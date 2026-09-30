@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="1254" height="1254" viewBox="0 0 1254 1254"
+     role="img" aria-labelledby="title desc">
+  <title id="title">FoldBackup — shared snapshot core</title>
+  <desc id="desc">Three separated cyan snapshot sheets float above one shared blue storage core. Only the latest snapshot has a three-by-three chunk grid, with one complete turquoise cell marking changed content; the remaining cells and unmarked older layers suggest reuse. The gray radial background matches logo.svg. No folded corners.</desc>
+
+  <defs>
+    <!-- Preserve the reference background exactly. -->
+    <radialGradient id="grayCircleGradient"
+                    gradientUnits="userSpaceOnUse"
+                    cx="627" cy="627" r="1000">
+      <stop offset="0%" stop-color="#4B4B4B"/>
+      <stop offset="20%" stop-color="#474747"/>
+      <stop offset="42%" stop-color="#3D3D3D"/>
+      <stop offset="64%" stop-color="#323232"/>
+      <stop offset="82%" stop-color="#282828"/>
+      <stop offset="94%" stop-color="#1E1E1E"/>
+      <stop offset="100%" stop-color="#181818"/>
+    </radialGradient>
+
+    <!-- One reusable plate, rather than three independent full cubes. -->
+    <g id="snapshotPlate" stroke-linejoin="round">
+      <path d="M-352 176 0 352V376L-352 200Z" fill="#2783A4"/>
+      <path d="M0 352 352 176V200L0 376Z" fill="#1D647E"/>
+      <path d="M0 0 352 176 0 352-352 176Z"
+            fill="currentColor" stroke="#B5EDFA" stroke-width="8"/>
+      <path d="M0 352V376" fill="none" stroke="#65BDCE" stroke-width="5"/>
+    </g>
+  </defs>
+
+  <rect width="1254" height="1254" fill="#181818"/>
+  <circle cx="627" cy="627" r="1000" fill="url(#grayCircleGradient)"/>
+
+  <!-- Restore the original proportions and spacing, without the old central stripe. -->
+  <!-- Shared content is represented by one solid storage core. -->
+  <g stroke-linejoin="round">
+    <path d="M627 570 979 746 627 922 275 746Z"
+          fill="#30748A" stroke="#64BBD0" stroke-width="8"/>
+    <path d="M275 746 627 922V1050L275 874Z"
+          fill="#22566F" stroke="#64BBD0" stroke-width="8"/>
+    <path d="M627 922 979 746V874L627 1050Z"
+          fill="#183D53" stroke="#64BBD0" stroke-width="8"/>
+  </g>
+
+  <!-- Older snapshots have no change highlights. -->
+  <g transform="translate(627 450)">
+    <use href="#snapshotPlate" color="#64B4CB"/>
+  </g>
+
+  <!-- Middle snapshot: unchanged content is represented by the same core. -->
+  <g transform="translate(627 340)">
+    <use href="#snapshotPlate" color="#83CCDF"/>
+  </g>
+
+  <!-- Latest snapshot: one complete changed cell in a three-by-three grid. -->
+  <g transform="translate(627 230)">
+    <use href="#snapshotPlate" color="#ACDFEA"/>
+    <g fill="none" stroke="#5299B1" stroke-width="7" stroke-linecap="round">
+      <path d="M-234.666667 117.333333 117.333333 293.333333M-117.333333 58.666667 234.666667 234.666667"/>
+      <path d="M117.333333 58.666667-234.666667 234.666667M234.666667 117.333333-117.333333 293.333333"/>
+    </g>
+    <path d="M0 234.666667 117.333333 293.333333 0 352-117.333333 293.333333Z"
+          fill="#65F5E3" stroke="#C4FFF5" stroke-width="6" stroke-linejoin="round"/>
+  </g>
+</svg>
