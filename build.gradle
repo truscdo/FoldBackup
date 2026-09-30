@@ -124,13 +124,13 @@ processResources {
 //    auto-load anything: the bundled libs are exported manually once
 //    (java -jar foldbackup.jar extract --output <lib-dir>) and the
 //    CLI is then run with an explicit classpath
-//    (java -cp "<jar>;<lib-dir>/*" com.foldbackup.cli.BackupCli).
+//    (java -cp "<jar>;<lib-dir>/*" io.github.truscdo.foldbackup.cli.BackupCli).
 // There is deliberately NO separate shaded/classifier fat jar: any second
 // copy of the same bytes invites exactly the deployment mix-up documented
 // in temp/zstd冲突与打包方案说明.md §10.
 jar {
     manifest {
-        attributes 'Main-Class': 'com.foldbackup.cli.Bootstrap'
+        attributes 'Main-Class': 'io.github.truscdo.foldbackup.cli.Bootstrap'
     }
 }
 
