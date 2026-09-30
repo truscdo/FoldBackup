@@ -1,0 +1,3 @@
+# 脚本模板统一以 LF 入库；写出时由 ScriptWriter 按目标类型规范化行尾
+# （*.bat → CRLF，*.sh → LF），不依赖检出环境的 autocrlf 配置。
+*.tmpl text eol=lf

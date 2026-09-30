@@ -1,0 +1,45 @@
+@echo off
+setlocal DisableDelayedExpansion
+set "ROOT=%~dp0."
+set "MODS_DIR={{MODS_DIR}}"
+set "JAR="
+for /f "delims=" %%f in ('dir /b /a-d /o-n "%~dp0foldbackup-*.jar" 2^>nul') do set "JAR=%~dp0%%f"
+if defined JAR goto :found
+set "JAR=%~dp0foldbackup.jar"
+if exist "%JAR%" if not exist "%JAR%\" goto :found
+set "JAR="
+for /f "delims=" %%f in ('dir /b /a-d /o-n "%MODS_DIR%\foldbackup-*.jar" 2^>nul') do set "JAR=%MODS_DIR%\%%f"
+:found
+if not defined JAR (
+    echo Error: foldbackup jar not found next to the script or in the configured mods directory.
+    pause
+    exit /b 1
+)
+set "SNAPSHOT="
+set "ARCHIVE="
+if exist "%~dp0index.db" if not exist "%~dp0index.db\" set "SNAPSHOT=1"
+for %%f in ("%~dp0*[*].tar") do if exist "%%~f" if not exist "%%~f\" set "ARCHIVE=1"
+if not defined SNAPSHOT if not defined ARCHIVE (
+    echo Error: no online repository or archives found next to the script.
+    pause
+    exit /b 1
+)
+java -jar "%JAR%" extract --output "%~dp0.foldbackup-cli"
+if errorlevel 1 (
+    echo Error: failed to export bundled libraries ^(read-only backup root?^).
+    pause
+    exit /b 1
+)
+if defined SNAPSHOT if defined ARCHIVE goto :both
+if defined ARCHIVE goto :archive
+java -jar "%JAR%" tui --snapshot-root "%ROOT%" --lib "%~dp0.foldbackup-cli"
+goto :done
+:archive
+java -jar "%JAR%" tui --archive-root "%ROOT%" --lib "%~dp0.foldbackup-cli"
+goto :done
+:both
+java -jar "%JAR%" tui --snapshot-root "%ROOT%" --archive-root "%ROOT%" --lib "%~dp0.foldbackup-cli"
+:done
+set "RESULT=%ERRORLEVEL%"
+if not "%RESULT%"=="0" pause
+exit /b %RESULT%

@@ -1,0 +1,45 @@
+#!/bin/sh
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+MODS_DIR={{MODS_DIR}}
+JAR=
+for candidate in "$SCRIPT_DIR"/foldbackup-*.jar; do
+    if [ -f "$candidate" ]; then
+        JAR="$candidate"
+        break
+    fi
+done
+if [ -z "$JAR" ] && [ -f "$SCRIPT_DIR/foldbackup.jar" ]; then
+    JAR="$SCRIPT_DIR/foldbackup.jar"
+fi
+if [ -z "$JAR" ]; then
+    for candidate in "$MODS_DIR"/foldbackup-*.jar; do
+        if [ -f "$candidate" ]; then
+            JAR="$candidate"
+            break
+        fi
+    done
+fi
+if [ -z "$JAR" ]; then
+    echo "Error: foldbackup jar not found in $SCRIPT_DIR or $MODS_DIR"
+    exit 1
+fi
+
+set -- tui
+if [ -f "$SCRIPT_DIR/index.db" ]; then
+    set -- "$@" --snapshot-root "$SCRIPT_DIR"
+fi
+for archive in "$SCRIPT_DIR"/*'['*'].tar'; do
+    if [ -f "$archive" ]; then
+        set -- "$@" --archive-root "$SCRIPT_DIR"
+        break
+    fi
+done
+if [ "$#" -eq 1 ]; then
+    echo "Error: no online repository or archives found in $SCRIPT_DIR"
+    exit 1
+fi
+java -jar "$JAR" extract --output "$SCRIPT_DIR/.foldbackup-cli" || {
+    echo "Error: failed to export bundled libraries (read-only backup root?)."
+    exit 1
+}
+exec java -jar "$JAR" "$@" --lib "$SCRIPT_DIR/.foldbackup-cli"

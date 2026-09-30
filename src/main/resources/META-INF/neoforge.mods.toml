@@ -1,0 +1,30 @@
+# NeoForge mod metadata for FoldBackup
+modLoader = "javafml"                     #mandatory
+loaderVersion = "${loader_version_range}" #mandatory
+license = "${mod_license}"
+
+[[mods]]
+modId = "${mod_id}"                    #mandatory
+version = "${mod_version}"
+displayName = "${mod_name}"
+credits = ""
+authors = "${mod_authors}"
+description = '''${mod_description}'''
+
+[[dependencies.foldbackup]]
+modId = "neoforge"
+type = "required"
+versionRange = "${neo_version_range}"
+ordering = "NONE"
+side = "BOTH"
+
+[[dependencies.foldbackup]]
+modId = "minecraft"
+type = "required"
+versionRange = "${minecraft_version_range}"
+ordering = "NONE"
+side = "BOTH"
+# Dependencies
+
+[[accessTransformers]]
+file = "META-INF/accesstransformer.cfg"

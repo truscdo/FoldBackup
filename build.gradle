@@ -1,0 +1,195 @@
+plugins {
+    id 'java-library'
+    id 'net.neoforged.moddev' version '2.0.141'
+}
+
+base {
+    archivesName = 'foldbackup'
+}
+
+version = mod_version
+
+group = mod_group_id
+
+java.toolchain.languageVersion = JavaLanguageVersion.of(21)
+
+neoForge {
+    version = neo_version
+
+    runs {
+        server {
+            server()
+            gameDirectory = layout.buildDirectory.dir("integrationTest/run")
+            // 无头运行：禁用原版 ServerGUI 控制台窗口 + JVM 级兜底，
+            // 确保本地开发机与 CI 行为一致（不弹 Swing 窗口）。
+            programArgument "nogui"
+            systemProperty "java.awt.headless", "true"
+        }
+        client {
+            client()
+        }
+    }
+
+    mods {
+        foldbackup {
+            sourceSet(sourceSets.main)
+        }
+    }
+
+    unitTest {
+        enable()
+        testedMod = mods.foldbackup
+    }
+}
+
+tasks.withType(ProcessResources).configureEach {
+    var replaceProperties = [
+            minecraft_version   : minecraft_version, minecraft_version_range: minecraft_version_range,
+            neo_version         : neo_version, neo_version_range: neo_version_range,
+            loader_version_range: loader_version_range,
+            mod_id              : mod_id, mod_name: mod_name, mod_license: mod_license, mod_version: mod_version,
+            mod_authors         : mod_authors, mod_description: mod_description,
+    ]
+    inputs.properties replaceProperties
+
+    filesMatching(['META-INF/neoforge.mods.toml']) {
+        expand replaceProperties + [project: project]
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+configurations {
+    // Dependencies used by core code, shared with standalone test processes.
+    coreLibraries {
+        canBeResolved = false
+        canBeConsumed = false
+    }
+    implementation.extendsFrom coreLibraries
+    coreProcessRuntime {
+        canBeConsumed = false
+        extendsFrom coreLibraries
+        attributes {
+            attribute(Usage.USAGE_ATTRIBUTE, objects.named(Usage, Usage.JAVA_RUNTIME))
+        }
+    }
+}
+
+dependencies {
+    coreLibraries 'com.dynatrace.hash4j:hash4j:0.28.0'
+    additionalRuntimeClasspath 'com.dynatrace.hash4j:hash4j:0.28.0'
+    jarJar 'com.dynatrace.hash4j:hash4j:0.28.0'
+    // Zstd compression for .lrh format
+    coreLibraries 'com.github.luben:zstd-jni:1.5.6-9'
+    additionalRuntimeClasspath 'com.github.luben:zstd-jni:1.5.6-9'
+    // NeoForge jar-in-jar: nested, NOT merged into the jar root — avoids
+    // JPMS package conflicts with other mods that also bundle zstd-jni
+    // (e.g. NotEnoughBandwidth). NeoForge's JarJarSelector negotiates a
+    // single version across all mods.
+    jarJar 'com.github.luben:zstd-jni:1.5.6-9'
+
+    // XXH3 hashing for fast change detection and content deduplication
+    coreLibraries 'net.openhft:zero-allocation-hashing:2026.0'
+    additionalRuntimeClasspath 'net.openhft:zero-allocation-hashing:2026.0'
+    jarJar 'net.openhft:zero-allocation-hashing:2026.0'
+
+    // Test
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.11.4'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.withType(JavaCompile).configureEach {
+    it.options.encoding = 'UTF-8'
+    it.options.release = 21
+}
+
+// Remove the generated META-INF from exploded runs to avoid duplicate
+// When ProcessResources expands the toml, the build dir has one copy
+// and the source dir has one. The moddev plugin handles dedup, but
+// clean the leftovers to avoid confusion.
+processResources {
+    exclude '**/*.wip'
+}
+
+// ── Single-jar dual-use: NeoForge mod + `java -jar` CLI ──
+// The ordinary `jar` below IS the shipped artifact for BOTH uses:
+//  * NeoForge mod — JarJarSelector loads the nested META-INF/jarjar/*.jar
+//    (zstd-jni / zero-allocation-hashing stay nested, never merged into the
+//    root: merging them would make the foldbackup module export
+//    com.github.luben.zstd → JPMS ResolutionException against other mods
+//    bundling zstd-jni, e.g. NotEnoughBandwidth);
+//  * standalone CLI — Main-Class points at Bootstrap, which does NOT
+//    auto-load anything: the bundled libs are exported manually once
+//    (java -jar foldbackup.jar extract --output <lib-dir>) and the
+//    CLI is then run with an explicit classpath
+//    (java -cp "<jar>;<lib-dir>/*" com.foldbackup.cli.BackupCli).
+// There is deliberately NO separate shaded/classifier fat jar: any second
+// copy of the same bytes invites exactly the deployment mix-up documented
+// in temp/zstd冲突与打包方案说明.md §10.
+jar {
+    manifest {
+        attributes 'Main-Class': 'com.foldbackup.cli.Bootstrap'
+    }
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+    // NeoForge's module loader uses virtual CodeSource paths; child JVMs need disk paths.
+    systemProperty 'foldbackup.testClasspath', files(sourceSets.main.output, sourceSets.test.output,
+            configurations.coreProcessRuntime).asPath
+}
+
+// ── Integration Test source set ──
+// These tests talk to a running NeoForge server via RCON — they do NOT
+// need Minecraft classes on the test classpath.
+sourceSets {
+    integrationTest {
+        compileClasspath += sourceSets.main.output
+        runtimeClasspath += sourceSets.main.output
+    }
+}
+
+// Offline fixture preparation also calls core code from the test JVM.
+configurations.integrationTestRuntimeOnly.extendsFrom configurations.coreLibraries
+
+dependencies {
+    // Keep standalone integration tests independent of NeoForge's junit-fml launcher.
+    // The NeoForge server runs in a separate process, not in the test JVM.
+    integrationTestImplementation 'org.junit.jupiter:junit-jupiter:5.11.4'
+    // Gson for JSON parsing of RCON responses
+    integrationTestImplementation 'com.google.code.gson:gson:2.11.0'
+    integrationTestRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+task integrationTest(type: Test) {
+    description = 'Run integration tests against a NeoForge server'
+    group = 'verification'
+    testClassesDirs = sourceSets.integrationTest.output.classesDirs
+    classpath = sourceSets.integrationTest.runtimeClasspath
+
+    useJUnitPlatform()
+
+    // Prepare once in the outer build; test workers launch the server JVM directly.
+    dependsOn 'prepareServerRun', 'classes', 'createServerLaunchScript'
+    systemProperty 'foldbackup.modFolders', 'foldbackup%%' + sourceSets.main.output.classesDirs.asPath.replace(File.pathSeparator, ';foldbackup%%') + ';foldbackup%%' + sourceSets.main.output.resourcesDir.absolutePath
+    systemProperty 'foldbackup.buildDir', layout.buildDirectory.get().asFile.absolutePath
+    systemProperty 'foldbackup.runDir', layout.buildDirectory.dir('integrationTest/run').get().asFile.absolutePath
+    // Fat jar (Main-Class = Bootstrap, bundled META-INF/jarjar/*.jar) —
+    // used by the bootstrap → extract → --lib → --tui whole-chain test.
+    dependsOn tasks.named('jar')
+    systemProperty 'foldbackup.fatJar',
+            tasks.named('jar').flatMap { it.archiveFile }.get().asFile.absolutePath
+
+    // Integration tests are single-threaded (RCON port conflict)
+    maxParallelForks = 1
+    forkEvery = 1
+    timeout = Duration.ofMinutes(10)
+
+    // Collect server logs on failure
+    reports.html.outputLocation.set(layout.buildDirectory.dir("reports/integrationTest"))
+    reports.junitXml.outputLocation.set(layout.buildDirectory.dir("test-results/integrationTest"))
+
+    shouldRunAfter test
+}
