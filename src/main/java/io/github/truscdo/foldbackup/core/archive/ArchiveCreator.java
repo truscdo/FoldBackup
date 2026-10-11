@@ -136,12 +136,17 @@ public class ArchiveCreator {
             }
         }
 
+        // One LRH object per distinct content identity; snapshot.bin maps every path to it.
+        // The parallel work unit is a unique object, so the worker clamp must use this count
+        // rather than the (larger) number of manifest region paths.
+        List<RegionEntry> uniqueRegions = uniqueRegions(sn.getRegions());
+
         // Auto parallelism for the standalone CLI/TUI export process.
         int nThreads = threads;
         if (nThreads <= 0) {
-            nThreads = ArchiveDefaults.defaultExportThreads(meta.regionCount, avgRegionSize(sn));
+            nThreads = ArchiveDefaults.defaultExportThreads(uniqueRegions.size(), avgRegionSize(sn));
         }
-        nThreads = Math.max(1, Math.min(nThreads, Math.max(1, meta.regionCount)));
+        nThreads = Math.max(1, Math.min(nThreads, Math.max(1, uniqueRegions.size())));
 
         // 原子提交：写 .tmp → 完成后 rename；失败删除 .tmp，不留半成品
         Path tmpPath = tarPath.resolveSibling(tarPath.getFileName() + ".tmp");
@@ -153,8 +158,6 @@ public class ArchiveCreator {
                 // snapshot.bin first
                 tar.putEntry("snapshot.bin", ArchiveSnapshotCodec.encode(meta));
 
-                // One LRH object per distinct content identity; snapshot.bin maps every path to it.
-                List<RegionEntry> uniqueRegions = uniqueRegions(sn.getRegions());
                 progress.stage(recompress ? "Recompressing regions" : "Copying regions", uniqueRegions.size());
                 if (!uniqueRegions.isEmpty()) {
                     if (recompress && nThreads > 1) {
@@ -292,7 +295,7 @@ public class ArchiveCreator {
         try {
             try (var scratch = new ArchiveTemporaryDirectory();
                     var result = new StreamingDiff(blobStore, scratch.path)) {
-                result.compare(base, diff, threads, progress);
+                result.compare(base, diff, progress);
                 progress.stage("Writing archive", 1 + result.directories.size()
                         + (result.filesBin == null ? 0 : 1) + result.fileObjects.size());
                 try (var channel = java.nio.channels.FileChannel.open(tmpPath, java.nio.file.StandardOpenOption.CREATE_NEW,

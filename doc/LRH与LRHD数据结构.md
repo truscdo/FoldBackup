@@ -5,7 +5,7 @@
 | 格式 | 状态 | 用途 |
 | --- | --- | --- |
 | LRH v3 | 位于 `LrhFormat` | 保存一个 Region 的完整区块内容 |
-| LRHD v1 | 位于 `LrhdFormat` 与 `LrhdStreamWriter` | 保存一个目录下的所有 Region 区块变化 |
+| LRHD v1 | 位于 `LrhdFormat`、`LrhdEncodingWriter` 与 `LrhdEncodingLayout` | 保存一个目录下的所有 Region 区块变化 |
 
 ## 1. LRH
 
@@ -73,33 +73,57 @@ contentHash = XXH3-128(
 
 ### 2.1 目标与布局
 
-采用未压缩的动态区块索引，放在数据区前。Region 只作为坐标和顺序分组。快照身份及基线关系由外层 `snapshot.bin` 管理，LRHD 文件头只保存压缩和索引元数据。通过元数据哈希保护文件头和完整索引，通过逐区块哈希与 Zstd checksum 保护 NBT。
+解码布局采用未压缩的动态区块索引，放在数据区前。Region 只作为坐标和顺序分组。快照身份及基线关系由外层 `snapshot.bin` 管理，LRHD 文件头只保存压缩和索引元数据。通过元数据哈希保护文件头和完整索引，通过逐区块哈希与 Zstd checksum 保护 NBT。
 
 ```text
-52 B 固定文件头 → 动态 Region 分组 → NBT Zstd 帧 → 8 B 文件尾
+解码布局
+文件头签名（8 B） → 固定元数据块（44 B） → 索引区 → 压缩数据区 → 文件尾签名（8 B）
+
+编码布局
+文件头签名（8 B） → 压缩数据区 → 索引区 → 固定元数据块（44 B） → 文件尾签名（8 B）
 ```
 
-索引只保存发生替换或删除的区块。Region 和区块记录均按稳定顺序排列，索引长度可在写入 NBT 前根据差分规划计算。
+索引只保存发生替换或删除的区块。Region 和区块记录均按稳定顺序排列，解码布局的索引长度可根据差分规划预先计算；编码布局允许在比较和压缩过程中累计索引，结束后再写出。
 
-### 2.2 文件头（52 B）
+文件头签名占 8 B，值为 `0x4c5248444c524844`（ASCII `LRHDLRHD`），始终位于文件起点。文件尾签名使用相同值，占 8 B，始终位于文件末尾。
+
+为了方便管道处理，允许更换元数据块和索引区位置：
+
+```text
+管道编码与解码
+├─ 编码器：顺序输出 压缩数据区 → 索引区 → 固定元数据块
+├─ 中间暂存器：将编码输出完整落盘
+│  ├─ 从文件尾读取 固定元数据块
+│  ├─ 根据 固定元数据块 计算 索引区 和 压缩数据区 的位置与长度
+│  └─ 按 固定元数据块 → 索引区 → 压缩数据区 的顺序读取暂存文件，发送到下游管道
+└─ 解码器
+   ├─ 读取 固定元数据块 和 索引区，校验元数据
+   ├─ 顺序解压 压缩数据区，校验区块数据
+   └─ 完成尾部校验后报告成功
+```
+
+### 2.2 固定元数据块（44 B）
+
+下表偏移以固定元数据块起点为零。
 
 | 偏移 | 字段 | 类型 / 长度 | 含义 |
 | --- | --- | --- | --- |
-| 0 | signature | 8 B | `0x4c5248444c524844`（ASCII `LRHDLRHD`），文件尾使用相同值 |
-| 8 | version | u8 / 1 B | 1 |
-| 9 | reserved | u8 / 1 B | 必须为零 |
-| 10 | compressionLevel | i16 / 2 B | Zstd 压缩级别 |
-| 12 | regionCount | i32 / 4 B | 索引包含的 Region 数 |
-| 16 | changedChunkCount | i32 / 4 B | 替换及删除记录总数 |
-| 20 | dataLength | u64 / 8 B | 解压后的 NBT 总字节数 |
-| 28 | compressedDataLength | u64 / 8 B | NBT Zstd 帧字节数 |
-| 36 | metadataHash | 16 B | `XXH3-128(文件头（此字段置零）\|\|完整索引)` |
+| 0 | version | u8 / 1 B | 1 |
+| 1 | reserved | u8 / 1 B | 必须为零 |
+| 2 | compressionLevel | i16 / 2 B | Zstd 压缩级别 |
+| 4 | regionCount | i32 / 4 B | 索引包含的 Region 数 |
+| 8 | changedChunkCount | i32 / 4 B | 替换及删除记录总数 |
+| 12 | dataLength | u64 / 8 B | 解压后的 NBT 总字节数 |
+| 20 | compressedDataLength | u64 / 8 B | NBT Zstd 帧字节数 |
+| 28 | metadataHash | 16 B | `XXH3-128(文件头签名\|\|固定元数据块（metadataHash 字段置零）\|\|完整索引)` |
+
+两种布局均按上述逻辑顺序计算元数据哈希，不受各部分物理位置影响。仅将 16 B 的 `metadataHash` 字段置零，文件头签名及其余元数据字段均保留实际值；文件尾签名不参与该哈希。
 
 快照时间、基线时间及快照标识均由外层 `snapshot.bin` 提供。
 
 `compressionLevel` 记录写入时使用的 Zstd 压缩级别；窗口参数由 Zstd 帧自身描述，不写入 LRHD。索引本身不压缩。
 
-### 2.3 Region 分组
+### 2.3 Region 索引区
 
 | 字段 | 类型 / 长度 | 含义 |
 | --- | --- | --- |

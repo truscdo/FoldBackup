@@ -102,7 +102,7 @@ class ArchiveCreatorDiffTest {
         for (String name : serial.keySet()) assertArrayEquals(serial.get(name), cli.get(name), name);
         assertTrue(parallel.containsKey("files.bin"));
         for (var entry : parallel.entrySet()) if (entry.getKey().endsWith(".lrhd")) {
-            var decoded = LrhdTestSupport.read(entry.getValue());
+            var decoded = LrhdTestSupport.readEntry(entry.getValue());
             assertFalse(decoded.allChunks().isEmpty());
             for (var chunk : decoded.allChunks()) {
                 if (entry.getKey().startsWith("dim0/")) assertTrue(chunk.deleted);
@@ -135,7 +135,7 @@ class ArchiveCreatorDiffTest {
         try (var paths = Files.list(output)) { assertEquals(1, paths.count()); }
     }
 
-    @Test void cancellationBeforeArchiveAndPlanSpoolFailureCleanUp() throws Exception {
+    @Test void cancellationBeforeArchiveAndClosedGeneratorCleanUp() throws Exception {
         var blobs = new BlobStore(temp.resolve("store"), 1);
         var store = new SnapshotStore(blobs.getRootDir());
         var base = new SnapshotManifest("S-20260917_100000", 1000, "world");
@@ -157,22 +157,26 @@ class ArchiveCreatorDiffTest {
         try (var directory = new ArchiveTemporaryDirectory()) {
             scratch = directory.path;
             try (var diff = new StreamingDiff(blobs, scratch)) {
-                diff.close(); // Simulate a plan spool becoming unavailable during collection.
-                assertThrows(IOException.class, () -> diff.compare(base, target, 4, new ProgressTracker(null)));
+                diff.close(); // A closed generator cannot begin another operation.
+                assertThrows(IOException.class, () -> diff.compare(base, target, new ProgressTracker(null)));
             }
         }
         assertFalse(Files.exists(scratch));
     }
 
-    @Test void separateBudgetsClampCpuMemoryAndSubmissionWindow() {
-        assertEquals(1, DiffResourceBudget.scanWorkers(100, 100, 1));
-        assertEquals(1, DiffResourceBudget.scanWorkers(100, 1, Long.MAX_VALUE));
-        var tiny = DiffResourceBudget.compression(100, 100, 19, 1);
-        assertEquals(1, tiny.workers());
-        assertEquals(2L * DiffResourceBudget.BLOCK_SIZE, tiny.bufferBytes());
-        var roomy = DiffResourceBudget.compression(100, 100, 19, Long.MAX_VALUE);
-        assertTrue(roomy.workers() <= Runtime.getRuntime().availableProcessors());
-        assertTrue(roomy.window() <= 2L * roomy.workers());
-        assertEquals(64L << 20, roomy.bufferBytes());
+    @Test void corruptTargetFooterAfterPayloadDoesNotPublishArchive() throws Exception {
+        var blobs = new BlobStore(temp.resolve("bad-store"), 1);
+        var store = new SnapshotStore(blobs.getRootDir());
+        var base = new SnapshotManifest("S-20260917_100000", 1000, "world");
+        var target = new SnapshotManifest("S-20260917_110000", 2000, "world");
+        store.saveSnapshot(base);
+        var entry = region(blobs, "region/r.0.0.mca", "already handed to compressor");
+        target.addRegion(entry); store.saveSnapshot(target);
+        Path blob = blobs.getRootDir().resolve(entry.getBlobPath());
+        byte[] bytes = Files.readAllBytes(blob); bytes[bytes.length - 1] ^= 1; Files.write(blob, bytes);
+        Path output = temp.resolve("bad-archive");
+        assertThrows(IOException.class, () -> new ArchiveCreator(store, blobs, 1).createDiffWithProgress(
+                base.getEpochSeconds(), target.getEpochSeconds(), output, 2, null));
+        try (var paths = Files.list(output)) { assertEquals(0, paths.count()); }
     }
 }

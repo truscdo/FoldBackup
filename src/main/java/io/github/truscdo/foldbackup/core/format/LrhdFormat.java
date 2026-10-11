@@ -16,14 +16,16 @@ public final class LrhdFormat {
     /** ASCII "LRHDLRHD". The same eight bytes are used as the file footer. */
     public static final long SIGNATURE = 0x4c5248444c524844L;
     public static final byte VERSION = 1;
-    public static final int HEADER_SIZE = 52;
-    public static final int METADATA_HASH_OFFSET = 36;
+    public static final int SIGNATURE_SIZE = 8;
+    public static final int METADATA_SIZE = 44;
+    public static final int METADATA_BLOCK_HASH_OFFSET = 28;
+    public static final int HEADER_SIZE = SIGNATURE_SIZE + METADATA_SIZE;
+    public static final int METADATA_HASH_OFFSET = SIGNATURE_SIZE + METADATA_BLOCK_HASH_OFFSET;
     public static final int METADATA_HASH_SIZE = 16;
     public static final int FOOTER_SIZE = 8;
     public static final int REGION_INDEX_SIZE = 12;
     public static final int CHUNK_INDEX_RECORD_SIZE = 28;
     public static final int DEFAULT_LEVEL = 19;
-    public static final int DEFAULT_WINDOW_LOG = 27;
 
     private LrhdFormat() {}
 
@@ -148,6 +150,15 @@ public final class LrhdFormat {
 
     /** Validates all metadata before returning. Leaves borrowed input at the NBT frame. */
     public static Index readIndex(InputStream input, long size) throws IOException {
+        return readIndex(input, size, true);
+    }
+
+    /** Validate an index while retaining only one Region at a time. */
+    public static void verifyIndex(InputStream input, long size) throws IOException {
+        readIndex(input, size, false);
+    }
+
+    private static Index readIndex(InputStream input, long size, boolean retain) throws IOException {
         if (size < 0) throw new IOException("Invalid LRHD file size");
         DataInputStream in = new DataInputStream(input);
         byte[] headerBytes = new byte[HEADER_SIZE];
@@ -226,9 +237,9 @@ public final class LrhdFormat {
                     throw new IOException("LRHD lengths exceed data area");
                 dataPosition = checkedAdd(dataPosition, length, "LRHD data length");
                 changed++;
-                region.chunks.add(chunk);
+                if (retain) region.chunks.add(chunk);
             }
-            regions.add(region);
+            if (retain) regions.add(region);
             previous = region;
         }
         long expectedCompressed = size - dataOffset - FOOTER_SIZE;
@@ -327,20 +338,6 @@ public final class LrhdFormat {
         return index;
     }
 
-    static long indexLength(List<RegionIndex> regions) throws IOException {
-        long length = 0;
-        int previousRx = 0, previousRz = 0;
-        boolean havePrevious = false;
-        for (var region : regions) {
-            if (region == null) throw new IOException("Null LRHD region plan");
-            validateRegionPlan(region, previousRx, previousRz, havePrevious);
-            long records = Math.multiplyExact(region.chunks.size(), CHUNK_INDEX_RECORD_SIZE);
-            length = Math.addExact(length, Math.addExact(REGION_INDEX_SIZE, records));
-            previousRx = region.rx; previousRz = region.rz; havePrevious = true;
-        }
-        return length;
-    }
-
     private static void validateRegionPlan(RegionIndex region, int previousRx, int previousRz,
             boolean havePrevious) throws IOException {
         validateCoordinates(region.rx, region.rz);
@@ -349,23 +346,9 @@ public final class LrhdFormat {
             throw new IOException("Invalid LRHD region plan");
     }
 
-    static int changedChunkCount(List<RegionIndex> regions) throws IOException {
-        long count = 0;
-        for (var region : regions) count = Math.addExact(count, region.chunks.size());
-        if (count > Integer.MAX_VALUE) throw new IOException("Too many LRHD changed chunks");
-        return (int) count;
-    }
-
-    static void writeIndex(SeekableByteChannel output, List<RegionIndex> regions,
-            StreamingHash.Hash128 hash) throws IOException {
-        OutputStream raw = new BufferedOutputStream(StreamIo.output(output), 32 * 1024);
-        OutputStream sink = hash == null ? raw : new FilterOutputStream(raw) {
-            @Override public void write(int b) throws IOException { write(new byte[]{(byte) b}, 0, 1); }
-            @Override public void write(byte[] bytes, int off, int len) throws IOException {
-                hash.update(bytes, off, len); out.write(bytes, off, len);
-            }
-        };
-        try (DataOutputStream out = new DataOutputStream(sink)) {
+    static void writeIndex(SeekableByteChannel output, List<RegionIndex> regions) throws IOException {
+        try (DataOutputStream out = new DataOutputStream(
+                new BufferedOutputStream(StreamIo.output(output), 32 * 1024))) {
             int previousRx = 0, previousRz = 0; boolean havePrevious = false;
             for (var region : regions) {
                 validateRegionPlan(region, previousRx, previousRz, havePrevious);

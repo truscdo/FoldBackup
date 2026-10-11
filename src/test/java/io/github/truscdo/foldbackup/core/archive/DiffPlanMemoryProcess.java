@@ -41,9 +41,7 @@ public final class DiffPlanMemoryProcess {
         try (var scratch = new ArchiveTemporaryDirectory()) {
             scratchPath = scratch.path;
             try (var diff = new StreamingDiff(blobs, scratch.path)) {
-                diff.compare(base, target, 8, new ProgressTracker(null));
-                if (Files.size(scratch.path.resolve("diff-plans.bin")) <= Runtime.getRuntime().maxMemory())
-                    throw new AssertionError("Probe plan does not exceed heap");
+                diff.compare(base, target, new ProgressTracker(null));
                 try (var channel = FileChannel.open(archive, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
                         var tar = new TarWriter(channel)) {
                     diff.writeDirectories(tar, 1, 8, new ProgressTracker(null));
@@ -51,9 +49,13 @@ public final class DiffPlanMemoryProcess {
             }
         }
         if (Files.exists(scratchPath)) throw new AssertionError("Plan spool leaked");
+        if (Files.size(archive) <= Runtime.getRuntime().maxMemory())
+            throw new AssertionError("Probe index does not exceed heap");
         // Verify hash and payload without loading the entire dynamic index into memory.
-        try (var input = new BufferedInputStream(Files.newInputStream(archive))) {
-            input.skipNBytes(512);
+        var archiveIndex = TarIndex.read(archive);
+        if (archiveIndex.entries.size() != 1) throw new AssertionError("Unexpected entries");
+        try (var input = new BufferedInputStream(
+                LrhdLayoutSource.open(archiveIndex.entries.values().iterator().next()), 65536)) {
             byte[] header = input.readNBytes(LrhdFormat.HEADER_SIZE);
             ByteBuffer fields = ByteBuffer.wrap(header);
             if (fields.getLong() != LrhdFormat.SIGNATURE) throw new AssertionError("Signature");

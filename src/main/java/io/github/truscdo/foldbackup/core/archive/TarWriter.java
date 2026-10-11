@@ -41,6 +41,11 @@ public final class TarWriter implements AutoCloseable {
         void write(java.nio.channels.SeekableByteChannel output) throws IOException;
     }
 
+    /** Thrown by an {@link EntryWriter} to discard the current unknown-size entry. */
+    public static final class EntryCancelledException extends IOException {
+        public EntryCancelledException() { super("TAR entry cancelled"); }
+    }
+
     /** Unknown-size entry. Both the entry header and its nested format may be backfilled. */
     public void putEntry(String name, EntryWriter writer) throws IOException {
         if (channel == null) throw new IOException("Unknown-size entries require seekable TAR output");
@@ -48,7 +53,13 @@ public final class TarWriter implements AutoCloseable {
         long header = channel.position();
         out.write(buildHeader(name, 0));
         long start = channel.position();
-        writer.write(channel);
+        try {
+            writer.write(channel);
+        } catch (EntryCancelledException cancelled) {
+            channel.truncate(header);
+            channel.position(header);
+            return;
+        }
         long end = channel.position(), length = end - start;
         if (length < 0 || length > 077777777777L) throw new IOException("TAR entry size out of range");
         channel.position(header);

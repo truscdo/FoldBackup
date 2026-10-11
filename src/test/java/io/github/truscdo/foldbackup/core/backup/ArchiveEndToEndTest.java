@@ -96,7 +96,7 @@ class ArchiveEndToEndTest {
 
     private long lrhdChunkDataBytes(Path tar, String name) throws IOException {
         byte[] lrhd = readTarEntry(tar, name);
-        io.github.truscdo.foldbackup.core.format.LrhdTestSupport.LrhdFile f = io.github.truscdo.foldbackup.core.format.LrhdTestSupport.read(lrhd);
+        io.github.truscdo.foldbackup.core.format.LrhdTestSupport.LrhdFile f = io.github.truscdo.foldbackup.core.format.LrhdTestSupport.readEntry(lrhd);
         long total = 0;
         for (io.github.truscdo.foldbackup.core.format.LrhdFormat.ChunkIndex ci : f.allChunks()) {
             if (!ci.deleted) {

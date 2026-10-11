@@ -219,7 +219,7 @@ public class ArchiveVerifier {
             String name = entry.name();
             progress.current(name);
             if (name.endsWith("diff.lrhd")) {
-                try (InputStream input = entry.open()) { verifyLrhd(input, entry.size(), name, result); }
+                try (InputStream input = LrhdLayoutSource.open(entry)) { verifyLrhd(input, entry.size(), name, result); }
             } else if (name.equals("files.bin")) {
                 var manifest = FilesManifestCodec.decode(entry.bytes());
                 if (manifest.baseEpoch != base.epoch) result.errors.add(name + ": baseline mismatch");

@@ -33,8 +33,8 @@ final class LrhdRestoreData implements AutoCloseable {
     }
 
     static LrhdRestoreData read(TarIndex.Entry entry) throws IOException {
-        try (var in = entry.open()) {
-            return new LrhdRestoreData(LrhdFormat.readIndex(in, entry.size()), entry::open);
+        try (var in = LrhdLayoutSource.open(entry)) {
+            return new LrhdRestoreData(LrhdFormat.readIndex(in, entry.size()), () -> LrhdLayoutSource.open(entry));
         }
     }
 

@@ -5,6 +5,8 @@ import io.github.truscdo.foldbackup.core.HashUtil;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -101,32 +103,38 @@ public final class LrhdTestSupport {
             plans.add(region);
         }
 
-        var output = new TestMemoryChannel();
-        var archive = new LrhdStreamWriter.ArchiveWriter(output, level,
-                visitor -> { for (var region : plans) visitor.accept(region); });
-        try (var frame = new LrhdFrameProducer(StreamIo.output(output), level)) {
-            for (int regionIndex = 0; regionIndex < groups.size(); regionIndex++) {
-                List<ChunkEntry> group = groups.get(regionIndex);
-                ChunkEntry[] slots = new ChunkEntry[1024];
-                for (ChunkEntry chunk : group) {
-                    int slot = chunk.slotIndex();
-                    if (slots[slot] != null) throw new IOException("Duplicate LRHD chunk");
-                    slots[slot] = chunk;
+        Path encoded = Files.createTempFile("lrhd-fixture-", ".encoded");
+        Path index = encoded.resolveSibling(encoded.getFileName() + ".index");
+        try {
+            try (var output = Files.newOutputStream(encoded);
+                    var writer = new LrhdEncodingWriter(output, index, level, 1)) {
+                for (int regionIndex = 0; regionIndex < plans.size(); regionIndex++) {
+                    for (ChunkEntry chunk : groups.get(regionIndex))
+                        if (chunk.nbt != null) writer.replacement(List.of(chunk.nbt));
+                    writer.region(plans.get(regionIndex));
                 }
-                RegionStream.Source source = consumer -> {
-                    for (int slot = 0; slot < slots.length; slot++) {
-                        ChunkEntry chunk = slots[slot];
-                        consumer.begin(slot, chunk == null ? 0 : (int) chunk.ts);
-                        if (chunk != null && chunk.nbt != null)
-                            consumer.data(chunk.nbt, 0, chunk.nbt.length);
-                        consumer.end();
-                    }
-                };
-                frame.region(plans.get(regionIndex), source);
+                writer.finish();
             }
-            archive.finish(frame.finish());
+            try (var input = io.github.truscdo.foldbackup.core.archive.LrhdLayoutSource
+                    .open(encoded, 0, Files.size(encoded))) { return input.readAllBytes(); }
+        } finally {
+            Files.deleteIfExists(index);
+            Files.deleteIfExists(encoded);
         }
-        return output.toByteArray();
+    }
+
+    /** Decodes raw tar-entry bytes in either the standard or encoding layout. */
+    public static LrhdFile readEntry(byte[] entryBytes) throws IOException {
+        Path temp = Files.createTempFile("lrhd-entry-", ".lrhd");
+        try {
+            Files.write(temp, entryBytes);
+            try (var input = io.github.truscdo.foldbackup.core.archive.LrhdLayoutSource
+                    .open(temp, 0, entryBytes.length)) {
+                return read(input.readAllBytes());
+            }
+        } finally {
+            Files.deleteIfExists(temp);
+        }
     }
 
     public static LrhdFile read(byte[] bytes) throws IOException {
