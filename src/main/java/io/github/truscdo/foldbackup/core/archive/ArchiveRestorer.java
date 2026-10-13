@@ -108,7 +108,7 @@ public class ArchiveRestorer {
             }
 
             progress.stage("Restoring regions", plan.regions.size());
-            plan.runRegions(compressionLevel, threads, metrics,
+            plan.runRegions(ArchiveTasks.TaskWork.decompress(), threads, metrics,
                     index -> progress.done(plan.regions.get(index).path()), (index, source) -> {
                 var region = plan.regions.get(index);
                 McaStreamWriter.write(staged.path.resolve(region.path()), region.rx(), region.rz(), 0,

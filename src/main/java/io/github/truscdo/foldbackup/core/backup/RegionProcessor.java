@@ -124,12 +124,11 @@ public class RegionProcessor {
         Map<String, RegionEntry> latestRegions = buildRegionMap(latestSnapshot);
         Map<String, FileEntry> latestFiles = buildFileMap(latestSnapshot);
         DedupStats stats = new DedupStats(snapshotId);
-        int workers = BackupResourceBudget.cpuWorkers(regionThreads, Runtime.getRuntime().availableProcessors(),
-                Integer.MAX_VALUE);
         long memory = BackupResourceBudget.memoryBudgetBytes(regionMemoryLimitMB, Runtime.getRuntime().maxMemory(),
                 Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory());
-        workers = (int) Math.max(1,
-                Math.min(workers, memory / BackupResourceBudget.streamingTaskBytes(compressionLevel)));
+        int workers = BackupResourceBudget.modRegionQuota(Integer.MAX_VALUE, memory, 0,
+                BackupResourceBudget.compressTaskBytes(compressionLevel),
+                Runtime.getRuntime().availableProcessors(), regionThreads).workers();
         try (var work = new BoundedWork<ScanResult>(workers, partial -> {
             blobStore.checkBackupWrites();
             for (var entry : partial.getRegions())

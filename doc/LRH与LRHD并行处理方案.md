@@ -45,8 +45,8 @@ CLI 与 TUI 调用同一组归档核心服务。
 ├─ 创建临时 TAR 并首先写入 snapshot.bin
 ├─ 处理 Region
 │  ├─ 不重压缩：在调用线程中逐个复制 LRH blob
-│  ├─ 顺序重压缩 (nThreads == 1)：在调用线程中逐个解压、重压缩并写入 TAR
-│  └─ 并行重压缩（nThreads > 1）
+│  ├─ 重压缩且配额 worker 数 == 1：在调用线程中逐个解压、重压缩并写入 TAR
+│  └─ 重压缩且配额 worker 数 > 1
 │     ├─ 有界 producer worker pool：每个任务处理一个 .lrh
 │     │  └─ 读取 LRH → 解压 NBT → 以 level 19 重压缩 → 输出到共享有界块缓冲
 │     └─ 调用线程兼任唯一 TAR writer
@@ -129,3 +129,80 @@ TAR 写入
 - 比较与解码任务同一时刻至多持有一个变化区块，写入编码器后所有权转移；反压由编码器内部队列提供
 - 每个目录的编码器按当前压缩预算申请尽可能多的 worker，帧内并行度再由 job 数决定。
 - lrhd 的写入按照编码布局进行。
+
+## 五、资源分配
+
+区域批处理的线程与内存配额统一由 `BackupResourceBudget` 给出；该范围之外的配额（LRHD reader 线程与预留）由调用点自行计算。
+
+```text
+regionQuota(count, budget, reserve, perWorker, cpus, requested)
+├─ workers = max(1, min(count, cpus, limit, usable / perWorker))
+│  ├─ usable = max(0, budget − max(0, reserve))
+│  ├─ limit = requested > 0: requested
+│  └─ limit = requested ≤ 0: 离线取 cpus，Mod 在线取 cpus / 2
+└─ window  = max(1, min(count, 2 × workers))
+```
+
+```text
+站点输入
+├─ 全量 LRH 导出
+│  ├─ count = 去重后的 Region 对象数
+│  ├─ budget = 导出内存预算
+│  ├─ reserve = 块池容量
+│  │  └─ max(2 × 块, min(64 MiB, budget / 8))，块 = 64 KiB
+│  ├─ perWorker = 合并重压上下文（源帧级别读 blob 头，输出级别 = 导出压缩级别）
+│  └─ requested = 命令行线程数
+├─ Mod 在线备份
+│  ├─ count 不设上限
+│  ├─ budget = 已配置限额: min(请求 MB, 剩余堆)
+│  │  └─ 未配置限额: Xmx 的 20% 与当前剩余堆的 50% 取小
+│  ├─ reserve = 0
+│  ├─ perWorker = 单线程压缩上下文（配置的压缩级别）
+│  └─ requested = 配置的线程数
+├─ LRH / LRHD 恢复与校验
+│  ├─ count = 选中的 Region 数
+│  ├─ budget = 导出内存预算
+│  ├─ reserve = 有差异包: reader 数 × 144 MiB
+│  │  └─ 无差异包: 0
+│  ├─ perWorker = 解码上下文（源帧级别）
+│  └─ requested = 线程数 − reader 数
+├─ 差异在线导入
+│  ├─ 合并分支: 与恢复共用 reader 预留与 requested 扣减
+│  │  └─ perWorker = 合并重压上下文（源帧级别，输出级别 = 恢复级别）
+│  └─ 非合并分支
+│     ├─ reserve = 0
+│     └─ perWorker = 解码上下文（源帧级别）
+├─ 快照导出到世界目录
+│  ├─ reserve = 0
+│  └─ perWorker = 解码上下文（源帧级别）
+└─ LRHD 差异包生成
+   ├─ count 不设上限
+   ├─ reserve = 2 × 变化区块缓冲
+   └─ perWorker = ZSTDMT 上下文（压缩级别）
+```
+
+```text
+源帧级别的取法
+├─ 一批一值：一次配额服务整批 worker，故取该批源帧级别的最大值
+├─ 来源：LRH 头 offset 17 的 short；只读 19 字节前缀，不解码
+│  ├─ 归档路径：从计划内 Region 的基础 LRH 条目读（建计划时）
+│  ├─ 快照导出：从 blob 文件读（算配额时）
+│  └─ 合成 Region（无基础帧，仅 LRHD 载荷）: 计 0，不占解码上下文
+└─ 探测失败（如清单指向已删 blob）: 按 zstd 上界计，真实错误由随后的实际读取报告
+```
+
+```text
+每 worker 内存口径
+├─ 单线程压缩上下文
+│  ├─ ZSTD 官方逐级推导值 × 1.3
+│  │  └─ 取 zstd v1.5.6 参数表：窗口 + 链 + 哈希表 + 额外表 + 流式缓冲
+│  └─ 前提：单线程、流式、未显式设置压缩参数；ZSTDMT 不适用
+├─ 解码上下文
+│  └─ 窗口 + 3 × min(128 KiB, 窗口)，窗口取源帧级别；无余量
+├─ 合并重压上下文
+│  └─ 单线程压缩上下文（目标级别）+ 解码上下文（源帧级别）
+├─ ZSTDMT 上下文
+│  └─ 级别档常数 + 一份帧窗口；官方估算 API 对多线程不可用，取值偏保守
+└─ 级别档常数
+   └─ 按级别分档的固定值；仅 ZSTDMT 沿用
+```

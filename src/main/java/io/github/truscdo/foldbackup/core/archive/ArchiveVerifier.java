@@ -238,7 +238,7 @@ public class ArchiveVerifier {
         }
         try (var plan = ArchiveRestorePlan.open(fullTar, diffTar)) {
             progress.stage("Reconstructing diff regions", plan.regions.size());
-            plan.runRegions(ArchiveDefaults.RESTORE_LEVEL, 0, null,
+            plan.runRegions(ArchiveTasks.TaskWork.decompress(), 0, null,
                     index -> progress.done(plan.regions.get(index).path()), (index, source) -> {
                         var region = plan.regions.get(index);
                         var accumulator = new io.github.truscdo.foldbackup.core.format.RegionStream.Accumulator();

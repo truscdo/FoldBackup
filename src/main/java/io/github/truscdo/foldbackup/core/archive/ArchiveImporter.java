@@ -208,7 +208,7 @@ public class ArchiveImporter {
         List<RegionEntry> regions;
         if (!merged) {
             regions = ArchiveTasks.run(plan.regions.size(),
-                    ArchiveTasks.workers(plan.regions.size(), 6, threads), 2,
+                    ArchiveTasks.decompressQuota(plan.regions.size(), plan.maxSourceFrameLevel(), threads), 2,
                     index -> importRegionObject(plan.regions.get(index), blobs),
                     index -> progress.done(plan.regions.get(index).path()), metrics);
         } else {
@@ -223,7 +223,8 @@ public class ArchiveImporter {
                 } else missing.add(i);
             }
             progress.stage("Merging missing regions", missing.size());
-            List<RegionEntry> processed = plan.runRegions(ArchiveDefaults.RESTORE_LEVEL, threads, metrics,
+            List<RegionEntry> processed = plan.runRegions(
+                    ArchiveTasks.TaskWork.recompress(ArchiveDefaults.RESTORE_LEVEL), threads, metrics,
                     missing::contains, index -> progress.done(plan.regions.get(index).path()), (index, source) -> {
                         var region = plan.regions.get(index);
                         try (var session = blobs.newWriteSession()) {

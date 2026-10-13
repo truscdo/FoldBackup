@@ -283,7 +283,9 @@ class ArchiveCreatorRecompressTest {
                 try (var channel = java.nio.channels.FileChannel.open(archive,
                         java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.WRITE);
                         var tar = new TarWriter(channel)) {
-                    exporter.exportRegionsParallel(tar, regions, 4, budget);
+                    var plan = exporter.planRegions(regions, budget, 19, 4);
+                    exporter.exportRegionsParallel(tar, regions, plan.quota(), plan.bufferBytes(), 19,
+                            new io.github.truscdo.foldbackup.core.ProgressTracker(null));
                 }
             });
             try (var reader = new TarReader(Files.newInputStream(archive))) {
@@ -316,7 +318,9 @@ class ArchiveCreatorRecompressTest {
         try (var channel = java.nio.channels.FileChannel.open(archive,
                 java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.WRITE);
                 var tar = new TarWriter(channel)) {
-            var metrics = exporter.exportRegionsParallel(tar, List.of(entry), 2, 1L << 20);
+            var plan = exporter.planRegions(List.of(entry), 1L << 20, 19, 2);
+            var metrics = exporter.exportRegionsParallel(tar, List.of(entry), plan.quota(), plan.bufferBytes(), 19,
+                    new io.github.truscdo.foldbackup.core.ProgressTracker(null));
             assertTrue(metrics.peakBufferBytes() <= 128 * 1024);
         }
         byte[] lrh = readTarEntry(archive, ArchiveCreator.regionObjectPath(contentHash));
@@ -358,8 +362,10 @@ class ArchiveCreatorRecompressTest {
             try (var channel = java.nio.channels.FileChannel.open(tempDir.resolve("failure.tar"),
                     java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.WRITE);
                     var tar = new TarWriter(channel)) {
+                var plan = exporter.planRegions(regions, 1L << 20, 19, 4);
                 assertThrows(IOException.class,
-                        () -> exporter.exportRegionsParallel(tar, regions, 4, 1L << 20));
+                        () -> exporter.exportRegionsParallel(tar, regions, plan.quota(), plan.bufferBytes(), 19,
+                                new io.github.truscdo.foldbackup.core.ProgressTracker(null)));
             }
         });
     }

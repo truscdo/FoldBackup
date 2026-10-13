@@ -83,7 +83,7 @@ class LrhdArchiveRecoveryTest {
         }
         try (var plan = ArchiveRestorePlan.open(archive.resolve(ArchiveCreator.fullTarName(BASE)),
                 archive.resolve(ArchiveCreator.diffTarName(BASE, TARGET)))) {
-            var values = plan.runRegions(3, 4, null, null, (i, source) -> {
+            var values = plan.runRegions(ArchiveTasks.TaskWork.decompress(), 4, null, null, (i, source) -> {
                 RegionStream.inspect(source); return plan.regions.get(i).rx();
             });
             assertEquals(List.of(10, -1, 5), values, "Published metadata order remains stable");
@@ -147,7 +147,7 @@ class LrhdArchiveRecoveryTest {
             var release = new java.util.concurrent.CountDownLatch(1);
             var executor = java.util.concurrent.Executors.newSingleThreadExecutor();
             try {
-                var work = executor.submit(() -> plan.runRegions(3, 4, null, null, (index, source) -> {
+                var work = executor.submit(() -> plan.runRegions(ArchiveTasks.TaskWork.decompress(), 4, null, null, (index, source) -> {
                     started.countDown();
                     try {
                         if (!release.await(5, java.util.concurrent.TimeUnit.SECONDS))

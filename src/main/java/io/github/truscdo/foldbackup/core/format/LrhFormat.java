@@ -29,6 +29,12 @@ public final class LrhFormat {
     public static final int COMPRESSED_DATA_OFFSET = TABLE_OFFSET + HEADER_TABLE_SIZE;
     public static final int MIN_FILE_SIZE = COMPRESSED_DATA_OFFSET + FOOTER_SIZE;
 
+    /** 头中压缩级别字段（short）的偏移。 */
+    public static final int LEVEL_OFFSET = 17;
+
+    /** 确定帧级别所需读取的头前缀长度。 */
+    public static final int LEVEL_PREFIX_SIZE = LEVEL_OFFSET + Short.BYTES;
+
     private LrhFormat() {
     }
 
@@ -101,6 +107,32 @@ public final class LrhFormat {
         StreamIo.write(out, header.array());
         StreamIo.write(out, table.array());
         out.position(end);
+    }
+
+    /**
+     * 读取一个 LRH 文件帧写入时所用的压缩级别（头 offset {@link #LEVEL_OFFSET} 的 short）。
+     * <p>
+     * 只读头前缀，不读长度表、不解码、不校验帧；供按源帧级别分配解码内存的调用点使用。
+     * 解码窗口由帧级别决定，因此偏好此值而不是调用方的输出级别。
+     */
+    public static int level(Path path) throws IOException {
+        try (InputStream in = Files.newInputStream(path)) {
+            return level(in.readNBytes(LEVEL_PREFIX_SIZE));
+        }
+    }
+
+    /**
+     * 从一个以 LRH 文件起始为起点的字节数组解析帧级别。
+     *
+     * @param prefix 至少 {@link #LEVEL_PREFIX_SIZE} 字节
+     */
+    public static int level(byte[] prefix) throws IOException {
+        if (prefix.length < LEVEL_PREFIX_SIZE)
+            throw new IOException("File too short for LRH header");
+        ByteBuffer header = ByteBuffer.wrap(prefix);
+        if (header.getLong() != LINEAR_SIGNATURE || prefix[8] != LINEAR_VERSION)
+            throw new IOException("Invalid LRH signature/version");
+        return header.getShort(LEVEL_OFFSET);
     }
 
     public static RegionStream.Summary read(Path path, RegionStream.Consumer consumer) throws IOException {

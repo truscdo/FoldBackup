@@ -1,8 +1,15 @@
 package io.github.truscdo.foldbackup.core.archive;
 
+import io.github.truscdo.foldbackup.core.format.ChunkData;
+import io.github.truscdo.foldbackup.core.format.LrhTestSupport;
+import io.github.truscdo.foldbackup.core.format.Region;
+import io.github.truscdo.foldbackup.core.format.ZstdCompressionMemory;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import java.io.*;
+import java.nio.file.Path;
 import java.time.Duration;
+import java.util.List;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.*;
 import static org.junit.jupiter.api.Assertions.*;
@@ -82,5 +89,33 @@ class ArchiveTasksTest {
             assertTrue(interrupted.get());
             assertEquals(0, exited.getCount());
         } finally { caller.interrupt(); caller.join(5000); }
+    }
+
+    // ── source frame level ───────────────────────────────────
+
+    /** 一次配额服务整批，故取批次内源帧级别的最大值。 */
+    @Test void maxSourceFrameLevelTakesTheBatchMaximum(@TempDir Path dir) throws IOException {
+        writeLrh(dir.resolve("a.lrh"), 3);
+        writeLrh(dir.resolve("b.lrh"), 19);
+        assertEquals(19, ArchiveTasks.maxSourceFrameLevel(
+                List.of(dir.resolve("a.lrh"), dir.resolve("b.lrh"))));
+        assertEquals(19, ArchiveTasks.maxSourceFrameLevel(
+                List.of(dir.resolve("b.lrh"), dir.resolve("a.lrh"))));
+        assertEquals(0, ArchiveTasks.maxSourceFrameLevel(List.of()));
+    }
+
+    /**
+     * 头探测是定尺而非校验：读不出的源按 zstd 上界计，真实错误留给随后的实际读取。
+     */
+    @Test void maxSourceFrameLevelFallsBackToTheUpperBoundWhenAProbeFails(@TempDir Path dir) {
+        assertEquals(ZstdCompressionMemory.MAX_LEVEL,
+                ArchiveTasks.maxSourceFrameLevel(List.of(dir.resolve("missing.lrh"))));
+    }
+
+    private static void writeLrh(Path destination, int level) throws IOException {
+        Region region = new Region(0, 0, 0);
+        region.setChunk(0, new ChunkData(new byte[] { 1, 2, 3 }, 0, 0));
+        region.setTimestamp(0, 7);
+        LrhTestSupport.writeRegionLinear(destination, region, level);
     }
 }

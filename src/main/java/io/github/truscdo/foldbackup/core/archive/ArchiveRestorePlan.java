@@ -12,7 +12,7 @@ import java.util.function.IntPredicate;
 /** Immutable region inputs and file overlay, prepared before any destination writes. */
 final class ArchiveRestorePlan implements AutoCloseable {
     record Region(String path, TarIndex.Entry base, LrhdRestoreData delta, int rx, int rz,
-                  String contentHash, long sizeUncompressed, SourceMetadata sourceMetadata) {
+                  String contentHash, long sizeUncompressed, int frameLevel, SourceMetadata sourceMetadata) {
         RegionStream.Source source(LrhdRestoreData.StagedRegion staged) {
             RegionStream.Source source = consumer -> {
                 if (base == null) {
@@ -111,7 +111,10 @@ final class ArchiveRestorePlan implements AutoCloseable {
                         throw new IOException("Missing Region object or LRHD data: " + info.filename);
                 }
                 plan.regions.add(new Region(info.filename, sourceObject, regionDelta, coords[0], coords[1],
-                        info.contentHash, info.sizeUncompressed, info.sourceMetadata));
+                        info.contentHash, info.sizeUncompressed,
+                        sourceObject == null ? 0
+                                : LrhFormat.level(sourceObject.prefix(LrhFormat.LEVEL_PREFIX_SIZE)),
+                        info.sourceMetadata));
             }
             Set<String> targetPaths = new HashSet<>(seen);
             Set<String> seenFiles = new HashSet<>();
@@ -215,21 +218,34 @@ final class ArchiveRestorePlan implements AutoCloseable {
     }
 
     /**
+     * 本计划全部 Region 的源帧级别上界；合成 Region（无基础 LRH 帧）计 0。
+     * <p>
+     * 供不经 {@link ArchiveRestorePipeline} 的批处理调用点（非合并导入、快照导出）取整批上界。
+     */
+    int maxSourceFrameLevel() {
+        int level = 0;
+        for (Region region : regions) level = Math.max(level, region.frameLevel());
+        return level;
+    }
+
+    /**
      * Stages each LRHD frame sequentially while bounded Region workers merge
      * completed stages. Frame verification gates progress and publication.
      */
-    <T> List<T> runRegions(int level, int threads, java.util.function.Consumer<ArchiveTasks.Metrics> metrics,
+    <T> List<T> runRegions(ArchiveTasks.TaskWork taskWork, int threads,
+            java.util.function.Consumer<ArchiveTasks.Metrics> metrics,
             IntConsumer completionListener, RegionTask<T> task) throws IOException {
-        return runRegions(level, threads, metrics, index -> true, completionListener, task);
+        return runRegions(taskWork, threads, metrics, index -> true, completionListener, task);
     }
 
     /**
      * Runs selected output Regions while every LRHD frame is still consumed and verified.
      * Results preserve plan indexes; unselected indexes contain {@code null}.
      */
-    <T> List<T> runRegions(int level, int threads, java.util.function.Consumer<ArchiveTasks.Metrics> metrics,
+    <T> List<T> runRegions(ArchiveTasks.TaskWork taskWork, int threads,
+            java.util.function.Consumer<ArchiveTasks.Metrics> metrics,
             IntPredicate includeRegion, IntConsumer completionListener, RegionTask<T> task) throws IOException {
-        return new ArchiveRestorePipeline(regions, diffs.entries.values()).run(level, threads, metrics,
+        return new ArchiveRestorePipeline(regions, diffs.entries.values()).run(taskWork, threads, metrics,
                 includeRegion, completionListener, task);
     }
 

@@ -283,4 +283,31 @@ class LrhFormatTest {
         assertThrows(IOException.class, () -> LrhTestSupport.recompress(bad, 19),
                 "bad signature must be rejected");
     }
+
+    // ── frame level header ───────────────────────────────────
+
+    /** 级别可由头前缀单独读出，不需要长度表与帧。 */
+    @Test
+    void levelIsReadableFromTheHeaderPrefixAlone() throws IOException {
+        byte[] lrh = Files.readAllBytes(writeToTempFile(sampleRegion(1, 2)));
+        byte[] prefix = Arrays.copyOf(lrh, LrhFormat.LEVEL_PREFIX_SIZE);
+        assertEquals(3, LrhFormat.level(prefix));
+        assertEquals(3, LrhFormat.level(lrh), "a longer buffer is accepted");
+    }
+
+    /** 读出的值跟着写入级别走，与调用方自身使用的级别无关。 */
+    @Test
+    void levelFollowsTheWrittenLevel() throws IOException {
+        Region region = sampleRegion(3, 5);
+        Path file = tempDir.resolve("level/r.3.5.lrh");
+        LrhTestSupport.writeRegionLinear(file, region, 19);
+        assertEquals(19, LrhFormat.level(file));
+        assertEquals(19, LrhFormat.level(Files.readAllBytes(file)));
+    }
+
+    @Test
+    void levelRejectsShortOrForeignInput() {
+        assertThrows(IOException.class, () -> LrhFormat.level(new byte[LrhFormat.LEVEL_PREFIX_SIZE - 1]));
+        assertThrows(IOException.class, () -> LrhFormat.level(new byte[LrhFormat.LEVEL_PREFIX_SIZE]));
+    }
 }

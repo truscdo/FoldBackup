@@ -56,7 +56,9 @@ public final class ArchivePipelineBenchmark {
             OrderedCompressionPipeline.Metrics metrics;
             try (var channel = FileChannel.open(archive, CREATE, WRITE, TRUNCATE_EXISTING);
                     var tar = new TarWriter(channel)) {
-                metrics = exporter.exportRegionsParallel(tar, regions, 2, 1L << 30);
+                var plan = exporter.planRegions(regions, 1L << 30, 19, 2);
+                metrics = exporter.exportRegionsParallel(tar, regions, plan.quota(), plan.bufferBytes(), 19,
+                        new io.github.truscdo.foldbackup.core.ProgressTracker(null));
             }
             double seconds = (System.nanoTime() - start) / 1e9;
             String row = String.format(Locale.ROOT,

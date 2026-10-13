@@ -45,14 +45,19 @@ final class ArchiveRestorePipeline {
      * Runs selected output Regions while every LRHD frame is still consumed and verified.
      * Results preserve plan indexes; unselected indexes contain {@code null}.
      */
-    <T> List<T> run(int level, int threads, java.util.function.Consumer<ArchiveTasks.Metrics> metrics,
+    <T> List<T> run(ArchiveTasks.TaskWork taskWork, int threads,
+            java.util.function.Consumer<ArchiveTasks.Metrics> metrics,
             IntPredicate includeRegion, IntConsumer completionListener, ArchiveRestorePlan.RegionTask<T> task)
             throws IOException {
         var selected = new boolean[regions.size()];
         int selectedCount = 0;
+        int sourceFrameLevel = 0;
         for (int i = 0; i < selected.length; i++) {
             selected[i] = includeRegion.test(i);
-            if (selected[i]) selectedCount++;
+            if (selected[i]) {
+                selectedCount++;
+                sourceFrameLevel = Math.max(sourceFrameLevel, regions.get(i).frameLevel());
+            }
         }
 
         var deltaWorks = new ArrayList<DeltaWork>();
@@ -87,9 +92,10 @@ final class ArchiveRestorePipeline {
                 : Math.min(deltaWorks.size(), Math.min(2, Math.min(processors, Math.max(1, requestedTotal - 1))));
         long readerReserve = readerWorkers * 144L * 1024 * 1024;
         int regionLimit = Math.max(1, requestedTotal - readerWorkers);
-        int workers = ArchiveTasks.workers(selectedCount, level, regionLimit, readerReserve);
-        int window = Math.max(1, Math.min(selectedCount == 0 ? 1 : selectedCount, 2 * workers));
-        var permits = new Semaphore(window, true);
+        var quota = ArchiveTasks.regionQuota(selectedCount, taskWork.withSourceFrameLevel(sourceFrameLevel),
+                regionLimit, readerReserve, ArchiveDefaults.exportMemoryBudget(), processors);
+        int workers = quota.workers();
+        var permits = new Semaphore(quota.inFlightWindow(), true);
         var io = new io.github.truscdo.foldbackup.core.format.IoBudget(2);
         var events = new LinkedBlockingQueue<PipelineEvent<T>>();
         var fatal = new AtomicReference<Throwable>();

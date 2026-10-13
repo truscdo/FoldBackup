@@ -65,7 +65,11 @@ public final class SnapshotWorldRestorer {
             }
 
             progress.stage("Restoring regions", regions.size());
-            ArchiveTasks.run(regions.size(), ArchiveTasks.workers(regions.size(), compressionLevel, threads), 2,
+            // 源帧级别决定解码窗口；输出侧是 zlib（McaStreamWriter），相对解码窗口可忽略。
+            int sourceFrameLevel = ArchiveTasks.maxSourceFrameLevel(
+                    regions.stream().map(r -> blobs.getRootDir().resolve(r.entry().getBlobPath())).toList());
+            ArchiveTasks.run(regions.size(),
+                    ArchiveTasks.decompressQuota(regions.size(), sourceFrameLevel, threads), 2,
                     index -> {
                         Region region = regions.get(index);
                         RegionEntry entry = region.entry();

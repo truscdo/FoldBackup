@@ -96,6 +96,8 @@ class DiffRegionPipelineTest {
 
     @Test void frameAllowanceGivesTheWholeBudgetToZstd() {
         int cpus = Math.min(8, Runtime.getRuntime().availableProcessors());
+        // 每 worker 内存取自生产口径，避免测试手抄一个与实现同源的数值。
+        long perWorker = DiffResourceBudget.mtTaskBytes(19);
         var tiny = DiffResourceBudget.pipeline(1, 19, 8);
         assertEquals(1, tiny.zstdWorkers());
         assertEquals(1, tiny.chunkBytes());
@@ -104,12 +106,12 @@ class DiffRegionPipelineTest {
         var large = DiffResourceBudget.pipeline(8, 19, 8L << 30);
         assertEquals(cpus, large.zstdWorkers());
         assertTrue(large.chunkBytes() >= 1 && large.chunkBytes() <= 64L << 20);
-        assertTrue((long) large.zstdWorkers() * 264L * (1L << 20) + 2 * large.chunkBytes() <= (8L << 30),
+        assertTrue((long) large.zstdWorkers() * perWorker + 2 * large.chunkBytes() <= (8L << 30),
                 "allowances stay within budget");
         // A small heap still permits at least one worker instead of collapsing to zero.
         var smallHeap = DiffResourceBudget.pipeline(24, 19, 768L << 20);
         assertTrue(smallHeap.zstdWorkers() >= 1);
-        assertTrue((long) smallHeap.zstdWorkers() * 264L * (1L << 20) + 2 * smallHeap.chunkBytes() <= (768L << 20));
+        assertTrue((long) smallHeap.zstdWorkers() * perWorker + 2 * smallHeap.chunkBytes() <= (768L << 20));
     }
     @Test void cancellationInterruptsBlockedSource() throws Exception {
         var entered = new CountDownLatch(1);

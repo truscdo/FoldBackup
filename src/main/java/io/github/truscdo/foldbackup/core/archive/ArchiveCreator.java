@@ -7,6 +7,7 @@ import io.github.truscdo.foldbackup.core.store.SnapshotStore;
 import io.github.truscdo.foldbackup.core.store.FileEntry;
 import io.github.truscdo.foldbackup.core.store.RegionEntry;
 import io.github.truscdo.foldbackup.core.store.SnapshotManifest;
+import io.github.truscdo.foldbackup.core.backup.BackupResourceBudget;
 import io.github.truscdo.foldbackup.core.format.LrhFormat;
 
 import java.io.IOException;
@@ -36,6 +37,9 @@ import java.util.*;
  * BlobStore) is only read here, never written.
  */
 public class ArchiveCreator {
+
+    /** 共享块池与 TAR 输出的块粒度。 */
+    private static final int REGION_BLOCK_BYTES = 64 * 1024;
 
     private final SnapshotStore snapshotManager;
     private final BlobStore blobStore;
@@ -81,8 +85,8 @@ public class ArchiveCreator {
      * @param epochSeconds online snapshot identity to export
      * @param outputDir  archive directory (created if absent)
      * @param recompress true = recompress at the configured level (default 19); false = verbatim copy
-     * @param threads    worker count; &lt;= 0 = auto
-     *                   ({@link ArchiveDefaults#defaultExportThreads})
+     * @param threads    worker count; &lt;= 0 = auto (all visible processors,
+     *                   bounded by the memory budget and by the work items)
      * @return path to the written tar file
      */
     public Path createFull(long epochSeconds, Path outputDir, boolean recompress, int threads) throws IOException {
@@ -141,12 +145,8 @@ public class ArchiveCreator {
         // rather than the (larger) number of manifest region paths.
         List<RegionEntry> uniqueRegions = uniqueRegions(sn.getRegions());
 
-        // Auto parallelism for the standalone CLI/TUI export process.
-        int nThreads = threads;
-        if (nThreads <= 0) {
-            nThreads = ArchiveDefaults.defaultExportThreads(uniqueRegions.size(), avgRegionSize(sn));
-        }
-        nThreads = Math.max(1, Math.min(nThreads, Math.max(1, uniqueRegions.size())));
+        // 配额只算一次：预算、预留、每 worker 内存都交给 BackupResourceBudget.regionQuota。
+        var plan = planRegions(uniqueRegions, ArchiveDefaults.exportMemoryBudget(), compressionLevel, threads);
 
         // 原子提交：写 .tmp → 完成后 rename；失败删除 .tmp，不留半成品
         Path tmpPath = tarPath.resolveSibling(tarPath.getFileName() + ".tmp");
@@ -160,9 +160,9 @@ public class ArchiveCreator {
 
                 progress.stage(recompress ? "Recompressing regions" : "Copying regions", uniqueRegions.size());
                 if (!uniqueRegions.isEmpty()) {
-                    if (recompress && nThreads > 1) {
-                        exportRegionsParallel(tar, uniqueRegions, nThreads,
-                                ArchiveDefaults.exportMemoryBudget(), compressionLevel, progress);
+                    if (recompress && plan.quota().workers() > 1) {
+                        exportRegionsParallel(tar, uniqueRegions, plan.quota(), plan.bufferBytes(),
+                                compressionLevel, progress);
                     } else if (recompress) {
                         for (RegionEntry re : uniqueRegions) {
                             String object = regionObjectPath(re.getContentHash());
@@ -376,37 +376,30 @@ public class ArchiveCreator {
         return baseId + "[" + targetId + "].tar";
     }
 
-    /** Average uncompressed region size from the manifest (0 if none). */
-    private static long avgRegionSize(SnapshotManifest sn) {
-        if (sn.getRegions() == null || sn.getRegions().isEmpty()) {
-            return 0;
-        }
-        long total = 0;
-        for (RegionEntry re : sn.getRegions()) {
-            total += re.getSizeUncompressed();
-        }
-        return total / sn.getRegions().size();
+    /** 一次导出的配额；{@code quota} 与块池容量同源，避免两处公式漂移。 */
+    record RegionPlan(BackupResourceBudget.RegionQuota quota, long bufferBytes) {}
+
+    /**
+     * 全量归档唯一的一处配额来源：算出配额与块池容量，之后不再有任何收窄。
+     * <p>
+     * 每个 worker 同时在飞两份上下文——解码源 blob 的 LRH 帧、以及以 {@code level} 重压——故每
+     * worker 内存取两者之和。源帧级别按本批取上界，只读每份 blob 的头前缀。
+     */
+    RegionPlan planRegions(List<RegionEntry> regions, long budgetBytes, int level, int threads) {
+        long bufferBytes = BackupResourceBudget.regionBufferBytes(budgetBytes, REGION_BLOCK_BYTES);
+        int sourceFrameLevel = ArchiveTasks.maxSourceFrameLevel(
+                regions.stream().map(re -> blobStore.getRootDir().resolve(re.getBlobPath())).toList());
+        var quota = BackupResourceBudget.regionQuota(regions.size(), budgetBytes, bufferBytes,
+                BackupResourceBudget.compressAndDecodeTaskBytes(level, sourceFrameLevel),
+                Runtime.getRuntime().availableProcessors(), threads);
+        return new RegionPlan(quota, bufferBytes);
     }
 
-    /** Parallel compression streams blocks directly into seekable TAR output. */
     OrderedCompressionPipeline.Metrics exportRegionsParallel(TarWriter tar, List<RegionEntry> regions,
-            int threads, long budget) throws IOException {
-        return exportRegionsParallel(tar, regions, threads, budget, ArchiveDefaults.RECOMPRESS_LEVEL,
-                new ProgressTracker(null));
-    }
-
-    private OrderedCompressionPipeline.Metrics exportRegionsParallel(TarWriter tar, List<RegionEntry> regions, int threads,
-            long budget, int level, ProgressTracker progress) throws IOException {
-        final int blockSize = 64 * 1024;
-        // Reserve output buffering separately from compression/decompression contexts.
-        // As before, a budget below one context allowance still permits one worker.
-        long bufferBudget = Math.max(2L * blockSize, Math.min(64L << 20, budget / 8));
-        int workers = (int) Math.max(1, Math.min(Math.min(threads, regions.size()),
-                Math.max(0, budget - bufferBudget) / io.github.truscdo.foldbackup.core.backup.BackupResourceBudget
-                        .streamingTaskBytes(level)));
-        int window = (int) Math.max(1, Math.min(regions.size(), 2L * workers));
+            BackupResourceBudget.RegionQuota quota, long bufferBytes, int level, ProgressTracker progress)
+            throws IOException {
         return OrderedCompressionPipeline.<io.github.truscdo.foldbackup.core.format.RegionStream.Summary>run(
-                regions.size(), workers, window, blockSize, bufferBudget,
+                regions.size(), quota.workers(), quota.inFlightWindow(), REGION_BLOCK_BYTES, bufferBytes,
                 (index, output) -> LrhFormat.compress(output,
                         consumer -> LrhFormat.read(blobStore.getRootDir().resolve(
                                 regions.get(index).getBlobPath()), consumer), level),

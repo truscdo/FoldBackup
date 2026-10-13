@@ -27,6 +27,10 @@ final class TarIndex {
             if (size > Integer.MAX_VALUE) throw new IOException("Metadata too large: " + name);
             try (InputStream in = open()) { return in.readNBytes((int) size); }
         }
+        /** 只读条目开头 {@code length} 字节，不读取其余内容。 */
+        byte[] prefix(int length) throws IOException {
+            try (InputStream in = open()) { return in.readNBytes(length); }
+        }
     }
 
     final Map<String, Entry> entries = new LinkedHashMap<>();
