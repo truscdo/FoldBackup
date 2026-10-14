@@ -135,16 +135,14 @@ class EntityRollbackStorageTest {
         }
         var snapshot = backup(world);
         assertEquals(Set.copyOf(paths), snapshot.getRegions().stream().map(RegionEntry::getFilename).collect(Collectors.toSet()));
-        Path exported = temp.resolve("exported"), linear = temp.resolve("linear"), archive = temp.resolve("archive"), restored = temp.resolve("restored");
+        Path exported = temp.resolve("exported"), archive = temp.resolve("archive"), restored = temp.resolve("restored");
         var exporter = new BackupExporter(snapshots, blobs, 6);
-        exporter.export(snapshot.getEpochSeconds(), exported, BackupExporter.Format.MCA, false);
-        exporter.export(snapshot.getEpochSeconds(), linear, BackupExporter.Format.LINEAR, false);
+        exporter.export(snapshot.getEpochSeconds(), exported, false);
         new ArchiveCreator(snapshots, blobs, 6).createFull(snapshot.getEpochSeconds(), archive);
         new ArchiveRestorer(6).restore(archive, null, null, restored);
         for (String path : paths) {
             assertArrayEquals(expected.get(path), read(exported.resolve(path), 0));
             assertArrayEquals(expected.get(path), read(restored.resolve(path), 0));
-            assertArrayEquals(expected.get(path), io.github.truscdo.foldbackup.core.format.LrhTestSupport.openRegionLinear(Files.readAllBytes(linear.resolve(path.replace(".mca", ".lrh"))), 0, 0, 0).getChunk(0).getRawChunk());
         }
     }
 

@@ -22,7 +22,7 @@ final class CliOutput {
         Path stagedZip = stage.resolveSibling(stage.getFileName() + ".zip");
         try {
             long epoch = snapshots.resolveEpoch(snapshotId);
-            Path result = exporter.exportWithProgress(epoch, stage, BackupExporter.Format.MCA, zip, threads, listener);
+            Path result = exporter.exportWithProgress(epoch, stage, zip, threads, listener);
             if (zip) {
                 Files.move(result, target);
             } else {

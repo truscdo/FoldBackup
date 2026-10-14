@@ -2,12 +2,8 @@ package io.github.truscdo.foldbackup.core;
 
 import io.github.truscdo.foldbackup.core.store.BlobStore;
 import io.github.truscdo.foldbackup.core.store.SnapshotStore;
-import io.github.truscdo.foldbackup.core.store.FileEntry;
-import io.github.truscdo.foldbackup.core.store.RegionEntry;
 import io.github.truscdo.foldbackup.core.store.SnapshotManifest;
 import io.github.truscdo.foldbackup.core.store.SnapshotReclamationEstimator;
-import io.github.truscdo.foldbackup.core.format.AnvilFormat;
-import io.github.truscdo.foldbackup.core.format.LrhFormat;
 import io.github.truscdo.foldbackup.core.archive.SnapshotWorldRestorer;
 
 import java.io.IOException;
@@ -25,20 +21,11 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
 /**
- * 将快照从数据块存储导出到可读的世界目录。
+ * 将快照从数据块存储导出为 Anvil (.mca) 世界目录。
  * <p>
- * 支持两种输出格式：
- * <ul>
- * <li>{@code mca} — Anvil (.mca) 区域文件（默认，用于直接游玩）</li>
- * <li>{@code linear} — 线性 (.lrh) 区域文件（用于格式检查）</li>
- * </ul>
  * 输出可选打包为单个 zip 归档。
  */
 public class BackupExporter {
-
-    public enum Format {
-        MCA, LINEAR
-    }
 
     private final SnapshotStore snapshotManager;
     private final BlobStore blobStore;
@@ -150,39 +137,36 @@ public class BackupExporter {
      *
      * @param epochSeconds internal snapshot identity
      * @param outputPath target directory (created if absent)
-     * @param format     region output format ({@code MCA} or {@code LINEAR})
      * @param zip        if true, package the output as a zip and delete the
      *                   directory
      * @return the path to the exported output (directory or zip file)
      * @throws IOException if the snapshot is not found or I/O fails
      */
-    public Path export(long epochSeconds, Path outputPath, Format format, boolean zip) throws IOException {
-        return exportWithProgress(epochSeconds, outputPath, format, zip, null);
+    public Path export(long epochSeconds, Path outputPath, boolean zip) throws IOException {
+        return exportWithProgress(epochSeconds, outputPath, zip, null);
     }
 
     /**
      * Export a snapshot to the given output directory with progress callback.
      * <p>
-     * Region entries are re-encoded by streaming: {@code LINEAR} recompresses the
-     * stored LRH frame into a temporary file, {@code MCA} expands it into a fresh
-     * Anvil file, and a whole region is never buffered.
+     * Region entries are re-encoded by streaming: each stored LRH frame expands
+     * into a fresh Anvil file, and a whole region is never buffered.
      * <p>
      * @param epochSeconds     internal snapshot identity
      * @param outputPath       target directory (created if absent)
-     * @param format           region output format ({@code MCA} or {@code LINEAR})
      * @param zip              if true, package the output as a zip and delete the
      *                         directory
      * @param progressListener progress listener, may be {@code null}
      * @return the path to the exported output (directory or zip file)
      * @throws IOException if the snapshot is not found or I/O fails
      */
-    public Path exportWithProgress(long epochSeconds, Path outputPath, Format format, boolean zip,
+    public Path exportWithProgress(long epochSeconds, Path outputPath, boolean zip,
             ProgressListener progressListener) throws IOException {
-        return exportWithProgress(epochSeconds, outputPath, format, zip, 0, progressListener);
+        return exportWithProgress(epochSeconds, outputPath, zip, 0, progressListener);
     }
 
     /** Export with an explicit Region worker cap; zero selects the memory-bounded default. */
-    public Path exportWithProgress(long epochSeconds, Path outputPath, Format format, boolean zip,
+    public Path exportWithProgress(long epochSeconds, Path outputPath, boolean zip,
             int threads, ProgressListener progressListener) throws IOException {
         SnapshotManifest snapshot = snapshotManager.loadSnapshot(epochSeconds);
         if (snapshot == null) {
@@ -190,67 +174,8 @@ public class BackupExporter {
         }
 
         var progress = new ProgressTracker(progressListener);
-        if (format == Format.MCA) {
-            new SnapshotWorldRestorer(blobStore, compressionLevel, threads)
-                    .restore(snapshot, outputPath, progressListener);
-        } else {
-            Files.createDirectories(outputPath);
-
-            // 预计算总项目数以显示进度
-            int regionCount = snapshot.getRegions() != null ? snapshot.getRegions().size() : 0;
-            int fileCount = snapshot.getExtraFiles() != null ? snapshot.getExtraFiles().size() : 0;
-            int totalItems = regionCount + fileCount;
-            progress.stage("Exporting", totalItems);
-
-            // 导出区域
-            if (snapshot.getRegions() != null) {
-                for (RegionEntry entry : snapshot.getRegions()) {
-                    progress.current(entry.getFilename());
-
-                    int[] coords = parseRegionCoords(entry.getFilename());
-
-                    String outName = "r." + coords[0] + "." + coords[1] + ".lrh";
-                    Path relative = Path.of(entry.getFilename());
-                    Path parent = relative.getParent();
-                    Path outFile = outputPath.resolve(parent == null ? Path.of(outName) : parent.resolve(outName))
-                            .normalize();
-                    if (relative.isAbsolute()
-                            || !outFile.toAbsolutePath().startsWith(outputPath.toAbsolutePath().normalize())) {
-                        throw new IOException("Invalid region export path: " + entry.getFilename());
-                    }
-
-                    Files.createDirectories(outFile.getParent());
-                    Path temp = Files.createTempFile(outFile.getParent(), outFile.getFileName() + ".", ".wip");
-                    try {
-                        try (var channel = java.nio.channels.FileChannel.open(temp,
-                                java.nio.file.StandardOpenOption.WRITE)) {
-                            LrhFormat.recompress(blobStore.getRootDir().resolve(entry.getBlobPath()), channel,
-                                    compressionLevel);
-                            channel.force(true);
-                        }
-                        Files.move(temp, outFile, java.nio.file.StandardCopyOption.ATOMIC_MOVE,
-                                java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-                    } finally {
-                        Files.deleteIfExists(temp);
-                    }
-                    progress.done(entry.getFilename());
-                }
-            }
-
-            // 导出额外文件
-            if (snapshot.getExtraFiles() != null) {
-                for (FileEntry entry : snapshot.getExtraFiles()) {
-                    progress.current(entry.getFilename());
-
-                    Path outFile = outputPath.resolve(entry.getFilename());
-                    Files.createDirectories(outFile.getParent());
-                    try (var input = blobStore.openFile(entry.getBlobPath()); var output = Files.newOutputStream(outFile)) {
-                        input.transferTo(output);
-                    }
-                    progress.done(entry.getFilename());
-                }
-            }
-        }
+        new SnapshotWorldRestorer(blobStore, compressionLevel, threads)
+                .restore(snapshot, outputPath, progressListener);
 
         // 可选打包 zip
         if (zip) {
@@ -288,12 +213,5 @@ public class BackupExporter {
         }
 
         return outputPath;
-    }
-
-    /** 从文件名（如 "region/r.0.0.mca"）解析区域 X/Z 坐标。 */
-    private static int[] parseRegionCoords(String filename) {
-        // 文件名可能是 "region/r.0.0.mca"——去掉目录前缀
-        String name = filename.contains("/") ? filename.substring(filename.lastIndexOf('/') + 1) : filename;
-        return AnvilFormat.parseRegionCoords(name);
     }
 }

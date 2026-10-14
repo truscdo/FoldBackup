@@ -285,7 +285,7 @@ public class BackupTui {
                         Path result;
                         try (var progress = new ProgressPrinter(System.out)) {
                             result = store.exporter().exportWithProgress(selected.epochSeconds, outputPath,
-                                    BackupExporter.Format.MCA, zip, threads, progress.onProgress());
+                                    zip, threads, progress.onProgress());
                         }
                         System.out.println("Done: " + result.toAbsolutePath().normalize() + "\n");
                     } catch (IOException e) {

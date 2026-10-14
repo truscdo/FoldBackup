@@ -41,7 +41,7 @@ class SnapshotCreationTest {
         var exporter = new BackupExporter(store, new BlobStore(root, 6), 6);
         Path output = temp.resolve("export");
         var restoreEvents = new ArrayList<ProgressEvent>();
-        exporter.exportWithProgress(snapshot.getEpochSeconds(), output, BackupExporter.Format.MCA, false,
+        exporter.exportWithProgress(snapshot.getEpochSeconds(), output, false,
                 2, restoreEvents::add);
         assertEquals("world metadata", Files.readString(output.resolve("level.dat")));
         assertTrue(Files.exists(output.resolve("region/r.0.0.mca")));
@@ -54,7 +54,7 @@ class SnapshotCreationTest {
         assertTrue(events.getLast().item().contains(snapshot.getSnapshotId()));
 
         Path zip = exporter.exportWithProgress(snapshot.getEpochSeconds(), temp.resolve("packed"),
-                BackupExporter.Format.MCA, true, 2, null);
+                true, 2, null);
         assertFalse(Files.exists(temp.resolve("packed")));
         try (var archive = new java.util.zip.ZipFile(zip.toFile())) {
             assertNotNull(archive.getEntry("level.dat"));
@@ -77,7 +77,7 @@ class SnapshotCreationTest {
 
         var exporter = new BackupExporter(new SnapshotStore(root), new BlobStore(root, 6), 6);
         assertThrows(IOException.class, () -> exporter.exportWithProgress(snapshot.getEpochSeconds(), output,
-                BackupExporter.Format.MCA, false, 2, null));
+                false, 2, null));
         assertEquals("keep", Files.readString(output.resolve("existing.txt")));
         assertFalse(Files.exists(output.resolve("level.dat")));
         assertFalse(Files.exists(output.resolve("region/r.0.0.mca")));
