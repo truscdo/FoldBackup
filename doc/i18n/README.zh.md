@@ -38,7 +38,9 @@ FoldBackup 是面向 Minecraft NeoForge 服务端的世界备份工具，支持�
    /foldbackup list
    ```
 
-默认备份目录是服务端运行目录下的 `foldbackups/`，可以通过 `general.backupPath` 修改。备份前会强制保存世界并暂时关闭自动保存，结束后恢复保存状态。
+   单机存档即使未开启作弊，主机玩家也能使用这些命令；通过局域网加入的其它玩家不能使用。
+
+默认备份目录是服务端运行目录下的 `foldbackups/`，可以通过 `general.backupPath` 修改。该配置是备份根：专用服务器直接以它为仓库，单机则使用 `foldbackups/<存档目录名>`，每个存档各自持有独立仓库。备份前会强制保存世界并暂时关闭自动保存，结束后恢复保存状态。
 
 默认开启自动备份，间隔按有玩家在线时的累计时间计算。手动备份也受最小备份间隔限制，需要跳过该间隔时可以使用 `/foldbackup backup --force`。
 
@@ -46,7 +48,7 @@ FoldBackup 是面向 Minecraft NeoForge 服务端的世界备份工具，支持�
 
 回档整个游戏存档可以使用TUI或者CLI。
 
-TUI的使用较为简单，模组初始化时会在备份目录生成启动脚本：
+TUI的使用较为简单，每次世界启动时都会在该世界的仓库目录生成启动脚本（专用服务器为 `foldbackups/`，单机为 `foldbackups/<存档目录名>`）：
 
 - Windows：`foldbackup-tui.bat`
 - Linux／支持 Bash 的环境：`foldbackup-tui.sh`
@@ -63,7 +65,7 @@ TUI的使用较为简单，模组初始化时会在备份目录生成启动脚�
 
 游戏内回档可使用`/foldbackup rollback chunk <x> <z> [快照ID]`，也可以用`/foldbackup rollback chunk in <维度> <x> <z> [快照ID]`指定维度。目标区块必须已经加载到内存中；未加载的区块请使用下面的CLI离线回档方式。省略快照ID时使用最新快照。
 
-当需要使用CLI回档时，以下示例假设当前目录为 `foldbackups`，且服务端存档目录为同级的 `world`。如果在其它目录执行，需要相应调整JAR、存档和快照目录路径；也可以用 `--snapshot-root <目录>` 指定快照目录。离线回档前必须先关闭服务端。
+当需要使用CLI回档时，以下示例假设当前目录为 `foldbackups`，且服务端存档目录为同级的 `world`。如果在其它目录执行，需要相应调整JAR、存档和快照目录路径；也可以用 `--snapshot-root <目录>` 指定快照目录。单机存档的仓库位于 `foldbackups/<存档目录名>`，需要把 `--snapshot-root` 指向该目录。离线回档前必须先关闭服务端。
 
 首次使用CLI时，需要先提取随 JAR 打包的运行库，这个设计是为了避免mod与CLI的依赖冲突：
 
@@ -123,7 +125,7 @@ CLI会恢复目标区块的地形、方块实体及可恢复的实体数据，�
 | 配置 | 默认值 | 含义 |
 | --- | --- | --- |
 | `general.enabled` | `true` | 开启自动备份 |
-| `general.backupPath` | `./foldbackups` | 相对于服务端运行目录的备份路径，也支持绝对路径 |
+| `general.backupPath` | `./foldbackups` | 相对于服务端运行目录的备份根，也支持绝对路径。专用服务器直接以它为仓库；单机在其下按存档目录名各建一个仓库 |
 | `general.compressionLevel` | `6` | Zstd 压缩级别，范围 1–22 |
 | `scheduling.intervalMinutes` | `120` | 自动备份的玩家在线时间累计间隔，单位分钟 |
 | `scheduling.minIntervalMinutes` | `10` | 两次备份的最小墙钟间隔，单位分钟 |

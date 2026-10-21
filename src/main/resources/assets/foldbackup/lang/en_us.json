@@ -10,6 +10,7 @@
   "foldbackup.command.backup.too_soon": "§c[FoldBackup] Backup rejected: the minimum interval of §e%s minutes§c has not elapsed. Use §e/foldbackup backup --force§c to bypass it.",
   "foldbackup.command.backup.failure": "§c[FoldBackup] Backup failed. Please contact an administrator.",
   "foldbackup.command.backend_not_ready": "§c[FoldBackup] The backup backend is not ready yet. Try again shortly.",
+  "foldbackup.command.backend_init_failed": "§c[FoldBackup] The backup repository at §f%s§c could not be opened. Backups are unavailable for this world; see the server log.",
   "foldbackup.command.list.empty": "§e[FoldBackup] No snapshots found.",
   "foldbackup.command.list.title": "§6=== FoldBackup Snapshots (%s) ===",
   "foldbackup.command.list.header": "§7ID | Date | Regions | Files | Compressed | Uncompressed | Cumulative Space",

@@ -1,6 +1,7 @@
 package io.github.truscdo.foldbackup.mod.preview;
 
 import io.github.truscdo.foldbackup.core.rollback.PreviewDifference;
+import io.github.truscdo.foldbackup.core.store.SnapshotStore;
 import io.github.truscdo.foldbackup.mod.DimensionPath;
 import io.github.truscdo.foldbackup.mod.FoldBackupMod;
 import io.github.truscdo.foldbackup.mod.i18n.FoldBackupTranslations;
@@ -66,14 +67,15 @@ public final class PreviewManager {
     }
 
     public int start(ServerPlayer player, int x, int z, String snapshotId) {
-        if (mod.getSnapshotStore() == null) {
+        SnapshotStore store = mod.getSnapshotStore();
+        if (store == null) {
             message(player, "foldbackup.command.backend_not_ready");
             return 0;
         }
         Long epochSeconds = null;
         if (snapshotId != null) {
             try {
-                epochSeconds = mod.getSnapshotStore().resolveEpoch(snapshotId);
+                epochSeconds = store.resolveEpoch(snapshotId);
             } catch (IOException e) {
                 message(player, "foldbackup.command.info.not_found", snapshotId);
                 return 0;
@@ -161,7 +163,8 @@ public final class PreviewManager {
             String language = FoldBackupTranslations.resolveLanguage(player, mod.getConfig());
             var counts = PreviewDifference.counts(PreviewData.captureEntities(level, chunk), historical.entities());
             message(player, "foldbackup.preview.entity_counts", countText(language, counts));
-            if (historical.state() != io.github.truscdo.foldbackup.core.rollback.ChunkRollbackSupport.EntitySnapshotState.PRESENT)
+            if (historical
+                    .state() != io.github.truscdo.foldbackup.core.rollback.ChunkRollbackSupport.EntitySnapshotState.PRESENT)
                 message(player, "foldbackup.preview.entity_snapshot_missing");
         } catch (Exception e) {
             FoldBackupMod.LOG.warn("Could not calculate entity preview difference", e);

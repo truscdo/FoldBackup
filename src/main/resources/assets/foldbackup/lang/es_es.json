@@ -10,6 +10,7 @@
   "foldbackup.command.backup.too_soon": "§c[FoldBackup] Aún no ha transcurrido el intervalo mínimo de §e%s minutos§c. Usa §e/foldbackup backup --force§c para omitirlo.",
   "foldbackup.command.backup.failure": "§c[FoldBackup] La copia de seguridad ha fallado. Contacta con un administrador.",
   "foldbackup.command.backend_not_ready": "§c[FoldBackup] El sistema de copias aún no está listo. Inténtalo de nuevo pronto.",
+  "foldbackup.command.backend_init_failed": "§c[FoldBackup] No se pudo abrir el repositorio de copias en §f%s§c. Las copias no están disponibles para este mundo; revisa el registro del servidor.",
   "foldbackup.command.list.empty": "§e[FoldBackup] No se encontraron instantáneas.",
   "foldbackup.command.list.title": "§6=== Instantáneas de FoldBackup (%s) ===",
   "foldbackup.command.list.header": "§7ID | Fecha | Regiones | Archivos | Comprimido | Sin comprimir | Espacio acumulado",

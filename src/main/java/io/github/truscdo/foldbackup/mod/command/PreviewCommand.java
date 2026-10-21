@@ -12,7 +12,7 @@ public final class PreviewCommand {
     private PreviewCommand() {}
 
     public static void register(CommandDispatcher<CommandSourceStack> dispatcher, FoldBackupMod mod) {
-        dispatcher.register(Commands.literal("foldbackup").requires(s -> s.hasPermission(2))
+        dispatcher.register(Commands.literal("foldbackup").requires(CommandPermissions::canManageBackups)
                 .then(Commands.literal("preview")
                         .then(Commands.literal("exit")
                                 .executes(c -> mod.getPreviewManager().exit(

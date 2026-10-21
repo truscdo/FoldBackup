@@ -28,7 +28,7 @@ public class TickHandler {
     @SubscribeEvent
     public void onServerTick(ServerTickEvent.Post event) {
         BackupScheduler scheduler = mod.getScheduler();
-        if (scheduler != null && scheduler.shouldTrigger(
+        if (scheduler != null && mod.getExecutor() != null && scheduler.shouldTrigger(
                 mod.getServer() != null && mod.getServer().getPlayerCount() > 0)) {
             LOG.info("Scheduled backup triggered ({} min of online time accumulated)",
                     mod.getConfig().getIntervalMinutes());

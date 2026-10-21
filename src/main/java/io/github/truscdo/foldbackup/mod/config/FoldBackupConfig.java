@@ -68,7 +68,9 @@ public class FoldBackupConfig {
                                 .comment("Enable automatic backups")
                                 .define("enabled", true);
                 backupPath = builder
-                                .comment("Backup storage path (relative to game dir, or absolute)")
+                                .comment("Backup root (relative to game dir, or absolute). "
+                                                + "A dedicated server uses it as the repository; singleplayer "
+                                                + "creates one repository per world folder under it.")
                                 .define("backupPath", "./foldbackups");
                 compressionLevel = builder
                                 .comment("Zstd compression level (1-22). 3=fast, 6=balanced, 10+=better but slower")
@@ -164,7 +166,8 @@ public class FoldBackupConfig {
                 return enabled.get();
         }
 
-        public Path getBackupPath() {
+        /** 备份根：所有世界的备份根目录。 */
+        public Path getBackupRoot() {
                 return Path.of(backupPath.get());
         }
 

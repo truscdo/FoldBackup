@@ -10,6 +10,7 @@
   "foldbackup.command.backup.too_soon": "§c[FoldBackup] Минимальный интервал §e%s мин.§c ещё не прошёл. Используйте §e/foldbackup backup --force§c, чтобы пропустить ожидание.",
   "foldbackup.command.backup.failure": "§c[FoldBackup] Ошибка резервного копирования. Обратитесь к администратору.",
   "foldbackup.command.backend_not_ready": "§c[FoldBackup] Система резервного копирования ещё не готова. Повторите попытку позже.",
+  "foldbackup.command.backend_init_failed": "§c[FoldBackup] Не удалось открыть репозиторий резервных копий §f%s§c. Резервное копирование для этого мира недоступно; подробности в журнале сервера.",
   "foldbackup.command.list.empty": "§e[FoldBackup] Снимки не найдены.",
   "foldbackup.command.list.title": "§6=== Снимки FoldBackup (%s) ===",
   "foldbackup.command.list.header": "§7ID | Дата | Регионы | Файлы | Сжато | Без сжатия | Накопленное место",

@@ -38,7 +38,9 @@ FoldBackup also introduces the LRHD format to record chunk differences in archiv
    /foldbackup list
    ```
 
-By default, backups are stored in `foldbackups/` under the server's working directory. You can change this with `general.backupPath`. Before a backup, FoldBackup forces the world to save and temporarily disables automatic saving. It restores the previous saving state when the backup finishes.
+   In singleplayer, the world host can use these commands even when cheats are off. Other players joining over LAN cannot use them.
+
+By default, backups are stored under `foldbackups/` in the server's working directory. You can change this with `general.backupPath`, which is the backup root: a dedicated server uses it directly as the repository, while singleplayer uses `foldbackups/<world-folder-name>` so each world keeps its own repository. Before a backup, FoldBackup forces the world to save and temporarily disables automatic saving. It restores the previous saving state when the backup finishes.
 
 Automatic backups are enabled by default. The interval counts accumulated time while players are online. Manual backups are also subject to the minimum interval between backups; use `/foldbackup backup --force` to bypass it.
 
@@ -46,7 +48,7 @@ Automatic backups are enabled by default. The interval counts accumulated time w
 
 You can restore an entire world through the TUI or CLI.
 
-The TUI is straightforward to use. When the mod initializes, it creates a launcher script in the backup directory:
+The TUI is straightforward to use. Each time a world starts, the mod creates a launcher script in that world's repository directory (`foldbackups/` on a dedicated server, `foldbackups/<world-folder-name>` in singleplayer):
 
 - Windows: `foldbackup-tui.bat`
 - Linux or an environment with Bash: `foldbackup-tui.sh`
@@ -61,7 +63,7 @@ In game, use `/foldbackup preview <x> <z> [snapshot-id]` to preview a chunk from
 
 To roll back a chunk in game, use `/foldbackup rollback chunk <x> <z> [snapshot-id]`. You can specify a dimension with `/foldbackup rollback chunk in <dimension> <x> <z> [snapshot-id]`. The target chunk must already be loaded in memory. For an unloaded chunk, use the offline CLI method below. If you omit the snapshot ID, the latest snapshot is used.
 
-For the CLI examples below, assume the current directory is `foldbackups` and the server world directory is its sibling, `world`. If you run the commands elsewhere, adjust the JAR, world, and snapshot paths accordingly. You can also specify the snapshot directory with `--snapshot-root <directory>`. **Stop the server before performing an offline rollback.**
+For the CLI examples below, assume the current directory is `foldbackups` and the server world directory is its sibling, `world`. If you run the commands elsewhere, adjust the JAR, world, and snapshot paths accordingly. You can also specify the snapshot directory with `--snapshot-root <directory>`. In singleplayer the repository is `foldbackups/<world-folder-name>`, so point `--snapshot-root` at that directory. **Stop the server before performing an offline rollback.**
 
 Before using the CLI for the first time, extract the runtime libraries bundled in the JAR. This avoids dependency conflicts between the mod and CLI:
 
@@ -119,7 +121,7 @@ Configuration is managed through NeoForge's SERVER configuration system. Names i
 | Option | Default | Description |
 | --- | --- | --- |
 | `general.enabled` | `true` | Enable automatic backups |
-| `general.backupPath` | `./foldbackups` | Backup path relative to the server's working directory; absolute paths are also supported |
+| `general.backupPath` | `./foldbackups` | Backup root relative to the server's working directory; absolute paths are also supported. A dedicated server uses it as the repository; singleplayer creates one repository per world folder under it |
 | `general.compressionLevel` | `6` | Zstd compression level, from 1 to 22 |
 | `scheduling.intervalMinutes` | `120` | Accumulated player online time between automatic backups, in minutes |
 | `scheduling.minIntervalMinutes` | `10` | Minimum wall-clock time between backups, in minutes |

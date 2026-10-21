@@ -1,23 +1,20 @@
 package io.github.truscdo.foldbackup.mod;
 
 import io.github.truscdo.foldbackup.core.LogUtil;
-import io.github.truscdo.foldbackup.core.StartupScriptInstaller;
-import io.github.truscdo.foldbackup.core.backup.*;
-import io.github.truscdo.foldbackup.core.store.BlobMaintenance;
 import io.github.truscdo.foldbackup.core.store.BlobStore;
 import io.github.truscdo.foldbackup.core.store.SnapshotStore;
 import io.github.truscdo.foldbackup.core.task.TaskRegistry;
-import io.github.truscdo.foldbackup.core.task.TaskStatus;
-import io.github.truscdo.foldbackup.core.task.TaskType;
 import io.github.truscdo.foldbackup.mod.backup.BackupExecutor;
 import io.github.truscdo.foldbackup.mod.backup.BackupProgressNotifier;
 import io.github.truscdo.foldbackup.mod.backup.BackupScheduler;
 import io.github.truscdo.foldbackup.mod.backup.TickHandler;
-import io.github.truscdo.foldbackup.mod.backup.WorldAccessor;
 import io.github.truscdo.foldbackup.mod.command.CommandRegistrationHandler;
 import io.github.truscdo.foldbackup.mod.config.ConfigEventHandler;
 import io.github.truscdo.foldbackup.mod.config.FoldBackupConfig;
+import io.github.truscdo.foldbackup.mod.preview.PreviewData;
+import io.github.truscdo.foldbackup.mod.preview.PreviewManager;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.world.level.ChunkPos;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.common.Mod;
@@ -28,14 +25,16 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 
 /**
  * FoldBackup 模组的主入口点——将后端、调度器和执行器连接在一起，
  * 并将 Minecraft 事件路由到专用处理类。
+ * <p>
+ * 路径解析分两段：备份根由配置幂等解析（{@link #bootstrapStorage()}），
+ * 世界仓库根在每次服务器启动时按当前存档现算，并封装在 {@link WorldRuntime} 中。
+ * <p>
+ * 仓库初始化失败不会阻止服务器启动：{@link #getBackendErrorKey()} 非 {@code null} 时
+ * 表示该世界的备份不可用，命令返回后端未就绪提示。
  */
 @Mod(FoldBackupMod.MOD_ID)
 public class FoldBackupMod {
@@ -43,18 +42,15 @@ public class FoldBackupMod {
     public static final String MOD_ID = "foldbackup";
     public static final LogUtil LOG = LogUtil.getLogger(MOD_ID);
 
-    private Path backupRoot;
-    private Path worldSavePath;
+    /** 备份根（所有世界的备份根），由配置派生。 */
+    private volatile Path baseRoot;
+    /** 当前世界的运行时；未启动或已停止时为 {@code null}。 */
+    private volatile WorldRuntime runtime;
     private MinecraftServer server;
-    private FoldBackupConfig config;
-    private BackupScheduler scheduler;
-    private BackupExecutor executor;
+    private final FoldBackupConfig config;
     private final TaskRegistry taskRegistry = new TaskRegistry();
     private final BackupProgressNotifier progressNotifier = new BackupProgressNotifier();
-    private SnapshotStore snapshotManager;
-    private BlobStore blobStore;
-    private ExecutorService backupExecutor;
-    private final io.github.truscdo.foldbackup.mod.preview.PreviewManager previewManager = new io.github.truscdo.foldbackup.mod.preview.PreviewManager(this);
+    private final PreviewManager previewManager = new PreviewManager(this);
 
     public FoldBackupMod(IEventBus modBus, ModContainer container) {
         config = new FoldBackupConfig(container);
@@ -64,108 +60,82 @@ public class FoldBackupMod {
 
         var gameBus = NeoForge.EVENT_BUS;
         gameBus.register(new ServerLifecycleHandler(this));
+        gameBus.register(new PlayerLoginHandler(this));
         gameBus.register(new TickHandler(this));
         gameBus.register(new CommandRegistrationHandler(this));
         gameBus.register(previewManager);
     }
 
-    // --- 后端初始化 ---
+    // --- 基路径 ---
 
+    /**
+     * 幂等解析备份根。配置重载时仍是空操作：基路径只在首次解析，
+     * 与"本次不做配置热重载"保持一致。
+     */
     void bootstrapStorage() {
-        if (backupRoot != null) {
+        if (baseRoot != null) {
             return;
         }
-
-        backupRoot = config.getBackupPath().isAbsolute()
-                ? config.getBackupPath()
-                : FMLPaths.GAMEDIR.get().resolve(config.getBackupPath());
-
+        Path configured = config.getBackupRoot();
+        baseRoot = configured.isAbsolute() ? configured : FMLPaths.GAMEDIR.get().resolve(configured);
         try {
-            Files.createDirectories(backupRoot);
+            Files.createDirectories(baseRoot);
         } catch (IOException e) {
-            LOG.error("Failed to create backup directory: {}", backupRoot, e);
+            LOG.error("Failed to create backup root: {}", baseRoot, e);
         }
-
-        cleanupWipFiles(backupRoot);
-        StartupScriptInstaller.install(backupRoot, FMLPaths.GAMEDIR.get().resolve("mods"));
     }
 
+    // --- 世界运行时 ---
+
+    /**
+     * 为给定世界构造并发布运行时。若存在旧实例，先关停（事件丢失时的兜底）。
+     */
     void initializeBackend(Path worldSavePath) {
         bootstrapStorage();
-        this.worldSavePath = worldSavePath;
 
-        // 惰性创建单线程执行器——仅在服务器实际启动时创建。
-        // 此前这是一个类级静态字段，在类加载时创建，
-        // 这在纯客户端环境中导致线程泄漏。
-        backupExecutor = Executors.newSingleThreadExecutor(r -> {
-            Thread t = new Thread(r, "foldbackup-worker");
-            t.setDaemon(true);
-            return t;
-        });
-
-        blobStore = new BlobStore(backupRoot, config.getCompressionLevel());
-        try {
-            snapshotManager = new SnapshotStore(backupRoot);
-        } catch (IOException e) {
-            LOG.error("Failed to load index.db; starting with empty index", e);
-            throw new RuntimeException("Cannot initialize SnapshotStore", e);
+        WorldRuntime previous;
+        synchronized (this) {
+            previous = runtime;
+            runtime = null;
+        }
+        if (previous != null) {
+            previous.shutdown();
         }
 
-        var regionProcessor = new RegionProcessor(snapshotManager::getIndex,
-                blobStore, config.getCompressionLevel(), config.buildBackupFilter(),
-                config.getRegionThreads(), config.getRegionMemoryLimitMB());
+        WorldRuntime created = new WorldRuntime(server, baseRoot, worldSavePath,
+                server.isDedicatedServer(), config,
+                FMLPaths.GAMEDIR.get().resolve("mods"), taskRegistry);
+        synchronized (this) {
+            runtime = created;
+        }
+    }
 
-        var worldAccessor = new WorldAccessor(server);
-
-        // Minecraft 版本在索引中纯粹是文档性元数据；
-        // 空字符串由 IndexStore 正确处理（往返时视为 null）。
-        var backupContext = new BackupContext(
-                worldSavePath,
-                worldSavePath.getParent() != null
-                        ? worldSavePath.getParent().getFileName().toString()
-                        : "world",
-                "");
-        var coordinator = new BackupCoordinator(
-                backupContext, snapshotManager, regionProcessor,
-                config.buildRetentionPolicy());
-
-        scheduler = new BackupScheduler(config);
-        executor = new BackupExecutor(server, worldAccessor, coordinator, config, scheduler, backupExecutor,
-                taskRegistry);
-
-        // 恢复持久化的计时器状态（需要 backupRoot）
-        scheduler.init(backupRoot);
-
-        LOG.info("FoldBackup initialized. Backup store: {}", backupRoot);
+    /**
+     * 关停指定运行时并清空引用；仅当它仍是当前实例时生效。
+     */
+    void shutdownBackend(WorldRuntime expected) {
+        synchronized (this) {
+            if (runtime != expected) {
+                return;
+            }
+            runtime = null;
+        }
+        expected.shutdown();
     }
 
     void setServer(MinecraftServer server) {
         this.server = server;
     }
 
-    void shutdownBackupExecutor() {
-        if (backupExecutor == null)
-            return;
-        backupExecutor.shutdown();
-        try {
-            if (!backupExecutor.awaitTermination(10, TimeUnit.SECONDS)) {
-                backupExecutor.shutdownNow();
-                LOG.warn("Backup executor did not terminate within 10s; tasks forced shutdown");
-            }
-        } catch (InterruptedException e) {
-            backupExecutor.shutdownNow();
-            Thread.currentThread().interrupt();
-        }
-    }
-
-    private static void cleanupWipFiles(Path root) {
-        new BlobMaintenance(root).cleanupWipFiles();
-    }
-
     // --- 公共 API（供命令/调度器使用） ---
 
+    WorldRuntime runtime() {
+        return runtime;
+    }
+
     public BackupExecutor getExecutor() {
-        return executor;
+        WorldRuntime current = runtime;
+        return current == null ? null : current.executor();
     }
 
     public BackupProgressNotifier getProgressNotifier() {
@@ -177,19 +147,30 @@ public class FoldBackupMod {
     }
 
     public BackupScheduler getScheduler() {
-        return scheduler;
+        WorldRuntime current = runtime;
+        return current == null ? null : current.scheduler();
     }
 
     public SnapshotStore getSnapshotStore() {
-        return snapshotManager;
+        WorldRuntime current = runtime;
+        return current == null ? null : current.snapshotStore();
     }
 
     public BlobStore getBlobStore() {
-        return blobStore;
+        WorldRuntime current = runtime;
+        return current == null ? null : current.blobStore();
     }
 
-    public Path getWorldSavePath() {
-        return worldSavePath;
+    /** 后端初始化失败的提示键；正常或尚未启动时为 {@code null}。 */
+    public String getBackendErrorKey() {
+        WorldRuntime current = runtime;
+        return current == null ? null : current.initErrorKey();
+    }
+
+    /** 当前世界的仓库根；尚未启动时为 {@code null}。 */
+    public Path getRepoRoot() {
+        WorldRuntime current = runtime;
+        return current == null ? null : current.repoRoot();
     }
 
     /**
@@ -199,23 +180,11 @@ public class FoldBackupMod {
      * @return 删除和 GC 完成时返回的 future
      */
     public CompletableFuture<Void> deleteSnapshotAsync(long epochSeconds) {
-        TaskStatus status = taskRegistry.startTask(TaskType.DELETE)
-                .setRunning()
-                .setMessage("Deleting snapshot at epoch " + epochSeconds + "...");
-        return CompletableFuture.runAsync(() -> {
-            if (snapshotManager == null) {
-                taskRegistry.fail(status, "Backend not initialized");
-                throw new CompletionException(
-                        new IllegalStateException("Backend not initialized yet"));
-            }
-            try {
-                snapshotManager.deleteSnapshot(epochSeconds);
-                taskRegistry.complete(status);
-            } catch (IOException e) {
-                taskRegistry.fail(status, "Delete failed: " + e.getMessage());
-                throw new CompletionException(e);
-            }
-        }, backupExecutor);
+        WorldRuntime current = runtime;
+        if (current == null) {
+            return CompletableFuture.failedFuture(new IllegalStateException("Backend not initialized"));
+        }
+        return current.deleteSnapshotAsync(epochSeconds);
     }
 
     public FoldBackupConfig getConfig() {
@@ -226,14 +195,15 @@ public class FoldBackupMod {
         return server;
     }
 
-    public io.github.truscdo.foldbackup.mod.preview.PreviewManager getPreviewManager() { return previewManager; }
+    public PreviewManager getPreviewManager() {
+        return previewManager;
+    }
 
-    public CompletableFuture<io.github.truscdo.foldbackup.mod.preview.PreviewData.Raw> readPreviewAsync(
-            net.minecraft.world.level.ChunkPos pos, Long epochSeconds, String dimension) {
-        // 与本服务器的快照清理/删除操作串行化，避免并发竞争。
-        return CompletableFuture.supplyAsync(() -> {
-            try { return io.github.truscdo.foldbackup.mod.preview.PreviewData.read(snapshotManager, blobStore, pos, epochSeconds, dimension); }
-            catch (IOException e) { throw new CompletionException(e); }
-        }, backupExecutor);
+    public CompletableFuture<PreviewData.Raw> readPreviewAsync(ChunkPos pos, Long epochSeconds, String dimension) {
+        WorldRuntime current = runtime;
+        if (current == null) {
+            return CompletableFuture.failedFuture(new IllegalStateException("Backend not initialized"));
+        }
+        return current.readPreviewAsync(pos, epochSeconds, dimension);
     }
 }

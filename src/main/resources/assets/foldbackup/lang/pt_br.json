@@ -10,6 +10,7 @@
   "foldbackup.command.backup.too_soon": "§c[FoldBackup] O intervalo mínimo de §e%s minutos§c ainda não passou. Use §e/foldbackup backup --force§c para ignorá-lo.",
   "foldbackup.command.backup.failure": "§c[FoldBackup] O backup falhou. Entre em contato com um administrador.",
   "foldbackup.command.backend_not_ready": "§c[FoldBackup] O mecanismo de backup ainda não está pronto. Tente novamente em instantes.",
+  "foldbackup.command.backend_init_failed": "§c[FoldBackup] Não foi possível abrir o repositório de backups em §f%s§c. Os backups estão indisponíveis para este mundo; consulte o log do servidor.",
   "foldbackup.command.list.empty": "§e[FoldBackup] Nenhum snapshot encontrado.",
   "foldbackup.command.list.title": "§6=== Snapshots do FoldBackup (%s) ===",
   "foldbackup.command.list.header": "§7ID | Data | Regiões | Arquivos | Compactado | Descompactado | Espaço acumulado",

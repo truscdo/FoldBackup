@@ -10,6 +10,7 @@
   "foldbackup.command.backup.too_soon": "§c[FoldBackup] 距离上次备份尚未达到最小间隔 §e%s 分钟§c。使用 §e/foldbackup backup --force§c 可跳过间隔限制。",
   "foldbackup.command.backup.failure": "§c[FoldBackup] 备份失败，请联系管理员。",
   "foldbackup.command.backend_not_ready": "§c[FoldBackup] 备份后端尚未就绪，请稍后重试。",
+  "foldbackup.command.backend_init_failed": "§c[FoldBackup] 无法打开备份仓库 §f%s§c，该世界暂时无法备份，详见服务端日志。",
   "foldbackup.command.list.empty": "§e[FoldBackup] 没有找到快照。",
   "foldbackup.command.list.title": "§6=== FoldBackup 快照（%s）===",
   "foldbackup.command.list.header": "§7ID | 时间 | 区域 | 文件 | 压缩后 | 未压缩 | 累计空间",

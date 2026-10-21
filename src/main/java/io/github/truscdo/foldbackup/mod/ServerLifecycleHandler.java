@@ -33,22 +33,35 @@ public class ServerLifecycleHandler {
         mod.setServer(server);
         mod.initializeBackend(server.getWorldPath(LevelResource.ROOT));
         if (mod.getConfig().isBackupOnStart()) {
-            mod.getExecutor().triggerBackup(false);
+            var executor = mod.getExecutor();
+            if (executor != null) {
+                executor.triggerBackup(false);
+            }
         }
     }
 
     @SubscribeEvent
     public void onServerStopping(ServerStoppingEvent event) {
-        if (mod.getScheduler() != null)
-            mod.getScheduler().saveState();
-        if (mod.getConfig().isBackupOnStop() && mod.getExecutor() != null) {
+        WorldRuntime runtime = mod.runtime();
+        if (runtime == null) {
+            mod.getProgressNotifier().clear();
+            return;
+        }
+        // 世界可能已切换：旧世界的停止事件不得关停新世界的运行时。
+        if (runtime.server() != event.getServer()) {
+            return;
+        }
+        if (runtime.scheduler() != null) {
+            runtime.scheduler().saveState();
+        }
+        if (mod.getConfig().isBackupOnStop() && runtime.executor() != null) {
             try {
-                mod.getExecutor().triggerBackupBlocking(false);
+                runtime.executor().triggerBackupBlocking(false);
             } catch (Exception e) {
                 LOG.error("Failed to run shutdown backup", e);
             }
         }
-        mod.shutdownBackupExecutor();
+        mod.shutdownBackend(runtime);
         mod.getProgressNotifier().clear();
     }
 }

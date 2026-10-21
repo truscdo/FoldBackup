@@ -1,11 +1,8 @@
 package io.github.truscdo.foldbackup.mod.command;
 
-import io.github.truscdo.foldbackup.core.store.BlobStore;
-import io.github.truscdo.foldbackup.core.store.SnapshotStore;
 import io.github.truscdo.foldbackup.mod.FoldBackupMod;
 import io.github.truscdo.foldbackup.mod.rollback.InMemoryChunkRollbackHandler;
 import io.github.truscdo.foldbackup.mod.rollback.RollbackOutcome;
-import io.github.truscdo.foldbackup.mod.i18n.FoldBackupTranslations;
 import com.mojang.brigadier.Command;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
@@ -91,7 +88,7 @@ public class ChunkRollbackCommand {
                 // ── 注册 ──
                 dispatcher.register(
                                 Commands.literal("foldbackup")
-                                                .requires(s -> s.hasPermission(2))
+                                                .requires(CommandPermissions::canManageBackups)
                                                 .then(Commands.literal("rollback")
                                                                 .then(Commands.literal("chunk")
                                                                                 .then(withDim)
@@ -115,22 +112,15 @@ public class ChunkRollbackCommand {
                         ServerLevel level, int chunkX, int chunkZ, String snapshotId) {
                 CommandSourceStack source = ctx.getSource();
 
-                // ── 确保后端已就绪 ──
-                SnapshotStore snapshotManager = mod.getSnapshotStore();
-                BlobStore blobStore = mod.getBlobStore();
-                if (snapshotManager == null || blobStore == null) {
-                        source.sendFailure(FoldBackupTranslations.componentForSource(source, mod.getConfig(),
-                                        "foldbackup.command.backend_not_ready"));
+                BackendGuard.RollbackHandles backend = BackendGuard.requireRollbackHandles(source, mod);
+                if (backend == null) {
                         return 0;
                 }
 
                 Long epochSeconds = null;
                 if (snapshotId != null) {
-                        try {
-                                epochSeconds = snapshotManager.resolveEpoch(snapshotId);
-                        } catch (java.io.IOException e) {
-                                source.sendFailure(FoldBackupTranslations.componentForSource(source, mod.getConfig(),
-                                                "foldbackup.command.info.not_found", snapshotId));
+                        epochSeconds = BackendGuard.resolveEpoch(source, mod, backend.store(), snapshotId);
+                        if (epochSeconds == null) {
                                 return 0;
                         }
                 }
@@ -138,20 +128,19 @@ public class ChunkRollbackCommand {
                 // ── 检查目标区块当前是否已加载到内存 ──
                 LevelChunk liveChunk = level.getChunkSource().getChunkNow(chunkX, chunkZ);
                 if (liveChunk == null) {
-                        source.sendFailure(FoldBackupTranslations.componentForSource(source, mod.getConfig(),
-                                        "foldbackup.rollback.chunk_not_loaded_command", chunkX, chunkZ));
+                        CommandFeedback.failure(source, mod, "foldbackup.rollback.chunk_not_loaded_command",
+                                        chunkX, chunkZ);
                         return 0;
                 }
 
                 // ── 执行内存回档 ──
                 InMemoryChunkRollbackHandler handler = new InMemoryChunkRollbackHandler(
-                                snapshotManager, blobStore);
+                                backend.store(), backend.blobs());
                 // 回档前必须先关闭目标区块的客户端预览。
                 mod.getPreviewManager().invalidateChunk(level, new ChunkPos(chunkX, chunkZ),
                                 "foldbackup.preview.ended_before_rollback");
                 RollbackOutcome result = handler.rollbackChunk(level, chunkX, chunkZ, epochSeconds);
-                Component message = FoldBackupTranslations.componentForSource(source, mod.getConfig(),
-                                result.translationKey(), result.args());
+                Component message = CommandFeedback.text(source, mod, result.translationKey(), result.args());
 
                 if (result.success()) {
                         source.sendSuccess(() -> message, true);
