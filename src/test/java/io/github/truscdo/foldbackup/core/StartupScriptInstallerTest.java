@@ -54,6 +54,33 @@ class StartupScriptInstallerTest {
     }
 
     @Test
+    void install_referencesModsRelativeToTheScript() throws IOException {
+        Path game = tempDir.resolve("游戏");
+        Path backupRoot = game.resolve("foldbacks").resolve("新的世界");
+        Path mods = game.resolve("mods");
+        Files.createDirectories(backupRoot);
+        Files.createDirectories(mods);
+
+        StartupScriptInstaller.install(backupRoot, mods);
+
+        String bat = Files.readString(backupRoot.resolve("foldbackup-tui.bat"), StandardCharsets.UTF_8);
+        String line = bat.lines()
+                .filter(text -> text.startsWith("set \"MODS_DIR="))
+                .findFirst()
+                .orElseThrow();
+        String relative = line.substring("set \"MODS_DIR=%~dp0".length(), line.length() - 1);
+
+        // 相对值从脚本目录解析后仍指向 mods 目录
+        assertEquals(mods.toRealPath(), backupRoot.resolve(relative).normalize().toRealPath());
+
+        String sh = Files.readString(backupRoot.resolve("foldbackup-tui.sh"), StandardCharsets.UTF_8);
+        assertTrue(sh.contains("\"$SCRIPT_DIR\"/'"), sh);
+        // 脚本不写入绝对路径，复制游戏目录后仍然可用
+        assertFalse(bat.contains(game.toString()), "bat must not embed an absolute path");
+        assertFalse(sh.contains(game.toString().replace('\\', '/')), "sh must not embed an absolute path");
+    }
+
+    @Test
     void install_createsMissingRoot() throws IOException {
         Path backupRoot = tempDir.resolve("nested/foldbackups");
         StartupScriptInstaller.install(backupRoot, tempDir.resolve("server mods"));
