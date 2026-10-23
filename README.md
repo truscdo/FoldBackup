@@ -142,6 +142,8 @@ Configuration is managed through NeoForge's SERVER configuration system. Names i
 
 For environment setup, test commands, and report locations, see the [Build and Test Guide](doc/构建与测试指南.md) (Chinese).
 
+`./gradlew jar` produces `foldbackup-<version>.jar`. Adding `-PjarNoScripts` (or running the `jarNoScripts` task) also produces `foldbackup-<version>-noscripts.jar`, which omits the TUI launcher script templates and the script injection code, so it never writes launcher scripts into the repository directory.
+
 ## License and Acknowledgments
 
 FoldBackup's project metadata declares the LGPL v3 license.

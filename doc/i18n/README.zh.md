@@ -146,6 +146,8 @@ CLI会恢复目标区块的地形、方块实体及可恢复的实体数据，�
 
 完整环境准备、测试命令及报告位置见 [构建与测试指南](../构建与测试指南.md)。
 
+`./gradlew jar` 产出 `foldbackup-<version>.jar`。追加 `-PjarNoScripts`（或运行 `jarNoScripts` 任务）会额外产出 `foldbackup-<version>-noscripts.jar`：该变体不含 TUI 启动脚本模板与脚本注入实现，运行时不会在仓库目录写出启动脚本。
+
 ## 许可证与致谢
 
 FoldBackup 的项目元数据声明采用 LGPL v3 许可证。

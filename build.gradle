@@ -128,6 +128,8 @@ processResources {
 // There is deliberately NO separate shaded/classifier fat jar: any second
 // copy of the same bytes invites exactly the deployment mix-up documented
 // in temp/zstd冲突与打包方案说明.md §10.
+// 例外：`jarNoScripts` 产出的 -noscripts 变体内容不同（移除启动脚本注入），
+// 不是同一份字节的第二份拷贝，因此不涉及上述混用风险。
 jar {
     manifest {
         attributes 'Main-Class': 'io.github.truscdo.foldbackup.cli.Bootstrap'
@@ -149,6 +151,9 @@ sourceSets {
         compileClasspath += sourceSets.main.output
         runtimeClasspath += sourceSets.main.output
     }
+
+    // 仅含一个空实现类，供 noscripts 变体 JAR 替换真实的启动脚本注入实现。
+    noLauncherScripts
 }
 
 // Offline fixture preparation also calls core code from the test JVM.
@@ -161,6 +166,34 @@ dependencies {
     // Gson for JSON parsing of RCON responses
     integrationTestImplementation 'com.google.code.gson:gson:2.11.0'
     integrationTestRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+// ── 无启动脚本变体 ──
+// 与标准 JAR 内容一致，但移除 TUI 启动脚本模板、ScriptWriter 与真实的
+// StartupScriptInstaller；调用点由 src/noLauncherScripts 的空实现承接。
+// 单元测试仍针对标准实现编译运行，不受影响。
+// 该变体默认不参与常规构建：可显式运行 `jarNoScripts`，或用
+// `-PjarNoScripts` 让 jar / assemble / build 一并产出。
+def noScriptsJar = tasks.register('jarNoScripts', Jar) {
+    group = 'build'
+    description = 'Builds the mod/CLI jar without TUI launcher script injection.'
+    archiveClassifier = 'noscripts'
+    manifest {
+        attributes 'Main-Class': 'io.github.truscdo.foldbackup.cli.Bootstrap'
+    }
+    from(sourceSets.main.output) {
+        exclude 'io/github/truscdo/foldbackup/core/ScriptWriter.class'
+        exclude 'io/github/truscdo/foldbackup/core/StartupScriptInstaller.class'
+        exclude 'scripts/**'
+    }
+    from(sourceSets.noLauncherScripts.output)
+    from(tasks.named('jarJar'))
+}
+
+if (providers.gradleProperty('jarNoScripts').isPresent()) {
+    tasks.named('jar') {
+        dependsOn noScriptsJar
+    }
 }
 
 task integrationTest(type: Test) {
