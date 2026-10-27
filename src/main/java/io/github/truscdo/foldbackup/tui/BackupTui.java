@@ -15,6 +15,7 @@ import io.github.truscdo.foldbackup.core.console.SnapshotTablePrinter;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Objects;
 import java.util.function.Consumer;
 
 /**
@@ -23,7 +24,8 @@ import java.util.function.Consumer;
  * 提供编号菜单界面，用于列出和导出快照，无需记住 CLI 参数。
  * 设计通过 {@code foldbackup-tui.bat} 或 {@code foldbackup-tui.sh} 脚本启动。
  * <p>
- * 备份根目录由调用方显式指定，仓库在选择操作后才初始化。
+ * 两个根目录（在线备份根与归档根）均由调用方显式指定且不允许为空，
+ * 仓库在选择操作后才初始化。
  */
 public class BackupTui {
 
@@ -35,13 +37,10 @@ public class BackupTui {
     private record StoreContext(SnapshotStore snapshotManager, BlobStore blobStore, BackupExporter exporter) {}
 
     public BackupTui(Path backupRoot, Path archiveRoot, ConsolePrompt prompt) {
-        if (backupRoot == null && archiveRoot == null) {
-            throw new IllegalArgumentException("At least one TUI root is required");
-        }
-        this.backupRoot = backupRoot;
-        this.archiveRoot = archiveRoot;
-        this.prompt = prompt;
-        this.archiveOperations = archiveRoot != null ? new ArchiveTui(archiveRoot, backupRoot, prompt) : null;
+        this.backupRoot = Objects.requireNonNull(backupRoot, "backupRoot");
+        this.archiveRoot = Objects.requireNonNull(archiveRoot, "archiveRoot");
+        this.prompt = Objects.requireNonNull(prompt, "prompt");
+        this.archiveOperations = new ArchiveTui(archiveRoot, backupRoot, prompt);
     }
 
     private StoreContext openStore() throws IOException {
@@ -52,10 +51,6 @@ public class BackupTui {
     }
 
     private void runStoreTask(Consumer<StoreContext> task) {
-        if (backupRoot == null) {
-            System.out.println("Online backup root is not configured; this operation is unavailable.\n");
-            return;
-        }
         try {
             task.accept(openStore());
         } catch (IOException e) {
@@ -69,7 +64,7 @@ public class BackupTui {
     // ──────────────────────────────────────────────
 
     /**
-     * TUI 入口——只接收调用方明确指定并验证的备份根。
+     * TUI 入口——接收调用方指定的在线备份根与归档根，两者都必须提供。
      * 由 {@code BackupCli} 在 {@code tui} 分发时调用。
      */
     public static void launch(Path root, Path archiveRoot) {
@@ -110,10 +105,6 @@ public class BackupTui {
                 continue;
             }
 
-            if (choice >= 6 && choice <= 8 && archiveOperations == null) {
-                System.out.println("Archive root is not configured; this operation is unavailable.\n");
-                continue;
-            }
             switch (choice) {
                 case 1 -> runStoreTask(this::listSnapshots);
                 case 2 -> runStoreTask(this::exportWorld);
@@ -133,33 +124,24 @@ public class BackupTui {
     }
 
     private void printRootStatus() {
-        if (backupRoot == null) {
-            System.out.println("  Online backup: DISABLED (root not provided)");
-        } else {
-            System.out.println("  Online backup: ENABLED  " + backupRoot.toAbsolutePath().normalize());
-        }
-        if (archiveRoot == null) {
-            System.out.println("  Archive storage:  DISABLED (root not provided)");
-        } else {
-            System.out.println("  Archive storage:  ENABLED  " + archiveRoot.toAbsolutePath().normalize());
-        }
+        System.out.println("  Online backup: " + backupRoot.toAbsolutePath().normalize());
+        System.out.println("  Archive root:  " + archiveRoot.toAbsolutePath().normalize());
     }
 
     private void printMenu() {
         System.out.println("Online backups");
-        System.out.println("  1. List snapshots" + (backupRoot == null ? " [disabled]" : ""));
-        System.out.println("  2. Export world files" + (backupRoot == null ? " [disabled]" : ""));
-        System.out.println("  3. Delete snapshot" + (backupRoot == null ? " [disabled]" : ""));
-        System.out.println("  4. Create archive" + (backupRoot == null ? " [disabled]" : ""));
-        System.out.println("  5. Create snapshot from world" + (backupRoot == null ? " [disabled]" : ""));
+        System.out.println("  1. List snapshots");
+        System.out.println("  2. Export world files");
+        System.out.println("  3. Delete snapshot");
+        System.out.println("  4. Create archive");
+        System.out.println("  5. Create snapshot from world");
         System.out.println();
         System.out.println("----------------------------------------");
         System.out.println();
         System.out.println("Archive storage");
-        String archiveDisabled = archiveRoot == null ? " [disabled]" : "";
-        System.out.println("  6. Restore as world files" + archiveDisabled);
-        System.out.println("  7. Import into online backup" + archiveDisabled);
-        System.out.println("  8. Verify archives" + archiveDisabled);
+        System.out.println("  6. Restore as world files");
+        System.out.println("  7. Import into online backup");
+        System.out.println("  8. Verify archives");
         System.out.println();
     }
 
@@ -168,10 +150,6 @@ public class BackupTui {
     // ──────────────────────────────────────────────
 
     private void createSnapshot() {
-        if (backupRoot == null) {
-            System.out.println("Online backup root is not configured; this operation is unavailable.");
-            return;
-        }
         String input = prompt.readLine("World directory (Enter = back): ");
         if (input == null || input.isBlank()) return;
         int threads = prompt.readThreadCount();
@@ -410,7 +388,7 @@ public class BackupTui {
             System.out.println("  Base:   " + base.id);
             System.out.println("  Target: " + target.id);
             System.out.println("  Threads: " + (threads > 0 ? threads : "auto"));
-            System.out.println("  Output: " + archiveOutputRoot());
+            System.out.println("  Output: " + archiveRoot);
             System.out.println();
             int confirm = prompt.readInt(
                     "Proceed? (1 = confirm, 2 = cancel to main menu, 0 = back): ", 0, 2);
@@ -444,7 +422,7 @@ public class BackupTui {
             System.out.println("  Target:     " + target.id);
             System.out.println("  Recompress: " + (recompress ? "yes (level 19)" : "no (verbatim)")
                     + (recompress && threads > 0 ? ", threads=" + threads : ""));
-            System.out.println("  Output:     " + archiveOutputRoot());
+            System.out.println("  Output:     " + archiveRoot);
             System.out.println();
             int confirm = prompt.readInt(
                     "Proceed? (1 = confirm, 2 = cancel to main menu, 0 = back): ", 0, 2);
@@ -463,7 +441,7 @@ public class BackupTui {
             long targetEpoch, String targetId, boolean recompress, int threads) {
         var archiveCreator = new ArchiveCreator(
                 store.snapshotManager(), store.blobStore(), ArchiveDefaults.ARCHIVE_LEVEL);
-        Path outputRoot = archiveOutputRoot();
+        Path outputRoot = archiveRoot;
         try {
             Path result;
             try (var progress = new ProgressPrinter(System.out)) {
@@ -482,11 +460,4 @@ public class BackupTui {
             System.err.println("Archive creation failed: " + e.getMessage() + "\n");
         }
     }
-
-    /** Archive creation belongs to online backup management, so it can use the online root as output. */
-    private Path archiveOutputRoot() {
-        return archiveRoot != null ? archiveRoot : backupRoot;
-    }
-
-
 }

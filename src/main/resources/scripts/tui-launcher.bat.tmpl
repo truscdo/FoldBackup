@@ -15,31 +15,13 @@ if not defined JAR (
     pause
     exit /b 1
 )
-set "SNAPSHOT="
-set "ARCHIVE="
-if exist "%~dp0index.db" if not exist "%~dp0index.db\" set "SNAPSHOT=1"
-for %%f in ("%~dp0*[*].tar") do if exist "%%~f" if not exist "%%~f\" set "ARCHIVE=1"
-if not defined SNAPSHOT if not defined ARCHIVE (
-    echo Error: no online repository or archives found next to the script.
-    pause
-    exit /b 1
-)
 java -jar "%JAR%" extract --output "%~dp0.foldbackup-cli"
 if errorlevel 1 (
     echo Error: failed to export bundled libraries ^(read-only backup root?^).
     pause
     exit /b 1
 )
-if defined SNAPSHOT if defined ARCHIVE goto :both
-if defined ARCHIVE goto :archive
-java -jar "%JAR%" tui --snapshot-root "%ROOT%" --lib "%~dp0.foldbackup-cli"
-goto :done
-:archive
-java -jar "%JAR%" tui --archive-root "%ROOT%" --lib "%~dp0.foldbackup-cli"
-goto :done
-:both
 java -jar "%JAR%" tui --snapshot-root "%ROOT%" --archive-root "%ROOT%" --lib "%~dp0.foldbackup-cli"
-:done
 set "RESULT=%ERRORLEVEL%"
 if not "%RESULT%"=="0" pause
 exit /b %RESULT%

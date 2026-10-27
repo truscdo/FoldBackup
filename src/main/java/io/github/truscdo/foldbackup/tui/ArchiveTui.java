@@ -13,6 +13,7 @@ import io.github.truscdo.foldbackup.core.console.ProgressPrinter;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Objects;
 
 /** Archive actions used by the shared TUI menu. */
 public class ArchiveTui {
@@ -22,9 +23,9 @@ public class ArchiveTui {
     private final ConsolePrompt prompt;
 
     public ArchiveTui(Path archiveRoot, Path onlineRoot, ConsolePrompt prompt) {
-        this.archiveRoot = archiveRoot;
-        this.onlineRoot = onlineRoot;
-        this.prompt = prompt;
+        this.archiveRoot = Objects.requireNonNull(archiveRoot, "archiveRoot");
+        this.onlineRoot = Objects.requireNonNull(onlineRoot, "onlineRoot");
+        this.prompt = Objects.requireNonNull(prompt, "prompt");
     }
 
     void exportArchive() {
@@ -121,9 +122,7 @@ public class ArchiveTui {
     }
 
     void importArchives() {
-        // With no explicit online root, the archive root is also the import target.
-        // This allows a archive-only directory to be rebuilt as an online repository.
-        Path targetRoot = onlineRoot != null ? onlineRoot : archiveRoot;
+        Path targetRoot = onlineRoot;
 
         while (true) {
             System.out.println();

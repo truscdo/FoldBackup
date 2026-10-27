@@ -25,7 +25,7 @@ class BackupTuiTest {
         try {
             System.setOut(new PrintStream(output, true));
             String input = "1\n5\n" + world + "\n\n1\n0\n";
-            new BackupTui(store, null, new ConsolePrompt(new StringReader(input), System.out)).run();
+            new BackupTui(store, store, new ConsolePrompt(new StringReader(input), System.out)).run();
         } finally { System.setOut(previous); }
         assertTrue(output.toString().contains("No snapshots found."));
         assertTrue(output.toString().contains("Created snapshot"));
@@ -36,7 +36,7 @@ class BackupTuiTest {
     void cancellingSnapshotCreationDoesNotInitializeStore() throws Exception {
         Path store = root.resolve("store");
         for (String input : new String[] {"5\n\n0\n", "5\n", "5\nworld\n0\n0\n", "5\nworld\n"}) {
-            new BackupTui(store, null, new ConsolePrompt(new StringReader(input), System.out)).run();
+            new BackupTui(store, store, new ConsolePrompt(new StringReader(input), System.out)).run();
             assertFalse(Files.exists(store));
         }
     }
@@ -62,26 +62,28 @@ class BackupTuiTest {
     }
 
     @Test
-    void onlineRootIsUsedForArchiveCreationWhenArchiveRootIsMissing() throws Exception {
+    void archiveCreationWritesIntoArchiveRoot() throws Exception {
         Path online = Files.createDirectory(root.resolve("online"));
+        Path archive = Files.createDirectory(root.resolve("archive"));
         var store = new io.github.truscdo.foldbackup.core.store.SnapshotStore(online);
         store.saveSnapshot(new io.github.truscdo.foldbackup.core.store.SnapshotManifest(
                 "S-20260914_120000", 1789358400L, "world"));
         // Create archive -> target -> full -> verbatim -> confirm -> exit.
         String input = "4\n1\n2\n2\n\n1\n0\n";
-        new BackupTui(online, null, new ConsolePrompt(new StringReader(input), System.out)).run();
+        new BackupTui(online, archive, new ConsolePrompt(new StringReader(input), System.out)).run();
         assertEquals(1, io.github.truscdo.foldbackup.core.archive.ArchiveTarScanner.fulls(
-                io.github.truscdo.foldbackup.core.archive.ArchiveTarScanner.scan(online)).size());
+                io.github.truscdo.foldbackup.core.archive.ArchiveTarScanner.scan(archive)).size());
     }
 
     @Test
-    void menuPlacesArchiveCreationUnderOnlineBackupsAndKeepsImportEnabledWithoutOnlineRoot() throws Exception {
-        Path archive = Files.createDirectory(root.resolve("archive"));
+    void menuPlacesArchiveCreationUnderOnlineBackupsAndShowsNoDisabledEntries() throws Exception {
+        Path online = Files.createDirectory(root.resolve("online-menu"));
+        Path archive = Files.createDirectory(root.resolve("archive-menu"));
         var output = new ByteArrayOutputStream();
         PrintStream previous = System.out;
         try {
             System.setOut(new PrintStream(output, true));
-            new BackupTui(null, archive, new ConsolePrompt(new StringReader("0\n"), System.out)).run();
+            new BackupTui(online, archive, new ConsolePrompt(new StringReader("0\n"), System.out)).run();
         } finally {
             System.setOut(previous);
         }
@@ -90,20 +92,21 @@ class BackupTuiTest {
         int onlineMenu = text.indexOf("Online backups");
         int menuSeparator = text.indexOf("----------------------------------------", onlineMenu);
         int createArchive = text.indexOf("4. Create archive");
-        int createSnapshot = text.indexOf("5. Create snapshot from world [disabled]");
+        int createSnapshot = text.indexOf("5. Create snapshot from world");
         assertTrue(onlineMenu >= 0 && createArchive > onlineMenu && createArchive < createSnapshot
                 && createSnapshot < menuSeparator,
                 "snapshot and archive creation belong to the online backups menu");
         assertTrue(text.contains("7. Import into online backup"));
-        assertFalse(text.contains("7. Import into online backup [disabled]"));
         assertTrue(text.contains("8. Verify archives"));
+        assertFalse(text.contains("[disabled]"), "both roots are always configured");
     }
 
     @Test
-    void archiveOnlyAndCombinedArchiveOperationsNeverInitializeOnlineStore() throws Exception {
+    void archiveOperationsNeverInitializeOnlineStoreUntilConfirmed() throws Exception {
         Path online = Files.createDirectory(root.resolve("online"));
         Path archive = Files.createDirectory(root.resolve("archive"));
-        new BackupTui(null, archive, new ConsolePrompt(new StringReader("7\n0\n"), System.out)).run();
+        // Import cancelled at the confirmation prompt; verify an empty archive root.
+        new BackupTui(online, archive, new ConsolePrompt(new StringReader("7\n0\n"), System.out)).run();
         new BackupTui(online, archive, new ConsolePrompt(new StringReader("8\n0\n"), System.out)).run();
         try (var entries = Files.list(online)) {
             assertEquals(0, entries.count());
@@ -116,7 +119,7 @@ class BackupTuiTest {
     @Test
     void invalidInputAndExitDoNotInitializeStore() throws Exception {
         var prompt = new ConsolePrompt(new StringReader("invalid\n9\n0\n"), System.out);
-        new BackupTui(root, null, prompt).run();
+        new BackupTui(root, root, prompt).run();
         try (var entries = Files.list(root)) {
             assertEquals(0, entries.count());
         }
@@ -126,7 +129,7 @@ class BackupTuiTest {
     void selectingOnlineOperationInitializesStore() throws Exception {
         var prompt = new ConsolePrompt(new StringReader("1\n0\n"),
                 new PrintStream(new ByteArrayOutputStream()));
-        new BackupTui(root, null, prompt).run();
+        new BackupTui(root, root, prompt).run();
         try (var entries = Files.list(root)) {
             assertTrue(entries.findAny().isPresent(), "online operation must open the store");
         }

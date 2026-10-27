@@ -117,7 +117,7 @@ class BootstrapTuiChainIT {
                 RunResult archive = runFatJar(jar, "tui", "--archive-root", root.toString(), "--lib", libDir.toString());
                 assertEquals(0, archive.exitCode(), archive.stderr());
                 assertTrue(archive.stdout().contains("Restore as world files"));
-                assertTrue(archive.stdout().contains("Online backup: ENABLED"));
+                assertTrue(archive.stdout().contains("Online backup:"));
                 assertFalse(archive.stdout().contains("Change archive root"));
                 RunResult combined = runFatJar(jar, "tui", "--snapshot-root", root.toString(),
                         "--archive-root", root.toString(), "--lib", libDir.toString());

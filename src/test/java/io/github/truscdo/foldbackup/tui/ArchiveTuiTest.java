@@ -29,7 +29,7 @@ class ArchiveTuiTest {
         PrintStream previous = System.out;
         try {
             System.setOut(new PrintStream(output, true));
-            new ArchiveTui(archive, null, new ConsolePrompt(new StringReader("2\n"),
+            new ArchiveTui(archive, archive, new ConsolePrompt(new StringReader("2\n"),
                     new PrintStream(output, true))).verifyArchives();
         } finally {
             System.setOut(previous);
@@ -49,7 +49,7 @@ class ArchiveTuiTest {
         PrintStream previous = System.out;
         try {
             System.setOut(new PrintStream(output, true));
-            new ArchiveTui(archive, null, new ConsolePrompt(new StringReader("1\n"),
+            new ArchiveTui(archive, archive, new ConsolePrompt(new StringReader("1\n"),
                     new PrintStream(output, true))).verifyArchives();
         } finally {
             System.setOut(previous);
@@ -64,7 +64,7 @@ class ArchiveTuiTest {
 
         var output = new ByteArrayOutputStream();
         // Select the full, accept the default path, then cancel at the summary.
-        new ArchiveTui(archive, null, new ConsolePrompt(new StringReader("1\n\n2\n"),
+        new ArchiveTui(archive, archive, new ConsolePrompt(new StringReader("1\n\n2\n"),
                 new PrintStream(output, true))).exportArchive();
 
         assertTrue(output.toString().contains("world-export"));
@@ -72,11 +72,11 @@ class ArchiveTuiTest {
     }
 
     @Test
-    void importFallsBackToArchiveRootWhenOnlineRootIsMissing() throws Exception {
+    void importUsesOnlineRootWhenBothRootsAreTheSame() throws Exception {
         String snapshotId = "S-20260914_120000";
         writeTar(snapshotId + "[full].tar", full(100, snapshotId));
 
-        new ArchiveTui(archive, null, new ConsolePrompt(new StringReader("1\n\n"),
+        new ArchiveTui(archive, archive, new ConsolePrompt(new StringReader("1\n\n"),
                 new PrintStream(new ByteArrayOutputStream(), true))).importArchives();
 
         var imported = new io.github.truscdo.foldbackup.core.store.SnapshotStore(archive).loadSnapshot(100);
@@ -100,10 +100,10 @@ class ArchiveTuiTest {
         writeTar("full.tar", full(100, "S-20260914_120000"));
         Path target = archive.resolve("world");
         String selection = "1\n" + target + "\n1\n0\n";
-        new ArchiveTui(archive, null, new ConsolePrompt(new StringReader(selection + "2\n"), System.out))
+        new ArchiveTui(archive, archive, new ConsolePrompt(new StringReader(selection + "2\n"), System.out))
                 .exportArchive();
         assertFalse(Files.exists(target));
-        new ArchiveTui(archive, null, new ConsolePrompt(new StringReader(selection + "1\n\n"), System.out))
+        new ArchiveTui(archive, archive, new ConsolePrompt(new StringReader(selection + "1\n\n"), System.out))
                 .exportArchive();
         assertTrue(Files.isDirectory(target));
     }
