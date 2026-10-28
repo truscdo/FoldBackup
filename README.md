@@ -48,12 +48,89 @@ Automatic backups are enabled by default. The interval counts accumulated time w
 
 You can restore an entire world through the TUI or CLI.
 
-The TUI is straightforward to use. Each time a world starts, the mod creates a launcher script in that world's repository directory (`foldbackups/` on a dedicated server, `foldbackups/<world-folder-name>` in singleplayer):
+From the world's repository directory (`foldbackups/` on a dedicated server, `foldbackups/<world-folder-name>` in singleplayer), run the following commands to export the bundled runtime libraries (this avoids dependency conflicts between the mod and the CLI), then open the menu:
 
-- Windows: `foldbackup-tui.bat`
-- Linux or an environment with Bash: `foldbackup-tui.sh`
+```bash
+# Dedicated server: foldbackups/
+java -jar ../mods/foldbackup-0.1.0.jar extract
+java -jar ../mods/foldbackup-0.1.0.jar tui
 
-Run the script to open the TUI. It locates the JAR, prepares the runtime libraries, and starts the menu. Select "Export as Minecraft World," choose a snapshot, output type, and output path, then confirm. This creates a world at the selected snapshot's point in time, which you can use to replace the existing world as needed.
+# Singleplayer: foldbackups/<world-folder-name>
+java -jar ../../mods/foldbackup-0.1.0.jar extract
+java -jar ../../mods/foldbackup-0.1.0.jar tui
+```
+
+Select "Export as Minecraft World," choose a snapshot, output type, and output path, then confirm. This creates a world at the selected snapshot's point in time, which you can use to replace the existing world as needed.
+
+### Quick Start the TUI
+
+If you prefer a launcher, save one of the scripts below into the repository directory as `foldbackup-tui.bat` or `foldbackup-tui.sh` (then `chmod +x` it on Linux). The script looks for the JAR beside itself, then in `../mods`, then in `../../mods`, so the default server and singleplayer layouts work without edits.
+
+`foldbackup-tui.bat`:
+
+```bat
+@echo off
+setlocal DisableDelayedExpansion
+set "SCRIPT_DIR=%~dp0"
+set "JAR="
+call :find "%SCRIPT_DIR%."
+call :find "%SCRIPT_DIR%..\mods"
+call :find "%SCRIPT_DIR%..\..\mods"
+if not defined JAR (
+    echo Error: foldbackup jar not found beside this script, in ..\mods, or in ..\..\mods.
+    pause
+    exit /b 1
+)
+java -jar "%JAR%" extract --output "%SCRIPT_DIR%.foldbackup-cli"
+if errorlevel 1 (
+    echo Error: failed to export bundled libraries ^(read-only repository directory?^).
+    pause
+    exit /b 1
+)
+java -jar "%JAR%" tui --snapshot-root "%SCRIPT_DIR%." --archive-root "%SCRIPT_DIR%." --lib "%SCRIPT_DIR%.foldbackup-cli"
+set "RESULT=%ERRORLEVEL%"
+if not "%RESULT%"=="0" pause
+exit /b %RESULT%
+
+:find
+if defined JAR exit /b 0
+if exist "%~1\foldbackup.jar" set "JAR=%~1\foldbackup.jar"
+if defined JAR exit /b 0
+for %%f in ("%~1\foldbackup-*.jar") do if not defined JAR if exist "%%~ff" set "JAR=%%~ff"
+exit /b 0
+```
+
+`foldbackup-tui.sh`:
+
+```sh
+#!/bin/sh
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+JAR=
+for dir in "$SCRIPT_DIR" "$SCRIPT_DIR/../mods" "$SCRIPT_DIR/../../mods"; do
+    if [ -f "$dir/foldbackup.jar" ]; then
+        JAR="$dir/foldbackup.jar"
+        break
+    fi
+    for candidate in "$dir"/foldbackup-*.jar; do
+        if [ -f "$candidate" ]; then
+            JAR="$candidate"
+            break
+        fi
+    done
+    if [ -n "$JAR" ]; then
+        break
+    fi
+done
+if [ -z "$JAR" ]; then
+    echo "Error: foldbackup jar not found beside this script, in ../mods, or in ../../mods." >&2
+    exit 1
+fi
+java -jar "$JAR" extract --output "$SCRIPT_DIR/.foldbackup-cli" || {
+    echo "Error: failed to export bundled libraries (read-only repository directory?)." >&2
+    exit 1
+}
+exec java -jar "$JAR" tui --snapshot-root "$SCRIPT_DIR" --archive-root "$SCRIPT_DIR" --lib "$SCRIPT_DIR/.foldbackup-cli"
+```
 
 ### Roll Back a Chunk
 
@@ -65,13 +142,7 @@ To roll back a chunk in game, use `/foldbackup rollback chunk <x> <z> [snapshot-
 
 For the CLI examples below, assume the current directory is `foldbackups` and the server world directory is its sibling, `world`. If you run the commands elsewhere, adjust the JAR, world, and snapshot paths accordingly. You can also specify the snapshot directory with `--snapshot-root <directory>`. In singleplayer the repository is `foldbackups/<world-folder-name>`, so point `--snapshot-root` at that directory. **Stop the server before performing an offline rollback.**
 
-Before using the CLI for the first time, extract the runtime libraries bundled in the JAR. This avoids dependency conflicts between the mod and CLI:
-
-```bash
-java -jar ../mods/foldbackup-0.1.0.jar extract
-```
-
-You can then use the other commands. List the snapshots:
+List the snapshots:
 
 ```bash
 java -jar ../mods/foldbackup-0.1.0.jar snapshot list
@@ -95,7 +166,7 @@ The TUI is also recommended for archive operations. Archives are created from sn
 
 In the TUI, select the option to create an archive, then choose a snapshot and compression level. To create a differential archive, also select a snapshot to use as its base.
 
-An archive can be restored as a Minecraft world or imported as a snapshot into a snapshot repository. If you distribute a world using archives, you can package the mod and TUI launcher script with them.
+An archive can be restored as a Minecraft world or imported as a snapshot into a snapshot repository. If you distribute a world using archives, you can package the mod and TUI launcher script with them (the script content is shown earlier in this README).
 
 The archive format is independent of the Minecraft version. You can use the CLI or TUI to compress worlds from versions that the mod does not support.
 
@@ -142,7 +213,7 @@ Configuration is managed through NeoForge's SERVER configuration system. Names i
 
 For environment setup, test commands, and report locations, see the [Build and Test Guide](doc/构建与测试指南.md) (Chinese).
 
-`./gradlew jar` produces `foldbackup-<version>.jar`. Adding `-PjarNoScripts` (or running the `jarNoScripts` task) also produces `foldbackup-<version>-noscripts.jar`, which omits the TUI launcher script templates and the script injection code, so it never writes launcher scripts into the repository directory.
+`./gradlew jar` produces `foldbackup-<version>.jar`. The JAR contains no TUI launcher script templates or script injection code, so it never writes launcher scripts into the repository directory.
 
 ## License and Acknowledgments
 

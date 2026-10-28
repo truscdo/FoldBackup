@@ -48,12 +48,89 @@ FoldBackup 是面向 Minecraft NeoForge 服务端的世界备份工具，支持�
 
 回档整个游戏存档可以使用TUI或者CLI。
 
-TUI的使用较为简单，每次世界启动时都会在该世界的仓库目录生成启动脚本（专用服务器为 `foldbackups/`，单机为 `foldbackups/<存档目录名>`）：
+在该世界的仓库目录（专用服务器为 `foldbackups/`，单机为 `foldbackups/<存档目录名>`）执行以下命令，先导出随 JAR 打包的运行库（这个设计是为了避免mod与CLI的依赖冲突），再启动菜单：
 
-- Windows：`foldbackup-tui.bat`
-- Linux／支持 Bash 的环境：`foldbackup-tui.sh`
+```bash
+# 服务器 foldbackups/
+java -jar ../mods/foldbackup-0.1.0.jar extract
+java -jar ../mods/foldbackup-0.1.0.jar tui
 
-运行即可打开TUI，脚本会自动定位 JAR、准备运行库并启动菜单。在菜单中选择“导出为游戏存档”，选择快照、输出形式和输出路径，再确认执行即可获得对应快照时间的游戏存档，然后可以根据需要对游戏存档进行替换。
+# 单机 foldbackups/<存档目录名>
+java -jar ../../mods/foldbackup-0.1.0.jar extract
+java -jar ../../mods/foldbackup-0.1.0.jar tui
+```
+
+在菜单中选择“导出为游戏存档”，选择快照、输出形式和输出路径，再确认执行即可获得对应快照时间的游戏存档，然后可以根据需要对游戏存档进行替换。
+
+### 快速启动TUI
+
+如果希望少敲命令，可以把下面的脚本另存到仓库目录，命名为 `foldbackup-tui.bat` 或 `foldbackup-tui.sh`（Linux 下需 `chmod +x`）。脚本会依次在自身所在目录、`../mods`、`../../mods` 中查找 JAR。
+
+`foldbackup-tui.bat`：
+
+```bat
+@echo off
+setlocal DisableDelayedExpansion
+set "SCRIPT_DIR=%~dp0"
+set "JAR="
+call :find "%SCRIPT_DIR%."
+call :find "%SCRIPT_DIR%..\mods"
+call :find "%SCRIPT_DIR%..\..\mods"
+if not defined JAR (
+    echo Error: foldbackup jar not found beside this script, in ..\mods, or in ..\..\mods.
+    pause
+    exit /b 1
+)
+java -jar "%JAR%" extract --output "%SCRIPT_DIR%.foldbackup-cli"
+if errorlevel 1 (
+    echo Error: failed to export bundled libraries ^(read-only repository directory?^).
+    pause
+    exit /b 1
+)
+java -jar "%JAR%" tui --snapshot-root "%SCRIPT_DIR%." --archive-root "%SCRIPT_DIR%." --lib "%SCRIPT_DIR%.foldbackup-cli"
+set "RESULT=%ERRORLEVEL%"
+if not "%RESULT%"=="0" pause
+exit /b %RESULT%
+
+:find
+if defined JAR exit /b 0
+if exist "%~1\foldbackup.jar" set "JAR=%~1\foldbackup.jar"
+if defined JAR exit /b 0
+for %%f in ("%~1\foldbackup-*.jar") do if not defined JAR if exist "%%~ff" set "JAR=%%~ff"
+exit /b 0
+```
+
+`foldbackup-tui.sh`：
+
+```sh
+#!/bin/sh
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+JAR=
+for dir in "$SCRIPT_DIR" "$SCRIPT_DIR/../mods" "$SCRIPT_DIR/../../mods"; do
+    if [ -f "$dir/foldbackup.jar" ]; then
+        JAR="$dir/foldbackup.jar"
+        break
+    fi
+    for candidate in "$dir"/foldbackup-*.jar; do
+        if [ -f "$candidate" ]; then
+            JAR="$candidate"
+            break
+        fi
+    done
+    if [ -n "$JAR" ]; then
+        break
+    fi
+done
+if [ -z "$JAR" ]; then
+    echo "Error: foldbackup jar not found beside this script, in ../mods, or in ../../mods." >&2
+    exit 1
+fi
+java -jar "$JAR" extract --output "$SCRIPT_DIR/.foldbackup-cli" || {
+    echo "Error: failed to export bundled libraries (read-only repository directory?)." >&2
+    exit 1
+}
+exec java -jar "$JAR" tui --snapshot-root "$SCRIPT_DIR" --archive-root "$SCRIPT_DIR" --lib "$SCRIPT_DIR/.foldbackup-cli"
+```
 
 ### 区块回档
 
@@ -66,14 +143,6 @@ TUI的使用较为简单，每次世界启动时都会在该世界的仓库目�
 游戏内回档可使用`/foldbackup rollback chunk <x> <z> [快照ID]`，也可以用`/foldbackup rollback chunk in <维度> <x> <z> [快照ID]`指定维度。目标区块必须已经加载到内存中；未加载的区块请使用下面的CLI离线回档方式。省略快照ID时使用最新快照。
 
 当需要使用CLI回档时，以下示例假设当前目录为 `foldbackups`，且服务端存档目录为同级的 `world`。如果在其它目录执行，需要相应调整JAR、存档和快照目录路径；也可以用 `--snapshot-root <目录>` 指定快照目录。单机存档的仓库位于 `foldbackups/<存档目录名>`，需要把 `--snapshot-root` 指向该目录。离线回档前必须先关闭服务端。
-
-首次使用CLI时，需要先提取随 JAR 打包的运行库，这个设计是为了避免mod与CLI的依赖冲突：
-
-```bash
-java -jar ../mods/foldbackup-0.1.0.jar extract
-```
-
-运行完毕后即可使用其它命令。
 
 列出快照：
 
@@ -99,7 +168,7 @@ CLI会恢复目标区块的地形、方块实体及可恢复的实体数据，�
 
 在TUI中选择创建归档选项，选择对应的快照和压缩级别等信息即可创建归档；如果希望创建差分归档，额外选择一个快照作为基础即可。
 
-归档可以恢复为游戏存档或者快照仓库的快照，作为存档分发方案时，可以将mod与tui启动脚本一起打包。
+归档可以恢复为游戏存档或者快照仓库的快照，作为存档分发方案时，可以将mod与tui启动脚本一起打包（脚本内容见本说明）。
 
 归档格式与游戏版本无关，对于mod不支持的版本，也可以使用CLI或者TUI进行压缩。
 
@@ -146,7 +215,7 @@ CLI会恢复目标区块的地形、方块实体及可恢复的实体数据，�
 
 完整环境准备、测试命令及报告位置见 [构建与测试指南](../构建与测试指南.md)。
 
-`./gradlew jar` 产出 `foldbackup-<version>.jar`。追加 `-PjarNoScripts`（或运行 `jarNoScripts` 任务）会额外产出 `foldbackup-<version>-noscripts.jar`：该变体不含 TUI 启动脚本模板与脚本注入实现，运行时不会在仓库目录写出启动脚本。
+`./gradlew jar` 产出 `foldbackup-<version>.jar`。该 JAR 不含 TUI 启动脚本模板或脚本注入实现，运行时不会向仓库目录写出任何启动脚本。
 
 ## 许可证与致谢
 

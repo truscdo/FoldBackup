@@ -103,8 +103,7 @@ public class FoldBackupMod {
         }
 
         WorldRuntime created = new WorldRuntime(server, baseRoot, worldSavePath,
-                server.isDedicatedServer(), config,
-                FMLPaths.GAMEDIR.get().resolve("mods"), taskRegistry);
+                server.isDedicatedServer(), config, taskRegistry);
         synchronized (this) {
             runtime = created;
         }

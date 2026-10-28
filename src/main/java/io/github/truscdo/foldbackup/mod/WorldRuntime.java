@@ -1,7 +1,6 @@
 package io.github.truscdo.foldbackup.mod;
 
 import io.github.truscdo.foldbackup.core.LogUtil;
-import io.github.truscdo.foldbackup.core.StartupScriptInstaller;
 import io.github.truscdo.foldbackup.core.backup.BackupContext;
 import io.github.truscdo.foldbackup.core.backup.BackupCoordinator;
 import io.github.truscdo.foldbackup.core.backup.RegionProcessor;
@@ -38,8 +37,8 @@ import java.util.concurrent.TimeUnit;
  * 此时 {@link #snapshotStore()} 与 {@link #blobStore()} 为 {@code null}，备份执行器
  * 返回 {@code NOT_INITIALIZED}，世界仍可正常进入。
  * <p>
- * 不引用 NeoForge 类型（mods 目录由调用方传入），但依赖 Minecraft 服务器对象，
- * 因此不纳入单元测试；路径规则见 {@link RepositoryLayout}。
+ * 不引用 NeoForge 类型，但依赖 Minecraft 服务器对象，因此不纳入单元测试；
+ * 路径规则见 {@link RepositoryLayout}。
  */
 public final class WorldRuntime {
 
@@ -69,11 +68,10 @@ public final class WorldRuntime {
      * @param worldSavePath   世界存档根目录
      * @param dedicatedServer 是否为专用服务器
      * @param config          配置
-     * @param modsDirectory   mods 目录（启动脚本的 JAR 搜索路径）
      * @param taskRegistry    共享的任务注册表
      */
     public WorldRuntime(MinecraftServer server, Path baseRoot, Path worldSavePath, boolean dedicatedServer,
-            FoldBackupConfig config, Path modsDirectory, TaskRegistry taskRegistry) {
+            FoldBackupConfig config, TaskRegistry taskRegistry) {
         this.server = server;
         this.worldSavePath = worldSavePath;
         this.repoRoot = RepositoryLayout.repoRoot(baseRoot, worldSavePath, dedicatedServer);
@@ -86,7 +84,6 @@ public final class WorldRuntime {
         try {
             // 仓库级副作用：只作用于本仓库，避免清理到其它存档的 .wip
             new BlobMaintenance(repoRoot).cleanupWipFiles();
-            StartupScriptInstaller.install(repoRoot, modsDirectory);
             blobStore = new BlobStore(repoRoot, config.getCompressionLevel());
             snapshotStore = new SnapshotStore(repoRoot);
         } catch (IOException | RuntimeException e) {

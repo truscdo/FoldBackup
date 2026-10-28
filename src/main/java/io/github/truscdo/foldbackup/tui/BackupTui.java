@@ -22,7 +22,7 @@ import java.util.function.Consumer;
  * 交互式 TUI（终端用户界面），用于备份管理。
  * <p>
  * 提供编号菜单界面，用于列出和导出快照，无需记住 CLI 参数。
- * 设计通过 {@code foldbackup-tui.bat} 或 {@code foldbackup-tui.sh} 脚本启动。
+ * 可由用户按 README 提供的内容创建启动脚本，或直接运行 {@code tui} 子命令。
  * <p>
  * 两个根目录（在线备份根与归档根）均由调用方显式指定且不允许为空，
  * 仓库在选择操作后才初始化。

@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Bootstrap 整链集成测试：真实 fat jar（{@code Main-Class = Bootstrap}，
- * 内嵌 {@code META-INF/jarjar/*.jar}）按启动脚本的两步式路径走通：
+ * 内嵌 {@code META-INF/jarjar/*.jar}）按 README 启动脚本的两步式路径走通：
  * <ol>
  * <li>{@code extract --output <lib-dir>} — 嵌套库释放到调用方指定目录
  * （幂等：重复执行报 already exported）；</li>
