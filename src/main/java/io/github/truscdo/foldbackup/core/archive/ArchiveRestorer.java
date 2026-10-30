@@ -97,10 +97,12 @@ public class ArchiveRestorer {
         progress.stage("Reading archive", diffTar == null ? 1 : 2);
         progress.done(fullTar.getFileName().toString());
         if (diffTar != null) progress.done(diffTar.getFileName().toString());
-        try (var plan = ArchiveRestorePlan.open(fullTar, diffTar);
+        TarIndex diff = diffTar == null ? null : TarIndex.read(diffTar);
+        try (var base = new ArchiveBaseline(fullTar);
+                var plan = ArchiveRestorePlan.open(base, diff == null ? base.meta() : diff.snapshot("diff"), diff);
                 var staged = new ArchiveTemporaryDirectory()) {
             progress.stage("Restoring files", plan.files().size());
-            for (var file : plan.files().values()) try (InputStream raw = file.object().open();
+            for (var file : plan.files().values()) try (InputStream raw = file.source().open();
                     InputStream in = new com.github.luben.zstd.ZstdInputStream(raw)) {
                 progress.current(file.path());
                 WorldRestoreSupport.writeFile(staged.path, file.path(), file.sizeUncompressed(), file.sourceHash(), in);

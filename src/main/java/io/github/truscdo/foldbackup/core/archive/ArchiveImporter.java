@@ -11,28 +11,33 @@ import io.github.truscdo.foldbackup.core.store.SnapshotManifest;
 import io.github.truscdo.foldbackup.core.format.LrhFormat;
 import io.github.truscdo.foldbackup.core.format.RegionStream;
 
+import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 /**
  * Archive importer: archives → online system (disaster recovery
  * after index.db / BlobStore loss).
  * <p>
- * Imports <b>all</b> archive tars (full + diff) in epoch-ascending order so each
- * differential archive's full baseline is available before it is applied.
+ * Archives are scanned once and processed in epoch-ascending order, so every
+ * differential archive's baseline snapshot is already online when its turn comes.
+ * The differential baseline is the online snapshot, never the full archive: the full
+ * archive's objects already landed in the blob store byte for byte, so reading it again
+ * would only be a second read of the same bytes.
  * <p>
- * Full and differential archives preserve the region and file content
- * identities and source metadata. Referenced objects are imported once into
- * the online content-addressed blob store.
+ * Region and file content identities and source metadata are preserved. Objects are
+ * imported once into the content-addressed blob store; an object whose blob already
+ * exists is reused without being read or verified.
  */
 public class ArchiveImporter {
 
@@ -79,48 +84,35 @@ public class ArchiveImporter {
             throw new IOException("Archive root not found: " + archiveRoot);
         }
         progress.stage("Scanning archives", 1);
-        // Enumerate all tars (full + diff), read snapshot.bin, sort by epoch
-        List<TarInfo> tars = new ArrayList<>();
-        List<String> errors = new ArrayList<>();
-        try (var stream = Files.list(archiveRoot)) {
-            for (Path p : (Iterable<Path>) stream::iterator) {
-                if (!p.getFileName().toString().endsWith(".tar")) {
-                    continue;
-                }
-                try {
-                    ArchiveSnapshot meta = readSnapshot(p);
-                    if (meta == null) errors.add(p.getFileName() + ": snapshot.bin is missing");
-                    else tars.add(new TarInfo(p, meta));
-                } catch (IOException | RuntimeException e) {
-                    errors.add(p.getFileName() + ": " + e.getMessage());
-                }
-            }
+        ArchiveLibrary library = ArchiveLibrary.scan(archiveRoot);
+        for (String warning : library.warnings()) {
+            System.out.println("Warning: " + warning);
         }
-        tars.sort(Comparator.comparingLong(t -> t.meta.epoch));
         progress.done("archives");
 
-        var snapshotManager = new SnapshotStore(backupRoot);
-        var blobStore = new BlobStore(backupRoot, 6);
+        var snapshots = new SnapshotStore(backupRoot);
+        var blobs = new BlobStore(backupRoot, ArchiveDefaults.RESTORE_LEVEL);
+        List<String> errors = new ArrayList<>(library.errors());
 
-        try (SnapshotStore.WriteSession ignored = snapshotManager.beginWrite()) {
+        try (SnapshotStore.WriteSession ignored = snapshots.beginWrite()) {
             int imported = 0;
-            progress.stage("Importing snapshots", tars.size());
-            for (TarInfo t : tars) {
-                String id;
-                String item = t.meta.sourceSnapshotId != null
-                        ? t.meta.sourceSnapshotId
-                        : t.tar.getFileName().toString();
+            progress.stage("Importing snapshots", library.entries().size());
+            for (ArchiveLibrary.Entry entry : library.entries()) {
+                String item = entry.meta().sourceSnapshotId != null
+                        ? entry.meta().sourceSnapshotId
+                        : entry.fileName();
                 try {
-                    if (t.meta.isFull()) {
-                        id = importFull(t.tar, snapshotManager, blobStore, listener);
-                    } else if (t.meta.isDiff()) {
-                        id = importDiff(t.tar, t.meta, snapshotManager, blobStore, listener);
+                    String id;
+                    if (entry.meta().isFull()) {
+                        id = importFull(entry, snapshots, blobs, listener);
+                    } else if (entry.meta().isDiff()) {
+                        id = importDiff(entry, snapshots, blobs, listener);
                     } else {
-                        throw new IOException("unsupported archive type: " + t.meta.type);
+                        throw new IOException("unsupported archive type: " + entry.meta().type);
                     }
                     if (id != null) imported++;
                 } catch (IOException | RuntimeException e) {
-                    errors.add(t.tar.getFileName() + ": " + e.getMessage());
+                    errors.add(entry.fileName() + ": " + e.getMessage());
                 } finally {
                     progress.done(item);
                 }
@@ -133,194 +125,148 @@ public class ArchiveImporter {
         }
     }
 
-    /** A archive tar plus its parsed snapshot.bin. */
-    private static final class TarInfo {
-        final Path tar;
-        final ArchiveSnapshot meta;
-
-        TarInfo(Path tar, ArchiveSnapshot meta) {
-            this.tar = tar;
-            this.meta = meta;
-        }
-    }
-
     /**
-     * Import one full archive tar. Skips if the snapshot epoch already exists.
+     * Import one full archive. The archive itself is the baseline, and its objects are
+     * copied into the blob store unless the blob already exists.
      *
-     * @return imported snapshot id, or null if skipped
+     * @return imported snapshot id, or null if the identical snapshot already exists
      */
-    private String importFull(Path tar, SnapshotStore snapshotManager, BlobStore blobStore,
+    private String importFull(ArchiveLibrary.Entry entry, SnapshotStore snapshots, BlobStore blobs,
             ProgressListener listener) throws IOException {
-        ArchiveSnapshot meta = readSnapshot(tar);
-        if (meta == null || !"full".equals(meta.type)) {
-            System.out.println("Skip " + tar.getFileName() + " (not a full archive)");
-            return null;
-        }
-        try (var plan = ArchiveRestorePlan.open(tar, null)) {
-            return importPlan(plan, false, snapshotManager, blobStore,
-                    new ProgressTracker(listener));
+        ArchiveSnapshot meta = entry.meta();
+        var progress = new ProgressTracker(listener);
+        if (alreadyImported(entry, snapshots, progress)) return null;
+        try (var base = new ArchiveBaseline(entry.tar());
+                var plan = ArchiveRestorePlan.open(base, meta, null)) {
+            return importPlan(plan, meta, false, snapshots, blobs, progress);
         }
     }
 
     /**
-     * Import one diff backup tar: reuse unchanged baseline blobs and merge changed
-     * regions from the full and diff archives.
-     * Skips if the snapshot epoch already exists, the baseline full archive is
-     * missing, or the baseline full has not been imported yet.
+     * Import one diff archive against its online baseline snapshot. The full archive is
+     * never opened: unchanged Regions and files are reused from the blob store, changed
+     * ones are rebuilt from the diff payloads (and, for split Regions, the baseline blob).
      *
-     * @return imported snapshot id, or null if skipped
+     * @return imported snapshot id, or null if the identical snapshot already exists
      */
-    private String importDiff(Path diffTar, ArchiveSnapshot meta, SnapshotStore snapshotManager,
-            BlobStore blobStore, ProgressListener listener) throws IOException {
-        // Baseline full archive must exist in the archive root and be imported first
-        Path fullTar;
-        try {
-            fullTar = findFullTar(meta.baseEpoch);
-        } catch (IOException e) {
+    private String importDiff(ArchiveLibrary.Entry entry, SnapshotStore snapshots, BlobStore blobs,
+            ProgressListener listener) throws IOException {
+        ArchiveSnapshot meta = entry.meta();
+        var progress = new ProgressTracker(listener);
+        if (alreadyImported(entry, snapshots, progress)) return null;
+        SnapshotManifest baseline = snapshots.loadSnapshot(meta.baseEpoch);
+        if (baseline == null) {
             String expected = ArchiveCreator.fullTarName(SnapshotStore.generateSnapshotId(meta.baseEpoch));
-            throw new IOException("required baseline full archive " + expected
-                    + " is missing for epoch " + meta.baseEpoch, e);
-        }
-        if (!Files.isRegularFile(fullTar)) {
-            throw new IOException("required baseline full archive not found: " + fullTar.getFileName());
-        }
-        ArchiveSnapshot baseMeta = readSnapshot(fullTar);
-        SnapshotManifest baseSnapshot = baseMeta == null ? null
-                : snapshotManager.loadSnapshot(meta.baseEpoch);
-        if (baseSnapshot == null) {
             throw new IOException("required baseline snapshot is not available in the online store: "
-                    + SnapshotStore.generateSnapshotId(meta.baseEpoch));
+                    + SnapshotStore.generateSnapshotId(meta.baseEpoch) + " (import " + expected + " first)");
         }
-        ArchiveVerifier.Result verification = new ArchiveVerifier().verifyArchive(archiveRoot, diffTar);
-        if (!verification.ok())
-            throw new IOException("archive or required baseline failed verification: "
-                    + String.join("; ", verification.errors));
-        try (var plan = ArchiveRestorePlan.open(fullTar, diffTar)) {
-            return importPlan(plan, true, snapshotManager, blobStore,
-                    new ProgressTracker(listener));
+        TarIndex diff = TarIndex.read(entry.tar());
+        try (var base = new SnapshotBaseline(baseline, blobs);
+                var plan = ArchiveRestorePlan.open(base, meta, diff)) {
+            return importPlan(plan, meta, true, snapshots, blobs, progress);
         }
     }
 
-    private String importPlan(ArchiveRestorePlan plan, boolean merged, SnapshotStore snapshots,
-            BlobStore blobs, ProgressTracker progress)
+    /**
+     * Skips an archive whose snapshot is already online and identical. Comparison uses the
+     * snapshot's content identity and source metadata; {@code tags} are carried but never
+     * decide a conflict.
+     *
+     * @return true when the archive can be skipped
+     */
+    private boolean alreadyImported(ArchiveLibrary.Entry entry, SnapshotStore snapshots, ProgressTracker progress)
             throws IOException {
-        progress.stage("Importing regions", plan.regions.size());
-        List<RegionEntry> regions;
-        if (!merged) {
-            regions = ArchiveTasks.run(plan.regions.size(),
-                    ArchiveTasks.decompressQuota(plan.regions.size(), plan.maxSourceFrameLevel(), threads), 2,
-                    index -> importRegionObject(plan.regions.get(index), blobs),
-                    index -> progress.done(plan.regions.get(index).path()), metrics);
-        } else {
-            RegionEntry[] imported = new RegionEntry[plan.regions.size()];
-            Set<Integer> missing = new LinkedHashSet<>();
-            for (int i = 0; i < plan.regions.size(); i++) {
-                var region = plan.regions.get(i);
-                if (blobs.exists(region.contentHash(), "lrh")) {
-                    String path = blobs.getRelativePath(region.contentHash(), "lrh");
-                    imported[i] = new RegionEntry(region.path(), region.contentHash(), path, blobs.size(path),
-                            region.sizeUncompressed(), region.sourceMetadata());
-                } else missing.add(i);
-            }
-            progress.stage("Merging missing regions", missing.size());
-            List<RegionEntry> processed = plan.runRegions(
-                    ArchiveTasks.TaskWork.recompress(ArchiveDefaults.RESTORE_LEVEL), threads, metrics,
-                    missing::contains, index -> progress.done(plan.regions.get(index).path()), (index, source) -> {
-                        var region = plan.regions.get(index);
-                        try (var session = blobs.newWriteSession()) {
-                            var summary = LrhFormat.write(session.channel(), source, ArchiveDefaults.RESTORE_LEVEL);
-                            String actualHash = HashUtil.bytesToHex(summary.hash());
-                            if (!region.contentHash().equals(actualHash))
-                                throw new IOException("Merged Region identity mismatch: " + region.path());
-                            var commit = session.commit(actualHash, "lrh");
-                            return new RegionEntry(region.path(), actualHash, commit.path(), commit.size(),
-                                    region.sizeUncompressed(), region.sourceMetadata());
-                        }
-                    });
-            for (int i : missing) {
-                imported[i] = processed.get(i);
-                if (imported[i] == null) throw new IOException("Missing imported Region: " + plan.regions.get(i).path());
-            }
-            regions = List.of(imported);
+        ArchiveSnapshot meta = entry.meta();
+        SnapshotManifest existing = snapshots.loadSnapshot(meta.epoch);
+        if (existing == null) return false;
+        String id = SnapshotStore.generateSnapshotId(meta.epoch);
+        if (!sameTarget(existing, meta)) {
+            throw new IOException("snapshot " + id + " already exists with different content"
+                    + " (archive: " + entry.fileName() + ")");
         }
+        System.out.println("Skipped " + id + " (identical snapshot already exists)");
+        progress.stage("Committing snapshot", 1);
+        progress.done(id);
+        return true;
+    }
+
+    private String importPlan(ArchiveRestorePlan plan, ArchiveSnapshot meta, boolean merged,
+            SnapshotStore snapshots, BlobStore blobs, ProgressTracker progress) throws IOException {
+        progress.stage("Importing regions", plan.regions.size());
+        List<RegionEntry> regions = merged
+                ? importMergedRegions(plan, blobs, progress)
+                : importRegionObjects(plan, blobs, progress);
         List<FileEntry> files = importFiles(plan, blobs, progress);
         progress.stage("Committing snapshot", 1);
-        SnapshotManifest manifest = buildManifest(plan.meta, regions, files);
-        SnapshotManifest existing = snapshots.loadSnapshot(plan.meta.epoch);
-        if (existing != null) {
-            if (!sameSnapshot(existing, manifest))
-                throw new IOException("Snapshot ID conflict: existing content differs for "
-                        + manifest.getSnapshotId());
-            System.out.println("Skipped " + manifest.getSnapshotId() + " (identical snapshot already exists)");
-            progress.done(manifest.getSnapshotId());
-            return null;
-        }
+        SnapshotManifest manifest = buildManifest(meta, regions, files);
         snapshots.saveSnapshot(manifest);
         progress.done(manifest.getSnapshotId());
         System.out.println("Imported " + manifest.getSnapshotId() + " (source: "
-                + plan.meta.sourceSnapshotId + ", epoch: " + plan.meta.epoch + "; " + regions.size()
+                + meta.sourceSnapshotId + ", epoch: " + meta.epoch + "; " + regions.size()
                 + " regions, " + files.size() + " files)");
         return manifest.getSnapshotId();
     }
 
-    private static boolean sameSnapshot(SnapshotManifest left, SnapshotManifest right) {
-        if (!java.util.Objects.equals(left.getSnapshotId(), right.getSnapshotId())
-                || left.getEpochSeconds() != right.getEpochSeconds()
-                || !java.util.Objects.equals(left.getWorldName(), right.getWorldName())
-                || !java.util.Objects.equals(left.getMinecraftVersion(), right.getMinecraftVersion())
-                || left.getWorldVersion() != right.getWorldVersion()
-                || !java.util.Objects.equals(left.getTags(), right.getTags())) return false;
-        Map<String, RegionEntry> leftRegions = new HashMap<>();
-        if (left.getRegions() != null) for (RegionEntry region : left.getRegions())
-            leftRegions.put(region.getFilename(), region);
-        if (right.getRegions() == null || leftRegions.size() != right.getRegions().size()) return false;
-        for (RegionEntry region : right.getRegions()) {
-            RegionEntry found = leftRegions.get(region.getFilename());
-            if (found == null || !java.util.Objects.equals(found.getContentHash(), region.getContentHash())
-                    || found.getSizeUncompressed() != region.getSizeUncompressed()
-                    || !java.util.Objects.equals(found.getSourceMetadata(), region.getSourceMetadata())) return false;
+    /** Whole-archive Region objects: reuse the blob when present, otherwise copy and verify. */
+    private List<RegionEntry> importRegionObjects(ArchiveRestorePlan plan, BlobStore blobs, ProgressTracker progress)
+            throws IOException {
+        return ArchiveTasks.run(plan.regions.size(),
+                ArchiveTasks.decompressQuota(plan.regions.size(), plan.maxSourceFrameLevel(), threads), 2,
+                index -> importRegionObject(plan.regions.get(index), blobs),
+                index -> progress.done(plan.regions.get(index).path()), metrics);
+    }
+
+    /** Diff import: only Regions whose target blob is absent are merged. */
+    private List<RegionEntry> importMergedRegions(ArchiveRestorePlan plan, BlobStore blobs, ProgressTracker progress)
+            throws IOException {
+        RegionEntry[] imported = new RegionEntry[plan.regions.size()];
+        Set<Integer> missing = new LinkedHashSet<>();
+        for (int i = 0; i < plan.regions.size(); i++) {
+            var region = plan.regions.get(i);
+            if (blobs.exists(region.contentHash(), "lrh")) {
+                String path = blobs.getRelativePath(region.contentHash(), "lrh");
+                imported[i] = new RegionEntry(region.path(), region.contentHash(), path, blobs.size(path),
+                        region.sizeUncompressed(), region.sourceMetadata());
+            } else {
+                missing.add(i);
+            }
         }
-        Map<String, FileEntry> leftFiles = new HashMap<>();
-        if (left.getExtraFiles() != null) for (FileEntry file : left.getExtraFiles())
-            leftFiles.put(file.getFilename(), file);
-        if (right.getExtraFiles() == null || leftFiles.size() != right.getExtraFiles().size()) return false;
-        for (FileEntry file : right.getExtraFiles()) {
-            FileEntry found = leftFiles.get(file.getFilename());
-            if (found == null || !java.util.Objects.equals(found.getSourceHash(), file.getSourceHash())
-                    || found.getSizeUncompressed() != file.getSizeUncompressed()
-                    || !java.util.Objects.equals(found.getSourceMetadata(), file.getSourceMetadata())) return false;
+        progress.stage("Merging missing regions", missing.size());
+        List<RegionEntry> processed = plan.runRegions(
+                ArchiveTasks.TaskWork.recompress(ArchiveDefaults.RESTORE_LEVEL), threads, metrics,
+                missing::contains, index -> progress.done(plan.regions.get(index).path()), (index, source) -> {
+                    var region = plan.regions.get(index);
+                    try (var session = blobs.newWriteSession()) {
+                        var summary = LrhFormat.write(session.channel(), source, ArchiveDefaults.RESTORE_LEVEL);
+                        String actualHash = HashUtil.bytesToHex(summary.hash());
+                        if (!region.contentHash().equals(actualHash))
+                            throw new IOException("Merged Region identity mismatch: " + region.path());
+                        var commit = session.commit(actualHash, "lrh");
+                        return new RegionEntry(region.path(), actualHash, commit.path(), commit.size(),
+                                region.sizeUncompressed(), region.sourceMetadata());
+                    }
+                });
+        for (int i : missing) {
+            imported[i] = processed.get(i);
+            if (imported[i] == null) throw new IOException("Missing imported Region: " + plan.regions.get(i).path());
         }
-        return true;
+        return List.of(imported);
     }
 
     private RegionEntry importRegionObject(ArchiveRestorePlan.Region region, BlobStore blobs) throws IOException {
-        TarIndex.Entry object = region.base();
-        if (object == null) throw new IOException("Missing Region object: " + region.path());
         String blobPath = blobs.getRelativePath(region.contentHash(), "lrh");
         if (blobs.exists(region.contentHash(), "lrh")) {
-            RegionStream.Summary summary;
-            try (InputStream input = object.open()) {
-                summary = LrhFormat.read(input, object.size(), new RegionStream.Accumulator());
-            }
-            if (!region.contentHash().equals(HashUtil.bytesToHex(summary.hash())))
-                throw new IOException("Region object identity mismatch: " + region.path());
+            // Read-time verification: an object that is not read is not verified.
             return new RegionEntry(region.path(), region.contentHash(), blobPath, blobs.size(blobPath),
                     region.sizeUncompressed(), region.sourceMetadata());
         }
-        try (var session = blobs.newWriteSession(); InputStream input = object.open()) {
-            InputStream tee = new java.io.FilterInputStream(input) {
-                @Override public int read() throws IOException {
-                    int value = in.read();
-                    if (value >= 0) session.output().write(value);
-                    return value;
-                }
-                @Override public int read(byte[] bytes, int off, int len) throws IOException {
-                    int count = in.read(bytes, off, len);
-                    if (count > 0) session.output().write(bytes, off, count);
-                    return count;
-                }
-            };
-            var summary = LrhFormat.read(tee, object.size(), new RegionStream.Accumulator());
+        var object = region.base();
+        if (object == null) throw new IOException("Missing Region object: " + region.path());
+        // The stored .lrh bytes are copied verbatim while the decoder verifies the content
+        // identity, so the blob stays byte-identical to the archive object.
+        try (var session = blobs.newWriteSession(); InputStream input = object.raw().open()) {
+            OutputStream encoded = session.output();
+            var summary = LrhFormat.read(tee(input, encoded), object.compressedSize(), new RegionStream.Accumulator());
             String actualHash = HashUtil.bytesToHex(summary.hash());
             if (!region.contentHash().equals(actualHash))
                 throw new IOException("Region object identity mismatch: " + region.path());
@@ -330,6 +276,7 @@ public class ArchiveImporter {
         }
     }
 
+    /** Regular files: reuse the blob when present, otherwise copy and verify in one pass. */
     private List<FileEntry> importFiles(ArchiveRestorePlan plan, BlobStore blobs, ProgressTracker progress)
             throws IOException {
         List<FileEntry> files = new ArrayList<>();
@@ -339,16 +286,10 @@ public class ArchiveImporter {
             progress.current(file.path());
             BlobStore.Commit commit = stored.get(file.sourceHash());
             if (commit == null) {
-                verifyFileObject(file);
                 String path = blobs.getRelativePath(file.sourceHash(), "zst");
-                if (blobs.exists(file.sourceHash(), "zst")) {
-                    commit = new BlobStore.Commit(path, blobs.size(path), false);
-                } else {
-                    try (var session = blobs.newWriteSession(); InputStream input = file.object().open()) {
-                        input.transferTo(session.output());
-                        commit = session.commit(file.sourceHash(), "zst");
-                    }
-                }
+                commit = blobs.existsPath(path)
+                        ? new BlobStore.Commit(path, blobs.size(path), false)
+                        : copyFileObject(file, blobs);
                 stored.put(file.sourceHash(), commit);
             }
             files.add(new FileEntry(file.path(), file.sourceHash(), commit.path(), commit.size(),
@@ -358,18 +299,77 @@ public class ArchiveImporter {
         return files;
     }
 
-    private void verifyFileObject(ArchiveRestorePlan.FileRef file) throws IOException {
-        FileContentIdentity.Summary summary;
-        try (InputStream raw = file.object().open();
-                InputStream input = new com.github.luben.zstd.ZstdInputStream(raw)) {
-            summary = FileContentIdentity.inspect(input);
+    /**
+     * Copies the compressed object while decoding it, so the identity check and the copy
+     * cost one read instead of two. The decoded bytes are hashed, the compressed bytes are
+     * what lands in the blob store.
+     */
+    private BlobStore.Commit copyFileObject(ArchiveRestorePlan.FileRef file, BlobStore blobs) throws IOException {
+        try (var session = blobs.newWriteSession()) {
+            OutputStream encoded = session.output();
+            try (InputStream raw = file.source().open();
+                    InputStream decoded = new com.github.luben.zstd.ZstdInputStream(tee(raw, encoded))) {
+                FileContentIdentity.Summary summary = FileContentIdentity.inspect(decoded);
+                if (!summary.matches(file.sizeUncompressed(), file.sourceHash()))
+                    throw new IOException("File object identity mismatch: " + file.path());
+            }
+            return session.commit(file.sourceHash(), "zst");
         }
-        if (!summary.matches(file.sizeUncompressed(), file.sourceHash()))
-            throw new IOException("File object identity mismatch: " + file.path());
     }
 
-    private Path findFullTar(long epoch) throws IOException {
-        return ArchiveTarScanner.fullAtEpoch(ArchiveTarScanner.scan(archiveRoot), epoch);
+    /** Wraps {@code input} so that every byte read is copied to {@code sink} as well. */
+    private static InputStream tee(InputStream input, OutputStream sink) {
+        return new FilterInputStream(input) {
+            @Override public int read() throws IOException {
+                int value = in.read();
+                if (value >= 0) sink.write(value);
+                return value;
+            }
+
+            @Override public int read(byte[] bytes, int off, int len) throws IOException {
+                int count = in.read(bytes, off, len);
+                if (count > 0) sink.write(bytes, off, count);
+                return count;
+            }
+        };
+    }
+
+    /**
+     * Compares the target state declared by an archive with an existing online snapshot.
+     * Region and file content identity, uncompressed size and source metadata decide;
+     * {@code tags} do not.
+     */
+    private static boolean sameTarget(SnapshotManifest existing, ArchiveSnapshot meta) {
+        if (existing.getEpochSeconds() != meta.epoch
+                || !Objects.equals(text(existing.getWorldName()), text(meta.world))
+                || !Objects.equals(text(existing.getMinecraftVersion()), text(meta.minecraftVersion))
+                || existing.getWorldVersion() != meta.worldVersion) return false;
+        List<RegionEntry> existingRegions = existing.getRegions() == null ? List.of() : existing.getRegions();
+        if (existingRegions.size() != meta.regions.size()) return false;
+        Map<String, RegionEntry> regionsByPath = new HashMap<>();
+        for (RegionEntry region : existingRegions) regionsByPath.put(region.getFilename(), region);
+        for (var info : meta.regions) {
+            RegionEntry found = regionsByPath.get(info.filename);
+            if (found == null || !Objects.equals(found.getContentHash(), info.contentHash)
+                    || found.getSizeUncompressed() != info.sizeUncompressed
+                    || !Objects.equals(found.getSourceMetadata(), ArchiveObjects.metadata(info.sourceMetadata))) return false;
+        }
+        List<FileEntry> existingFiles = existing.getExtraFiles() == null ? List.of() : existing.getExtraFiles();
+        if (existingFiles.size() != meta.files.size()) return false;
+        Map<String, FileEntry> filesByPath = new HashMap<>();
+        for (FileEntry file : existingFiles) filesByPath.put(file.getFilename(), file);
+        for (var info : meta.files) {
+            FileEntry found = filesByPath.get(info.filename);
+            if (found == null || !Objects.equals(found.getSourceHash(), info.sourceHash)
+                    || found.getSizeUncompressed() != info.sizeUncompressed
+                    || !Objects.equals(found.getSourceMetadata(), ArchiveObjects.metadata(info.sourceMetadata))) return false;
+        }
+        return true;
+    }
+
+    /** 归档的 {@code snapshot.bin} 用空串表示“无值”，索引读回时是 {@code null}，两者等价。 */
+    private static String text(String value) {
+        return value == null || value.isEmpty() ? null : value;
     }
 
     /** Build an online manifest from archive metadata + imported entries. */
@@ -408,22 +408,4 @@ public class ArchiveImporter {
         summary.setTotalUncompressedBytes(uncomp);
         return summary;
     }
-
-    // ── helpers ──
-
-    private ArchiveSnapshot readSnapshot(Path tar) throws IOException {
-        try (InputStream fis = Files.newInputStream(tar);
-                TarReader reader = new TarReader(fis)) {
-            TarReader.Entry e;
-            while ((e = reader.nextEntry()) != null) {
-                if (e.name.equals("snapshot.bin")) {
-                    byte[] data = reader.readEntryData();
-                    return ArchiveSnapshotCodec.decode(data);
-                }
-                reader.readEntryData();
-            }
-        }
-        return null;
-    }
-
 }

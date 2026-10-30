@@ -2,8 +2,8 @@ package io.github.truscdo.foldbackup.core.archive;
 
 import io.github.truscdo.foldbackup.core.ProgressListener;
 import io.github.truscdo.foldbackup.core.ProgressTracker;
-import io.github.truscdo.foldbackup.core.format.LrhFormat;
 import io.github.truscdo.foldbackup.core.format.LrhdFormat;
+import io.github.truscdo.foldbackup.core.format.RegionStream;
 import io.github.truscdo.foldbackup.core.HashUtil;
 import io.github.truscdo.foldbackup.core.store.SnapshotStore;
 
@@ -12,6 +12,8 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -20,11 +22,14 @@ import java.util.Set;
  * Archive verifier: checks snapshot.bin, every {@code .lrh} frame and
  * contentHash, every {@code .lrhd} chunk hash, and files.bin.
  * <p>
+ * The baseline archive is read once per verification and shared by both checks: the
+ * per-object identity pass and the rebuilt-target pass. Both passes stay, because they
+ * answer different questions — "is every part correct" and "is the assembly correct".
+ * <p>
  * Full-tar {@code .lrh} entries are validated by streaming them through
- * {@link LrhFormat#read} into a
- * {@link io.github.truscdo.foldbackup.core.format.RegionStream.Accumulator}, which re-derives
- * the length table and content hash without materialising a region or a
- * payload array.
+ * {@link io.github.truscdo.foldbackup.core.format.LrhFormat#read} into a
+ * {@link RegionStream.Accumulator}, which re-derives the length table and content hash
+ * without materialising a region or a payload array.
  */
 public class ArchiveVerifier {
 
@@ -69,9 +74,11 @@ public class ArchiveVerifier {
             diffTar = locateDiffTar(archiveRoot, baseEpochSeconds, diffEpochSeconds);
             progress.done(diffTar.getFileName().toString());
         }
-        verifyFullTar(fullTar, result, progress);
-        if (diffTar != null) {
-            verifyDiffTar(fullTar, diffTar, result, progress);
+        try (var baseline = new ArchiveBaseline(fullTar)) {
+            verifyFullTar(fullTar, baseline, result, progress);
+            if (diffTar != null) {
+                verifyDiffTar(baseline, diffTar, result, progress);
+            }
         }
         return result;
     }
@@ -99,10 +106,8 @@ public class ArchiveVerifier {
         }
         if (meta.isFull()) {
             Result full = new Result();
-            try {
-                verifyFullTar(archiveFile, full, progress);
-            } catch (IOException | RuntimeException e) {
-                full.errors.add(e.getMessage());
+            try (ArchiveBaseline baseline = readBaseline(archiveFile, full)) {
+                if (baseline != null) verifyFullTar(archiveFile, baseline, full, progress);
             }
             mergeResult(result, full, archiveFile.getFileName().toString());
         } else if (meta.isDiff()) {
@@ -116,24 +121,36 @@ public class ArchiveVerifier {
                 return result;
             }
             Result baseline = new Result();
-            try {
-                verifyFullTar(fullTar, baseline, progress);
-            } catch (IOException | RuntimeException e) {
-                baseline.errors.add(e.getMessage());
-            }
-            mergeResult(result, baseline, fullTar.getFileName().toString());
+            try (ArchiveBaseline base = readBaseline(fullTar, baseline)) {
+                if (base != null) verifyFullTar(fullTar, base, baseline, progress);
+                mergeResult(result, baseline, fullTar.getFileName().toString());
 
-            Result diff = new Result();
-            try {
-                verifyDiffTar(fullTar, archiveFile, diff, progress);
-            } catch (IOException | RuntimeException e) {
-                diff.errors.add(e.getMessage());
+                Result diff = new Result();
+                if (base == null) {
+                    diff.errors.add("baseline archive cannot be read");
+                } else {
+                    try {
+                        verifyDiffTar(base, archiveFile, diff, progress);
+                    } catch (IOException | RuntimeException e) {
+                        diff.errors.add(e.getMessage());
+                    }
+                }
+                mergeResult(result, diff, archiveFile.getFileName().toString());
             }
-            mergeResult(result, diff, archiveFile.getFileName().toString());
         } else {
             result.errors.add(archiveFile.getFileName() + ": unsupported archive type " + meta.type);
         }
         return result;
+    }
+
+    /** The baseline archive is the only baseline read; a broken one is reported, not thrown. */
+    private static ArchiveBaseline readBaseline(Path tar, Result result) {
+        try {
+            return new ArchiveBaseline(tar);
+        } catch (IOException | RuntimeException e) {
+            result.errors.add(e.getMessage());
+            return null;
+        }
     }
 
     private static void mergeResult(Result target, Result source, String archiveName) {
@@ -177,43 +194,52 @@ public class ArchiveVerifier {
 
     // ── full tar ──
 
-    private void verifyFullTar(Path fullTar, Result result, ProgressTracker progress) throws IOException {
+    private void verifyFullTar(Path fullTar, ArchiveBaseline baseline, Result result,
+            ProgressTracker progress) throws IOException {
         progress.stage("Verifying " + fullTar.getFileName(), -1);
-        TarIndex archive = TarIndex.read(fullTar);
-        ArchiveSnapshot meta = archive.snapshot("full");
-        Set<String> regions = new java.util.HashSet<>();
+        verifyBaselineObjects(baseline, result, progress);
+        // Coordinate/path conflicts are only visible when the whole target is assembled.
+        try (var ignored = ArchiveRestorePlan.open(baseline, baseline.meta(), null)) { }
+    }
+
+    /** Every referenced object is present and matches its declared identity. */
+    private void verifyBaselineObjects(ArchiveBaseline baseline, Result result, ProgressTracker progress)
+            throws IOException {
+        ArchiveSnapshot meta = baseline.meta();
+        Set<String> regions = new HashSet<>();
         for (var region : meta.regions) {
             if (!regions.add(region.contentHash)) continue;
             String name = ArchiveCreator.regionObjectPath(region.contentHash);
-            TarIndex.Entry entry = archive.entries.get(name);
             progress.current(name);
-            if (entry == null) result.errors.add(name + ": referenced object is missing");
-            else verifyRegionObject(entry, region.contentHash, name, result);
+            var object = baseline.regionObject(region.contentHash);
+            if (object == null) result.errors.add(name + ": referenced object is missing");
+            else verifyRegionObject(object.decoded(), object.compressedSize(), region.contentHash, name, result);
             progress.done(name);
         }
-        Set<String> files = new java.util.HashSet<>();
+        Set<String> files = new HashSet<>();
         for (var file : meta.files) {
             if (!files.add(file.sourceHash)) continue;
             String name = ArchiveCreator.fileObjectPath(file.sourceHash);
-            TarIndex.Entry entry = archive.entries.get(name);
             progress.current(name);
-            if (entry == null) result.errors.add(name + ": referenced object is missing");
-            else verifyFileObject(entry, file.sourceHash, file.sizeUncompressed, name, result);
+            long size = baseline.fileObjectSize(file.sourceHash);
+            if (size < 0) result.errors.add(name + ": referenced object is missing");
+            else verifyFileObject(baseline.fileSource(file.sourceHash), size, file.sourceHash,
+                    file.sizeUncompressed, name, result);
             progress.done(name);
         }
-        try (var ignored = ArchiveRestorePlan.open(fullTar, null)) { }
     }
 
     // ── diff tar ──
 
-    private void verifyDiffTar(Path fullTar, Path diffTar, Result result, ProgressTracker progress) throws IOException {
+    private void verifyDiffTar(ArchiveBaseline baseline, Path diffTar, Result result, ProgressTracker progress)
+            throws IOException {
         progress.stage("Verifying " + diffTar.getFileName(), -1);
         TarIndex archive = TarIndex.read(diffTar);
         ArchiveSnapshot meta = archive.snapshot("diff");
-        ArchiveSnapshot base = TarIndex.read(fullTar).snapshot("full");
-        Map<String, Long> targetSizes = new java.util.HashMap<>();
+        ArchiveSnapshot base = baseline.meta();
+        Map<String, Long> targetSizes = new HashMap<>();
         for (var file : meta.files) targetSizes.put(file.sourceHash, file.sizeUncompressed);
-        Set<String> baseHashes = new java.util.HashSet<>();
+        Set<String> baseHashes = new HashSet<>();
         for (var file : base.files) baseHashes.add(file.sourceHash);
         for (var entry : archive.entries.values()) {
             String name = entry.name();
@@ -227,7 +253,7 @@ public class ArchiveVerifier {
                 String hash = name.substring("objects/files/".length(), name.length() - ".zst".length());
                 Long size = targetSizes.get(hash);
                 if (size == null) result.errors.add(name + ": object is not referenced by target manifest");
-                else verifyFileObject(entry, hash, size, name, result);
+                else verifyFileObject(entry::open, entry.size(), hash, size, name, result);
             }
             progress.done(name);
         }
@@ -236,12 +262,12 @@ public class ArchiveVerifier {
                     && !archive.entries.containsKey(ArchiveCreator.fileObjectPath(file.sourceHash)))
                 result.errors.add(file.filename + ": changed file object is missing");
         }
-        try (var plan = ArchiveRestorePlan.open(fullTar, diffTar)) {
+        try (var plan = ArchiveRestorePlan.open(baseline, meta, archive)) {
             progress.stage("Reconstructing diff regions", plan.regions.size());
             plan.runRegions(ArchiveTasks.TaskWork.decompress(), 0, null,
                     index -> progress.done(plan.regions.get(index).path()), (index, source) -> {
                         var region = plan.regions.get(index);
-                        var accumulator = new io.github.truscdo.foldbackup.core.format.RegionStream.Accumulator();
+                        var accumulator = new RegionStream.Accumulator();
                         source.read(accumulator);
                         String actualHash = HashUtil.bytesToHex(accumulator.finish().hash());
                         if (!region.contentHash().equals(actualHash))
@@ -251,20 +277,21 @@ public class ArchiveVerifier {
         }
     }
 
-    private void verifyRegionObject(TarIndex.Entry entry, String expectedHash, String name, Result result) {
-        result.totalBytes += entry.size();
+    private void verifyRegionObject(RegionStream.Source source, long size, String expectedHash,
+            String name, Result result) {
+        result.totalBytes += size;
         result.lrhChecked++;
-        try (InputStream input = entry.open()) {
-            var summary = LrhFormat.read(input, entry.size(), new io.github.truscdo.foldbackup.core.format.RegionStream.Accumulator());
+        try {
+            var summary = RegionStream.inspect(source);
             if (!expectedHash.equals(HashUtil.bytesToHex(summary.hash())))
                 throw new IOException("object path does not match Region content identity");
         } catch (Exception failure) { result.errors.add(name + ": " + failure.getMessage()); }
     }
 
-    private void verifyFileObject(TarIndex.Entry entry, String expectedHash, long expectedSize,
+    private void verifyFileObject(FileSource source, long size, String expectedHash, long expectedSize,
             String name, Result result) {
-        result.totalBytes += entry.size();
-        try (InputStream raw = entry.open();
+        result.totalBytes += size;
+        try (InputStream raw = source.open();
                 InputStream input = new com.github.luben.zstd.ZstdInputStream(raw)) {
             if (!FileContentIdentity.inspect(input).matches(expectedSize, expectedHash))
                 throw new IOException("object path does not match file content identity");

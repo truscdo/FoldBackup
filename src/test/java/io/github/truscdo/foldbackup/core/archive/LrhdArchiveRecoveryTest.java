@@ -81,8 +81,9 @@ class LrhdArchiveRecoveryTest {
             var region = AnvilTestSupport.readRegionAnvil(output.resolve("region/r." + rx + ".0.mca"));
             assertArrayEquals(rx == -1 ? new byte[]{7, 8} : new byte[]{4, 5}, region.getChunk(0).getRawChunk());
         }
-        try (var plan = ArchiveRestorePlan.open(archive.resolve(ArchiveCreator.fullTarName(BASE)),
-                archive.resolve(ArchiveCreator.diffTarName(BASE, TARGET)))) {
+        TarIndex diff = TarIndex.read(archive.resolve(ArchiveCreator.diffTarName(BASE, TARGET)));
+        try (var base = new ArchiveBaseline(archive.resolve(ArchiveCreator.fullTarName(BASE)));
+                var plan = ArchiveRestorePlan.open(base, diff.snapshot("diff"), diff)) {
             var values = plan.runRegions(ArchiveTasks.TaskWork.decompress(), 4, null, null, (i, source) -> {
                 RegionStream.inspect(source); return plan.regions.get(i).rx();
             });
@@ -141,8 +142,9 @@ class LrhdArchiveRecoveryTest {
     @Test void regionsFromOneLrhdCanMergeInParallel() throws Exception {
         org.junit.jupiter.api.Assumptions.assumeTrue(Runtime.getRuntime().availableProcessors() >= 2);
         Path archive = archives(false, false);
-        try (var plan = ArchiveRestorePlan.open(archive.resolve(ArchiveCreator.fullTarName(BASE)),
-                archive.resolve(ArchiveCreator.diffTarName(BASE, TARGET)))) {
+        TarIndex diff = TarIndex.read(archive.resolve(ArchiveCreator.diffTarName(BASE, TARGET)));
+        try (var base = new ArchiveBaseline(archive.resolve(ArchiveCreator.fullTarName(BASE)));
+                var plan = ArchiveRestorePlan.open(base, diff.snapshot("diff"), diff)) {
             var started = new java.util.concurrent.CountDownLatch(2);
             var release = new java.util.concurrent.CountDownLatch(1);
             var executor = java.util.concurrent.Executors.newSingleThreadExecutor();
