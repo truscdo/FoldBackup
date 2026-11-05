@@ -17,7 +17,7 @@ The same JAR can be installed as a NeoForge mod or run as a standalone tool. It 
 - **World export**: Export a snapshot as a Minecraft world.
 - **Archive compression**: Create full or differential archives, then restore an archive as a Minecraft world or import it into a snapshot repository.
 
-    Archives are intended for storing and distributing worlds. You can select an earlier full archive as the base for a differential archive. After downloading a full archive once, you can use differential archives to sync a server world to a local machine, edit it locally, and sync the changes back to the server. Only changed data needs to be transferred, saving bandwidth.
+    Archives are intended for storing and distributing worlds. After downloading a full archive once, later differential archives transfer only the changed data, so you can sync a server world to a local machine, edit it there, and sync it back. This saves bandwidth.
 
 ### LRH and Linear
 
@@ -52,15 +52,19 @@ From the world's repository directory (`foldbackups/` on a dedicated server, `fo
 
 ```bash
 # Dedicated server: foldbackups/
-java -jar ../mods/foldbackup-0.1.0.jar extract
-java -jar ../mods/foldbackup-0.1.0.jar tui
+java -jar ../mods/foldbackup-0.3.0.jar extract
+java -jar ../mods/foldbackup-0.3.0.jar tui
 
 # Singleplayer: foldbackups/<world-folder-name>
-java -jar ../../mods/foldbackup-0.1.0.jar extract
-java -jar ../../mods/foldbackup-0.1.0.jar tui
+java -jar ../../mods/foldbackup-0.3.0.jar extract
+java -jar ../../mods/foldbackup-0.3.0.jar tui
 ```
 
-Select "Export as Minecraft World," choose a snapshot, output type, and output path, then confirm. This creates a world at the selected snapshot's point in time, which you can use to replace the existing world as needed.
+In the menu, select "2. Export world files" and follow the prompts to choose a snapshot, a directory or a ZIP, and the output path. Press Enter to accept the default path (`world-export/<snapshot-id>`, or the same name with `.zip` for a ZIP).
+
+For a directory export, the target can be an existing game save: FoldBackup updates only the content that differs from the snapshot and never rewrites identical files. Stop the server before restoring. After the check, choose "1 = overwrite" to keep files in the target that the snapshot does not contain, or "2 = delete extra" to remove them so the target matches the snapshot exactly. The thread-count prompt can be accepted with Enter.
+
+The CLI can do the same export: `snapshot export <snapshot-id> --output <directory>`. `--zip` writes a ZIP; for a directory export, `--delete-extra` removes content that is not in the snapshot; `--dry-run` prints the statistics without writing or deleting.
 
 ### Quick Start the TUI
 
@@ -145,13 +149,13 @@ For the CLI examples below, assume the current directory is `foldbackups` and th
 List the snapshots:
 
 ```bash
-java -jar ../mods/foldbackup-0.1.0.jar snapshot list
+java -jar ../mods/foldbackup-0.3.0.jar snapshot list
 ```
 
 Copy the target snapshot ID from the list, then roll back the chunk. The following command restores chunk `[x, z]` in the Overworld directory `world` to its state in that snapshot:
 
 ```bash
-java -jar ../mods/foldbackup-0.1.0.jar snapshot rollback <snapshot-id> --world ../world --chunk <chunk-x> <chunk-z>
+java -jar ../mods/foldbackup-0.3.0.jar snapshot rollback <snapshot-id> --world ../world --chunk <chunk-x> <chunk-z>
 ```
 
 `--world` points to the target dimension directory: use the world root for the Overworld, `../world/DIM-1` for the Nether, `../world/DIM1` for the End, or the corresponding `dimensions/<namespace>/<path>` directory for a custom dimension. `--chunk` takes signed integer chunk coordinates, not block coordinates. For example, block coordinate `-1` belongs to chunk coordinate `-1`. The CLI asks for confirmation before proceeding; append `--yes` to skip the prompt.
@@ -162,11 +166,9 @@ The CLI restores the target chunk's terrain, block entities, and recoverable ent
 
 Archives are intended for storing and distributing worlds, with high compression ratios as a priority. Because creating them uses substantial resources, archive operations are available only through the CLI and TUI.
 
-The TUI is also recommended for archive operations. Archives are created from snapshots, so you need a snapshot before creating an archive. You can create one in game or through the TUI or CLI.
+Archives are created from snapshots, so you need a snapshot before creating an archive. You can create one in game or through the TUI or CLI. In the TUI, select "4. Create archive", choose a snapshot and the archive type. A differential archive also asks for an earlier snapshot to compare against, so it stores only what changed.
 
-In the TUI, select the option to create an archive, then choose a snapshot and compression level. To create a differential archive, also select a snapshot to use as its base.
-
-An archive can be restored as a Minecraft world or imported as a snapshot into a snapshot repository. If you distribute a world using archives, you can package the mod and TUI launcher script with them (the script content is shown earlier in this README).
+An archive can be restored as a Minecraft world ("6. Restore as world files" in the TUI) or imported as a snapshot into a snapshot repository. Restoring as a world also updates an existing save in place, and choosing "delete extra" removes files that are not in the archive. If you distribute a world using archives, you can package the mod and TUI launcher script with them (the script content is shown earlier in this README).
 
 The archive format is independent of the Minecraft version. You can use the CLI or TUI to compress worlds from versions that the mod does not support.
 

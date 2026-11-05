@@ -17,7 +17,7 @@ FoldBackup 是面向 Minecraft NeoForge 服务端的世界备份工具，支持�
 - **存档导出**：将快照导出为 Minecraft 游戏存档
 - **归档压缩**：可以创建完整归档或差分归档，并使用归档文件恢复为游戏存档或导入到快照仓库
 
-    归档用于储存和分发存档，同时支持指定一个旧的完整归档，在此基础上生成差分归档；对于服务器场景，这可以在一次完整归档下载后，通过差分归档文件将存档同步至本地，本地编辑完成后再通过差分归档同步至服务器，仅传输更改部分，节约带宽
+    归档用于储存和分发存档。下载一次完整归档后，后续差分归档只需传输更改部分，即可把服务器存档同步到本地，编辑后再同步回去，节约带宽
 
 ### LRH 与 Linear
 
@@ -52,15 +52,19 @@ FoldBackup 是面向 Minecraft NeoForge 服务端的世界备份工具，支持�
 
 ```bash
 # 服务器 foldbackups/
-java -jar ../mods/foldbackup-0.1.0.jar extract
-java -jar ../mods/foldbackup-0.1.0.jar tui
+java -jar ../mods/foldbackup-0.3.0.jar extract
+java -jar ../mods/foldbackup-0.3.0.jar tui
 
 # 单机 foldbackups/<存档目录名>
-java -jar ../../mods/foldbackup-0.1.0.jar extract
-java -jar ../../mods/foldbackup-0.1.0.jar tui
+java -jar ../../mods/foldbackup-0.3.0.jar extract
+java -jar ../../mods/foldbackup-0.3.0.jar tui
 ```
 
-在菜单中选择“导出为游戏存档”，选择快照、输出形式和输出路径，再确认执行即可获得对应快照时间的游戏存档，然后可以根据需要对游戏存档进行替换。
+在菜单中选择“2. Export world files”（导出世界文件），按提示选择快照、导出为目录还是 ZIP，再输入输出路径。路径可以直接回车使用默认值（`world-export/<快照ID>`，ZIP 为同名 `.zip`）。
+
+导出为目录时，目标可以指向已有的游戏存档：程序只更新与快照不同的内容，相同的文件不会重写。回档前请先停止服务器。检查完成后选择“1 = overwrite”会保留存档中多出的文件，选择“2 = delete extra”会删除这些文件，使存档与快照完全一致。之后的线程数提示可以直接回车使用默认设置。
+
+CLI 也可以完成同样的导出：`snapshot export <快照ID> --output <目录>`。`--zip` 导出 ZIP；目录导出可加 `--delete-extra` 删除多出的内容；`--dry-run` 只输出统计，不写入也不删除。
 
 ### 快速启动TUI
 
@@ -147,13 +151,13 @@ exec java -jar "$JAR" tui --snapshot-root "$SCRIPT_DIR" --archive-root "$SCRIPT_
 列出快照：
 
 ```bash
-java -jar ../mods/foldbackup-0.1.0.jar snapshot list
+java -jar ../mods/foldbackup-0.3.0.jar snapshot list
 ```
 
 从列表中复制目标快照ID，然后执行区块回档。以下命令会将主世界 `world` 中区块 `[x, z]` 恢复到该快照的状态：
 
 ```bash
-java -jar ../mods/foldbackup-0.1.0.jar snapshot rollback <快照ID> --world ../world --chunk <区块X> <区块Z>
+java -jar ../mods/foldbackup-0.3.0.jar snapshot rollback <快照ID> --world ../world --chunk <区块X> <区块Z>
 ```
 
 `--world` 指向目标维度目录：主世界使用存档根目录，下界使用 `../world/DIM-1`，末地使用 `../world/DIM1`，自定义维度使用其 `dimensions/<命名空间>/<路径>` 目录。`--chunk` 接收有符号整数区块坐标，不是方块坐标；例如方块坐标 `-1` 对应区块坐标 `-1`。CLI 会在执行前要求确认；可追加 `--yes` 跳过确认。
@@ -164,11 +168,9 @@ CLI会恢复目标区块的地形、方块实体及可恢复的实体数据，�
 
 归档用于储存和分发存档，以高压缩率为目标，性能占用较大，因此仅提供CLI和TUI实现。
 
-归档操作同样推荐使用TUI进行；为了方便管理，归档以快照为目标，所以创建归档文件前需要有对应的快照，这可以通过游戏内备份，或者TUI与CLI中的快照创建实现。
+创建归档前需要有对应的快照，可以在游戏内备份，也可以用TUI或CLI创建。在TUI主菜单选择“4. Create archive”（创建归档），选择快照和归档类型即可；创建差分归档时会再选择一个更早的快照作为对比基准，只保存变化的部分。
 
-在TUI中选择创建归档选项，选择对应的快照和压缩级别等信息即可创建归档；如果希望创建差分归档，额外选择一个快照作为基础即可。
-
-归档可以恢复为游戏存档或者快照仓库的快照，作为存档分发方案时，可以将mod与tui启动脚本一起打包（脚本内容见本说明）。
+归档可以恢复为游戏存档（TUI 主菜单为“6. Restore as world files”）或者导入为快照仓库中的快照。恢复为存档时同样会更新已有的游戏存档，选择“delete extra”会删除归档中不存在的文件。作为存档分发方案时，可以将mod与tui启动脚本一起打包（脚本内容见本说明）。
 
 归档格式与游戏版本无关，对于mod不支持的版本，也可以使用CLI或者TUI进行压缩。
 
