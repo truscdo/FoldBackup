@@ -3,12 +3,14 @@ package io.github.truscdo.foldbackup.tui;
 import io.github.truscdo.foldbackup.core.archive.ArchiveDefaults;
 import io.github.truscdo.foldbackup.core.archive.ArchiveFormatUtil;
 import io.github.truscdo.foldbackup.core.archive.ArchiveImporter;
-import io.github.truscdo.foldbackup.core.archive.ArchiveRestorer;
+import io.github.truscdo.foldbackup.core.archive.ArchiveRestoreSource;
 import io.github.truscdo.foldbackup.core.archive.ArchiveTarScanner;
 import io.github.truscdo.foldbackup.core.archive.ArchiveTarScanner.ArchiveTarInfo;
 import io.github.truscdo.foldbackup.core.archive.ArchiveVerifier;
 import io.github.truscdo.foldbackup.core.console.ArchiveVerifyReporter;
 import io.github.truscdo.foldbackup.core.console.ProgressPrinter;
+import io.github.truscdo.foldbackup.core.console.RestoreStatsPrinter;
+import io.github.truscdo.foldbackup.core.restore.RestoreOperation;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -60,45 +62,63 @@ public class ArchiveTui {
                     continue;
                 }
 
-                while (true) {
-                    System.out.println();
-                    System.out.println("Summary:");
-                    System.out.println("  Full:   " + selected.full().fileName());
-                    if (diffId != null) {
-                        System.out.println("  Diff:   " + selected.target().fileName());
-                    }
-                    System.out.println("  Output: " + output);
-                    System.out.println();
-
-                    int confirm = prompt.readInt(
-                            "Proceed? (1 = confirm, 2 = cancel to main menu, 0 = back): ", 0, 2);
-                    if (confirm == 2) {
-                        System.out.println("Restore cancelled.\n");
-                        return;
-                    }
-                    if (confirm <= 0) {
-                        break;
-                    }
-
-                    int threads = prompt.readThreadCount();
-                    if (threads == ConsolePrompt.EOF) threads = 0;
-                    if (threads == ConsolePrompt.BACK) continue;
-                    try {
-                        var restorer = new ArchiveRestorer(ArchiveDefaults.RESTORE_LEVEL, threads);
-                        Path result;
-                        try (var progress = new ProgressPrinter(System.out)) {
-                            System.out.println("Restoring " + (diffId != null ? "full+" + diffId : "full") + " ...");
-                            result = restorer.restore(archiveRoot, selected.full().meta().epoch,
-                                    selected.target().meta().isDiff() ? selected.target().meta().epoch : null,
-                                    output, progress.onProgress());
-                        }
-                        System.out.println("Done: " + result.toAbsolutePath().normalize() + "\n");
-                    } catch (IOException e) {
-                        System.err.println("Restore failed: " + e.getMessage() + "\n");
-                    }
+                ExportFlow flow = exportTo(selected, output);
+                if (flow == ExportFlow.CANCEL) {
+                    System.out.println("Restore cancelled.\n");
+                    return;
+                }
+                if (flow == ExportFlow.DONE) {
                     return;
                 }
             }
+        }
+    }
+
+    private enum ExportFlow { DONE, BACK_TO_PATH, CANCEL }
+
+    private ExportFlow exportTo(SelectedArchive selected, Path output) {
+        try (var source = ArchiveRestoreSource.open(archiveRoot, selected.target().tar())) {
+            RestoreOperation.Session session;
+            try (var progress = new ProgressPrinter(System.out)) {
+                session = RestoreOperation.prepare(source, output, 0, progress.onProgress());
+            } catch (IOException e) {
+                System.err.println("Restore failed: " + e.getMessage() + "\n");
+                return ExportFlow.CANCEL;
+            }
+            try (session) {
+                System.out.println();
+                RestoreStatsPrinter.print(session.stats(), null, false, session.target(), System.out);
+                System.out.println();
+                while (true) {
+                    int choice = prompt.readInt(
+                            "1 = overwrite, 2 = delete extra, 3 = cancel to main menu, 0 = back: ", 0, 3);
+                    if (choice == 3) return ExportFlow.CANCEL;
+                    // Blank input and EOF follow the existing TUI convention: any non-positive
+                    // choice goes back one level.
+                    if (choice <= 0) return ExportFlow.BACK_TO_PATH;
+
+                    boolean deleteExtra = choice == 2;
+                    while (true) {
+                        int threads = prompt.readThreadCount();
+                        if (threads == ConsolePrompt.EOF) return ExportFlow.CANCEL;
+                        if (threads == ConsolePrompt.BACK) break;
+
+                        System.out.println("Restoring...");
+                        try (var progress = new ProgressPrinter(System.out)) {
+                            var outcome = session.execute(deleteExtra, threads, ArchiveDefaults.RESTORE_LEVEL,
+                                    progress.onProgress());
+                            System.out.println("Done: " + outcome.target().toAbsolutePath().normalize()
+                                    + ", deleted extra: " + outcome.deleted() + "\n");
+                        } catch (IOException e) {
+                            System.err.println("Restore failed: " + e.getMessage() + "\n");
+                        }
+                        return ExportFlow.DONE;
+                    }
+                }
+            }
+        } catch (IOException e) {
+            System.err.println("Restore failed: " + e.getMessage() + "\n");
+            return ExportFlow.CANCEL;
         }
     }
 

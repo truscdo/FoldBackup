@@ -1,11 +1,14 @@
 package io.github.truscdo.foldbackup.cli;
 
-import io.github.truscdo.foldbackup.core.BackupExporter;
 import io.github.truscdo.foldbackup.core.ProgressEvent;
 import io.github.truscdo.foldbackup.core.backup.RegionProcessor;
+import io.github.truscdo.foldbackup.core.export.SnapshotZipExport;
 import io.github.truscdo.foldbackup.core.format.AnvilTestSupport;
 import io.github.truscdo.foldbackup.core.format.ChunkData;
 import io.github.truscdo.foldbackup.core.format.Region;
+import io.github.truscdo.foldbackup.core.restore.RestoreOperation;
+import io.github.truscdo.foldbackup.core.restore.SnapshotRestoreSource;
+import io.github.truscdo.foldbackup.core.restore.WorldSaveLock;
 import io.github.truscdo.foldbackup.core.store.BlobStore;
 import io.github.truscdo.foldbackup.core.store.SnapshotManifest;
 import io.github.truscdo.foldbackup.core.store.SnapshotStore;
@@ -38,23 +41,26 @@ class SnapshotCreationTest {
         assertEquals(1, snapshot.getRegions().size());
         assertEquals(1, snapshot.getExtraFiles().size());
         var store = new SnapshotStore(root);
-        var exporter = new BackupExporter(store, new BlobStore(root, 6), 6);
+        var blobs = new BlobStore(root, 6);
         Path output = temp.resolve("export");
         var restoreEvents = new ArrayList<ProgressEvent>();
-        exporter.exportWithProgress(snapshot.getEpochSeconds(), output, false,
-                2, restoreEvents::add);
+        try (var source = new SnapshotRestoreSource(snapshot, blobs)) {
+            RestoreOperation.run(source, output, new RestoreOperation.Options(false, false, 2, 6),
+                    restoreEvents::add);
+        }
         assertEquals("world metadata", Files.readString(output.resolve("level.dat")));
         assertTrue(Files.exists(output.resolve("region/r.0.0.mca")));
         assertFalse(Files.exists(output.resolve("session.lock")));
-        assertEquals("Publishing world", restoreEvents.getLast().phase());
+        assertEquals("Restoring regions", restoreEvents.getLast().phase());
         assertEquals("Scanning world", events.getFirst().phase());
         assertEquals("Backup complete", events.getLast().phase());
         assertEquals(1, events.getLast().completed());
         assertEquals(1, events.getLast().total());
         assertTrue(events.getLast().item().contains(snapshot.getSnapshotId()));
 
-        Path zip = exporter.exportWithProgress(snapshot.getEpochSeconds(), temp.resolve("packed"),
-                true, 2, null);
+        Path zip = SnapshotZipExport.export(store, blobs, snapshot.getSnapshotId(), temp.resolve("packed"),
+                2, null);
+        assertEquals(temp.resolve("packed.zip").toAbsolutePath().normalize(), zip);
         assertFalse(Files.exists(temp.resolve("packed")));
         try (var archive = new java.util.zip.ZipFile(zip.toFile())) {
             assertNotNull(archive.getEntry("level.dat"));
@@ -75,9 +81,12 @@ class SnapshotCreationTest {
         Path output = Files.createDirectory(temp.resolve("export"));
         Files.writeString(output.resolve("existing.txt"), "keep");
 
-        var exporter = new BackupExporter(new SnapshotStore(root), new BlobStore(root, 6), 6);
-        assertThrows(IOException.class, () -> exporter.exportWithProgress(snapshot.getEpochSeconds(), output,
-                false, 2, null));
+        var store = new SnapshotStore(root);
+        assertThrows(IOException.class, () -> {
+            try (var source = new SnapshotRestoreSource(snapshot, new BlobStore(root, 6))) {
+                RestoreOperation.run(source, output, new RestoreOperation.Options(false, false, 2, 6), null);
+            }
+        });
         assertEquals("keep", Files.readString(output.resolve("existing.txt")));
         assertFalse(Files.exists(output.resolve("level.dat")));
         assertFalse(Files.exists(output.resolve("region/r.0.0.mca")));

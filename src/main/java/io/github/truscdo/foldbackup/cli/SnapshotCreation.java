@@ -6,6 +6,7 @@ import io.github.truscdo.foldbackup.core.backup.BackupContext;
 import io.github.truscdo.foldbackup.core.backup.BackupCoordinator;
 import io.github.truscdo.foldbackup.core.backup.RegionProcessor;
 import io.github.truscdo.foldbackup.core.backup.BackupFilter;
+import io.github.truscdo.foldbackup.core.restore.WorldSaveLock;
 import io.github.truscdo.foldbackup.core.store.BlobStore;
 import io.github.truscdo.foldbackup.core.store.SnapshotManifest;
 import io.github.truscdo.foldbackup.core.store.SnapshotStore;

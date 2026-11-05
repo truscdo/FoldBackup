@@ -42,7 +42,8 @@ public final class StreamingRestoreMemoryProcess {
         var exporter = new ArchiveCreator(store, blobs, 3);
         exporter.createFull(base.getEpochSeconds(), archive, false, 1);
         exporter.createDiff(base.getEpochSeconds(), target.getEpochSeconds(), archive);
-        new ArchiveRestorer(6).restore(archive, base.getEpochSeconds(), target.getEpochSeconds(), output);
+        io.github.truscdo.foldbackup.core.restore.RestoreTestSupport.restoreTo(archive, base.getEpochSeconds(),
+                target.getEpochSeconds(), output, false, 1);
         var expected = RegionStream.inspect(after);
         for (String path : List.of("region/r.-1.-1.mca", "entities/r.-1.-1.mca", "region/r.1.0.mca")) {
             if (!expected.same(RegionStream.inspect(McaStream.source(output.resolve(path)))))

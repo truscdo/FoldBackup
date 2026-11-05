@@ -6,7 +6,7 @@ import io.github.truscdo.foldbackup.core.store.SnapshotManifest;
 import io.github.truscdo.foldbackup.core.store.SnapshotStore;
 import io.github.truscdo.foldbackup.core.archive.ArchiveCreator;
 import io.github.truscdo.foldbackup.core.archive.ArchiveImporter;
-import io.github.truscdo.foldbackup.core.archive.ArchiveRestorer;
+import io.github.truscdo.foldbackup.core.restore.RestoreTestSupport;
 import io.github.truscdo.foldbackup.core.archive.ArchiveVerifier;
 import io.github.truscdo.foldbackup.core.format.AnvilTestSupport;
 import io.github.truscdo.foldbackup.core.format.ChunkData;
@@ -202,8 +202,7 @@ class ArchiveEndToEndTest {
 
         // ── archive export full only ──
         Path outFull = tempDir.resolve("restore-full");
-        var restorer = new ArchiveRestorer(6);
-        restorer.restore(archiveRoot, null, null, outFull);
+        RestoreTestSupport.restoreTo(archiveRoot, null, null, outFull, false, 1);
         assertArrayEquals(nbt("chunk-0-0-v1"), chunkNbt(outFull, "region/r.0.0.mca", 0));
         assertArrayEquals(nbt("chunk-1-0-v1"), chunkNbt(outFull, "region/r.0.0.mca", 1));
         assertArrayEquals(nbt("chunk-0-32-v1"), chunkNbt(outFull, "region/r.0.1.mca", 0));
@@ -212,7 +211,7 @@ class ArchiveEndToEndTest {
 
         // ── archive export full + diff ──
         Path outDiff = tempDir.resolve("restore-diff");
-        restorer.restore(archiveRoot, sn1.getEpochSeconds(), sn2.getEpochSeconds(), outDiff);
+        RestoreTestSupport.restoreTo(archiveRoot, sn1.getEpochSeconds(), sn2.getEpochSeconds(), outDiff, false, 1);
         assertArrayEquals(nbt("chunk-0-0-v2"), chunkNbt(outDiff, "region/r.0.0.mca", 0),
                 "modified chunk applied");
         assertNull(chunkNbt(outDiff, "region/r.0.0.mca", 1), "deleted chunk removed");
@@ -333,8 +332,8 @@ class ArchiveEndToEndTest {
         reverseRegions(exporter.createFull(full.getEpochSeconds(), archive));
         exporter.createDiff(full.getEpochSeconds(), diff.getEpochSeconds(), archive);
         Path serial = tempDir.resolve("serial"), parallel = tempDir.resolve("parallel");
-        new ArchiveRestorer(6, 1).restore(archive, full.getEpochSeconds(), diff.getEpochSeconds(), serial);
-        new ArchiveRestorer(6, 4).restore(archive, full.getEpochSeconds(), diff.getEpochSeconds(), parallel);
+        RestoreTestSupport.restoreTo(archive, full.getEpochSeconds(), diff.getEpochSeconds(), serial, false, 1);
+        RestoreTestSupport.restoreTo(archive, full.getEpochSeconds(), diff.getEpochSeconds(), parallel, false, 4);
         try (var walk = Files.walk(serial)) {
             for (Path file : walk.filter(Files::isRegularFile).toList()) {
                 Path other = parallel.resolve(serial.relativize(file));
@@ -363,7 +362,7 @@ class ArchiveEndToEndTest {
         exporter.createFull(baseEpoch, archive, false, 1);
         exporter.createDiff(baseEpoch, targetEpoch, archive);
         Path out = tempDir.resolve("restored");
-        new ArchiveRestorer(6).restore(archive, baseEpoch, targetEpoch, out);
+        RestoreTestSupport.restoreTo(archive, baseEpoch, targetEpoch, out, false, 1);
         return out;
     }
 
@@ -422,7 +421,7 @@ class ArchiveEndToEndTest {
         exporter.createFull(base.getEpochSeconds(), archive, false, 1);
         exporter.createDiff(base.getEpochSeconds(), target.getEpochSeconds(), archive);
         Path restored = tempDir.resolve("empty-region-restored");
-        new ArchiveRestorer(6, 2).restore(archive, base.getEpochSeconds(), target.getEpochSeconds(), restored);
+        RestoreTestSupport.restoreTo(archive, base.getEpochSeconds(), target.getEpochSeconds(), restored, false, 2);
         assertTrue(Files.isRegularFile(restored.resolve("region/r.0.0.mca")));
         assertNull(chunkNbt(restored, "region/r.0.0.mca", 0));
 
@@ -455,7 +454,7 @@ class ArchiveEndToEndTest {
         new ArchiveCreator(new SnapshotStore(root), new BlobStore(root, 6), 19)
                 .createDiff(base.getEpochSeconds(), empty.getEpochSeconds(), archive);
         Path emptyOut = tempDir.resolve("restored-empty");
-        new ArchiveRestorer(6).restore(archive, base.getEpochSeconds(), empty.getEpochSeconds(), emptyOut);
+        RestoreTestSupport.restoreTo(archive, base.getEpochSeconds(), empty.getEpochSeconds(), emptyOut, false, 1);
         assertFalse(Files.exists(emptyOut.resolve("region/r.0.0.mca")));
         assertFalse(Files.exists(emptyOut.resolve("DIM-1/region/r.0.0.mca")));
     }
@@ -485,8 +484,11 @@ class ArchiveEndToEndTest {
 
         Path out = tempDir.resolve("restore-mismatch");
         IOException ex = assertThrows(IOException.class,
-                () -> new ArchiveRestorer(6).restore(archiveRoot, sn1.getEpochSeconds(), sn2.getEpochSeconds(), out));
-        assertTrue(ex.getMessage().contains("Baseline mismatch"), ex.getMessage());
+                () -> RestoreTestSupport.restoreTo(archiveRoot, sn1.getEpochSeconds(), sn2.getEpochSeconds(), out,
+                        false, 1));
+        // The restore derives its baseline from the diff's own baseEpoch, so a rewritten base that
+        // names no archive is reported as a missing baseline rather than as a plan-level mismatch.
+        assertTrue(ex.getMessage().contains("baseline archive"), ex.getMessage());
         assertFalse(Files.exists(out.resolve("region")), "nothing written on mismatch");
     }
 

@@ -4,11 +4,15 @@ import io.github.truscdo.foldbackup.core.BackupExporter;
 import io.github.truscdo.foldbackup.core.LogUtil;
 import io.github.truscdo.foldbackup.core.console.ArchiveVerifyReporter;
 import io.github.truscdo.foldbackup.core.console.ProgressPrinter;
+import io.github.truscdo.foldbackup.core.console.RestoreStatsPrinter;
 import io.github.truscdo.foldbackup.core.console.SnapshotTablePrinter;
 import io.github.truscdo.foldbackup.core.archive.ArchiveDefaults;
 import io.github.truscdo.foldbackup.core.archive.ArchiveVerifier;
+import io.github.truscdo.foldbackup.core.export.SnapshotZipExport;
 import io.github.truscdo.foldbackup.core.rollback.ChunkRollbackCoordinator;
 import io.github.truscdo.foldbackup.core.rollback.ChunkRollbackSupport;
+import io.github.truscdo.foldbackup.core.restore.RestoreOperation;
+import io.github.truscdo.foldbackup.core.restore.SnapshotRestoreSource;
 import io.github.truscdo.foldbackup.core.store.BlobStore;
 import io.github.truscdo.foldbackup.core.store.SnapshotManifest;
 import io.github.truscdo.foldbackup.core.store.SnapshotStore;
@@ -66,9 +70,7 @@ public class BackupCli {
             case "list" -> {
                 requireCount(args, 2, "snapshot list");
                 SnapshotStore snapshots = snapshotStore(invocation.snapshotRoot());
-                runList(new BackupExporter(snapshots,
-                        new BlobStore(invocation.snapshotRoot(), ArchiveDefaults.EXPORT_LEVEL),
-                        ArchiveDefaults.EXPORT_LEVEL));
+                runList(new BackupExporter(snapshots));
             }
             case "create" -> runCreate(invocation.snapshotRoot(), args);
             case "import" -> runImport(invocation, args);
@@ -130,10 +132,13 @@ public class BackupCli {
     }
 
     private static void runExport(Invocation invocation, List<String> args) throws IOException {
-        if (args.size() < 3) throw new IOException("Usage: snapshot export <snapshot-id> --output <path> [--zip] [--threads <N>]");
+        if (args.size() < 3) throw new IOException("Usage: snapshot export <snapshot-id> --output <path> "
+                + "[--zip] [--delete-extra] [--dry-run] [--threads <N>]");
         String snapshotId = args.get(2);
         Path output = null;
         boolean zip = false;
+        boolean deleteExtra = false;
+        boolean dryRun = false;
         int threads = 0;
         boolean outputSeen = false;
         for (int i = 3; i < args.size(); i++) {
@@ -147,6 +152,14 @@ public class BackupCli {
                     if (zip) throw new IOException("Duplicate --zip");
                     zip = true;
                 }
+                case "--delete-extra" -> {
+                    if (deleteExtra) throw new IOException("Duplicate --delete-extra");
+                    deleteExtra = true;
+                }
+                case "--dry-run" -> {
+                    if (dryRun) throw new IOException("Duplicate --dry-run");
+                    dryRun = true;
+                }
                 case "--threads" -> {
                     if (threads != 0) throw new IOException("Duplicate --threads");
                     try { threads = Integer.parseInt(requireValue(args, ++i, "--threads")); }
@@ -157,15 +170,35 @@ public class BackupCli {
             }
         }
         if (output == null) throw new IOException("snapshot export requires --output <path>");
+        if (zip && (deleteExtra || dryRun))
+            throw new IOException("--zip cannot be combined with --delete-extra or --dry-run");
+
         SnapshotStore snapshots = snapshotStore(invocation.snapshotRoot());
-        var exporter = new BackupExporter(snapshots,
-                new BlobStore(invocation.snapshotRoot(), ArchiveDefaults.EXPORT_LEVEL), ArchiveDefaults.EXPORT_LEVEL);
-        System.out.println("Exporting " + snapshotId + " to " + output + " ...");
-        Path result;
-        try (var progress = new ProgressPrinter(System.err)) {
-            result = CliOutput.exportSnapshot(snapshots, exporter, snapshotId, output, zip, threads, progress.onProgress());
+        var blobs = new BlobStore(invocation.snapshotRoot(), ArchiveDefaults.EXPORT_LEVEL);
+        if (zip) {
+            System.out.println("Exporting " + snapshotId + " to " + output + " ...");
+            Path result;
+            try (var progress = new ProgressPrinter(System.err)) {
+                result = SnapshotZipExport.export(snapshots, blobs, snapshotId, output, threads,
+                        progress.onProgress());
+            }
+            System.out.println("Done: " + result);
+            return;
         }
-        System.out.println("Done: " + result);
+
+        long epoch = snapshots.resolveEpoch(snapshotId);
+        SnapshotManifest manifest = snapshots.loadSnapshot(epoch);
+        if (manifest == null) throw new IOException("Snapshot not found: " + snapshotId);
+        RestoreOperation.Outcome outcome;
+        try (var source = new SnapshotRestoreSource(manifest, blobs);
+                var progress = new ProgressPrinter(System.err)) {
+            System.out.println("Exporting " + snapshotId + " to " + output + " ...");
+            outcome = RestoreOperation.run(source, output,
+                    new RestoreOperation.Options(dryRun, deleteExtra, threads, ArchiveDefaults.EXPORT_LEVEL),
+                    progress.onProgress());
+        }
+        RestoreStatsPrinter.print(outcome.stats(), deleteExtra, dryRun, outcome.target(), System.out);
+        System.out.println("Done: " + outcome.target());
     }
 
     private static void runDelete(Invocation invocation, List<String> args) throws IOException {

@@ -108,6 +108,61 @@ class ArchiveTuiTest {
         assertTrue(Files.isDirectory(target));
     }
 
+    @Test
+    void checkProgressIsShownAndBlankDecisionReturnsToPath() throws Exception {
+        writeTar("full.tar", full(100, "S-20260914_120000"));
+        Path target = archive.resolve("not-created");
+        var output = new ByteArrayOutputStream();
+        PrintStream previous = System.out;
+        try {
+            System.setOut(new PrintStream(output, true));
+            new ArchiveTui(archive, archive, new ConsolePrompt(new StringReader("1\n" + target + "\n\n0\n0\n"),
+                    new PrintStream(output, true))).exportArchive();
+        } finally {
+            System.setOut(previous);
+        }
+        String text = output.toString();
+        assertTrue(text.contains("Checking"), "the check phase reports progress: " + text);
+        assertTrue(text.contains("Target:"), text);
+        assertFalse(Files.exists(target), text);
+    }
+
+    @Test
+    void cancelDecisionReturnsToMainMenuWithoutWriting() throws Exception {
+        writeTar("full.tar", full(100, "S-20260914_120000"));
+        Path target = archive.resolve("cancelled");
+        var output = new ByteArrayOutputStream();
+        PrintStream previous = System.out;
+        try {
+            System.setOut(new PrintStream(output, true));
+            new ArchiveTui(archive, archive, new ConsolePrompt(new StringReader("1\n" + target + "\n3\n"),
+                    new PrintStream(output, true))).exportArchive();
+        } finally {
+            System.setOut(previous);
+        }
+        String text = output.toString();
+        assertTrue(text.contains("Restore cancelled."), text);
+        assertFalse(Files.exists(target), text);
+    }
+
+    @Test
+    void overwriteDecisionCreatesOutput() throws Exception {
+        writeTar("full.tar", full(100, "S-20260914_120000"));
+        Path target = archive.resolve("created");
+        var output = new ByteArrayOutputStream();
+        PrintStream previous = System.out;
+        try {
+            System.setOut(new PrintStream(output, true));
+            new ArchiveTui(archive, archive, new ConsolePrompt(new StringReader("1\n" + target + "\n1\n\n"),
+                    new PrintStream(output, true))).exportArchive();
+        } finally {
+            System.setOut(previous);
+        }
+        String text = output.toString();
+        assertTrue(Files.isDirectory(target), text);
+        assertTrue(text.contains("Done: "), text);
+    }
+
     private void writeTar(String name, ArchiveSnapshot metadata) throws Exception {
         try (var output = Files.newOutputStream(archive.resolve(name));
                 var writer = new TarWriter(output)) {

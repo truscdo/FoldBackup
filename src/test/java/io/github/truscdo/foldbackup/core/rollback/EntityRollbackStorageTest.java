@@ -1,9 +1,10 @@
 package io.github.truscdo.foldbackup.core.rollback;
 
-import io.github.truscdo.foldbackup.core.BackupExporter;
 import io.github.truscdo.foldbackup.core.backup.RegionProcessor;
 import io.github.truscdo.foldbackup.core.archive.ArchiveCreator;
-import io.github.truscdo.foldbackup.core.archive.ArchiveRestorer;
+import io.github.truscdo.foldbackup.core.restore.RestoreOperation;
+import io.github.truscdo.foldbackup.core.restore.RestoreTestSupport;
+import io.github.truscdo.foldbackup.core.restore.SnapshotRestoreSource;
 import io.github.truscdo.foldbackup.core.format.*;
 import io.github.truscdo.foldbackup.core.store.*;
 import org.junit.jupiter.api.Test;
@@ -136,10 +137,11 @@ class EntityRollbackStorageTest {
         var snapshot = backup(world);
         assertEquals(Set.copyOf(paths), snapshot.getRegions().stream().map(RegionEntry::getFilename).collect(Collectors.toSet()));
         Path exported = temp.resolve("exported"), archive = temp.resolve("archive"), restored = temp.resolve("restored");
-        var exporter = new BackupExporter(snapshots, blobs, 6);
-        exporter.export(snapshot.getEpochSeconds(), exported, false);
+        try (var source = new SnapshotRestoreSource(snapshot, blobs)) {
+            RestoreOperation.run(source, exported, new RestoreOperation.Options(false, false, 1, 6), null);
+        }
         new ArchiveCreator(snapshots, blobs, 6).createFull(snapshot.getEpochSeconds(), archive);
-        new ArchiveRestorer(6).restore(archive, null, null, restored);
+        RestoreTestSupport.restoreTo(archive, null, null, restored, false, 1);
         for (String path : paths) {
             assertArrayEquals(expected.get(path), read(exported.resolve(path), 0));
             assertArrayEquals(expected.get(path), read(restored.resolve(path), 0));

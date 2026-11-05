@@ -4,6 +4,7 @@ import io.github.truscdo.foldbackup.core.store.BlobStore;
 import io.github.truscdo.foldbackup.core.store.SnapshotStore;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -19,6 +20,9 @@ import static org.junit.jupiter.api.Assertions.*;
  * {@code ChunkRollbackResult(false, ...)} 中——在此验证。
  */
 class ChunkRollbackCoordinatorTest {
+
+    @TempDir
+    Path tempRoot;
 
     // ── 解析失败处理 ──
 
@@ -77,7 +81,7 @@ class ChunkRollbackCoordinatorTest {
     // ── 辅助方法 ──
 
     /** 创建没有 index.db 的最小备份根目录（空状态）。 */
-    private static Path createTempBackupRoot() throws IOException {
-        return Files.createTempDirectory("foldbackup-test-");
+    private Path createTempBackupRoot() throws IOException {
+        return Files.createTempDirectory(tempRoot, "backup-");
     }
 }

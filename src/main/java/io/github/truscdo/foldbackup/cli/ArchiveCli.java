@@ -4,8 +4,10 @@ import io.github.truscdo.foldbackup.core.store.BlobStore;
 import io.github.truscdo.foldbackup.core.store.SnapshotStore;
 import io.github.truscdo.foldbackup.core.archive.ArchiveDefaults;
 import io.github.truscdo.foldbackup.core.archive.ArchiveCreator;
-import io.github.truscdo.foldbackup.core.archive.ArchiveRestorer;
+import io.github.truscdo.foldbackup.core.archive.ArchiveRestoreSource;
 import io.github.truscdo.foldbackup.core.console.ProgressPrinter;
+import io.github.truscdo.foldbackup.core.console.RestoreStatsPrinter;
+import io.github.truscdo.foldbackup.core.restore.RestoreOperation;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -87,10 +89,13 @@ public final class ArchiveCli {
     }
 
     public static void runArchiveExport(Path archiveRoot, List<String> args) throws IOException {
-        if (args.size() < 3) throw new IOException("Usage: archive export <archive-file> --output <dir> [--threads <N>]");
+        if (args.size() < 3) throw new IOException("Usage: archive export <archive-file> --output <dir> "
+                + "[--delete-extra] [--dry-run] [--threads <N>]");
         Path archiveFile = BackupCli.resolveArchiveFile(archiveRoot, args.get(2));
         Path output = null;
         int threads = 0;
+        boolean deleteExtra = false;
+        boolean dryRun = false;
         boolean outputSeen = false;
         boolean threadsSeen = false;
         for (int i = 3; i < args.size(); i++) {
@@ -99,6 +104,14 @@ public final class ArchiveCli {
                     if (outputSeen) throw new IOException("Duplicate --output");
                     output = Path.of(optionValue(args, ++i, "--output"));
                     outputSeen = true;
+                }
+                case "--delete-extra" -> {
+                    if (deleteExtra) throw new IOException("Duplicate --delete-extra");
+                    deleteExtra = true;
+                }
+                case "--dry-run" -> {
+                    if (dryRun) throw new IOException("Duplicate --dry-run");
+                    dryRun = true;
                 }
                 case "--threads" -> {
                     if (threadsSeen) throw new IOException("Duplicate --threads");
@@ -109,13 +122,16 @@ public final class ArchiveCli {
             }
         }
         if (output == null) throw new IOException("archive export requires --output <dir>");
-        ArchiveRestorer restorer = new ArchiveRestorer(ArchiveDefaults.RESTORE_LEVEL, threads);
-        Path result;
-        try (var progress = new ProgressPrinter(System.err)) {
+        RestoreOperation.Outcome outcome;
+        try (var source = ArchiveRestoreSource.open(archiveRoot, archiveFile);
+                var progress = new ProgressPrinter(System.err)) {
             System.out.println("Exporting " + archiveFile + " to " + output + " ...");
-            result = CliOutput.exportArchive(restorer, archiveRoot, archiveFile, output, progress.onProgress());
+            outcome = RestoreOperation.run(source, output,
+                    new RestoreOperation.Options(dryRun, deleteExtra, threads, ArchiveDefaults.RESTORE_LEVEL),
+                    progress.onProgress());
         }
-        System.out.println("Done: " + result);
+        RestoreStatsPrinter.print(outcome.stats(), deleteExtra, dryRun, outcome.target(), System.out);
+        System.out.println("Done: " + outcome.target());
     }
 
     private static String optionValue(List<String> args, int index, String option) throws IOException {

@@ -147,7 +147,9 @@ tasks.named('test') {
 sourceSets {
     integrationTest {
         compileClasspath += sourceSets.main.output
-        runtimeClasspath += sourceSets.main.output
+        // 集成测试的 @TempDir 也走 src/test 里的重试工厂与 junit-platform.properties；
+        // 否则 JUnit 默认的单次删除会在 Windows 文件被占用时直接让测试失败。
+        runtimeClasspath += sourceSets.main.output + sourceSets.test.output
     }
 }
 

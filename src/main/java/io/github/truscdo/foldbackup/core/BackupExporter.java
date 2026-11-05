@@ -1,15 +1,9 @@
 package io.github.truscdo.foldbackup.core;
 
-import io.github.truscdo.foldbackup.core.store.BlobStore;
 import io.github.truscdo.foldbackup.core.store.SnapshotStore;
 import io.github.truscdo.foldbackup.core.store.SnapshotManifest;
 import io.github.truscdo.foldbackup.core.store.SnapshotReclamationEstimator;
-import io.github.truscdo.foldbackup.core.archive.SnapshotWorldRestorer;
 
-import java.io.IOException;
-import java.io.OutputStream;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.text.SimpleDateFormat;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -17,24 +11,14 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipOutputStream;
 
-/**
- * 将快照从数据块存储导出为 Anvil (.mca) 世界目录。
- * <p>
- * 输出可选打包为单个 zip 归档。
- */
+/** 在线快照的列表与空间摘要视图。 */
 public class BackupExporter {
 
     private final SnapshotStore snapshotManager;
-    private final BlobStore blobStore;
-    private final int compressionLevel;
 
-    public BackupExporter(SnapshotStore snapshotManager, BlobStore blobStore, int compressionLevel) {
+    public BackupExporter(SnapshotStore snapshotManager) {
         this.snapshotManager = snapshotManager;
-        this.blobStore = blobStore;
-        this.compressionLevel = compressionLevel;
     }
 
     // --- 列表 ---
@@ -128,90 +112,5 @@ public class BackupExporter {
             }
         }
         return candidates;
-    }
-
-    // --- 导出 ---
-
-    /**
-     * Export a snapshot to the given output directory (no progress callback).
-     *
-     * @param epochSeconds internal snapshot identity
-     * @param outputPath target directory (created if absent)
-     * @param zip        if true, package the output as a zip and delete the
-     *                   directory
-     * @return the path to the exported output (directory or zip file)
-     * @throws IOException if the snapshot is not found or I/O fails
-     */
-    public Path export(long epochSeconds, Path outputPath, boolean zip) throws IOException {
-        return exportWithProgress(epochSeconds, outputPath, zip, null);
-    }
-
-    /**
-     * Export a snapshot to the given output directory with progress callback.
-     * <p>
-     * Region entries are re-encoded by streaming: each stored LRH frame expands
-     * into a fresh Anvil file, and a whole region is never buffered.
-     * <p>
-     * @param epochSeconds     internal snapshot identity
-     * @param outputPath       target directory (created if absent)
-     * @param zip              if true, package the output as a zip and delete the
-     *                         directory
-     * @param progressListener progress listener, may be {@code null}
-     * @return the path to the exported output (directory or zip file)
-     * @throws IOException if the snapshot is not found or I/O fails
-     */
-    public Path exportWithProgress(long epochSeconds, Path outputPath, boolean zip,
-            ProgressListener progressListener) throws IOException {
-        return exportWithProgress(epochSeconds, outputPath, zip, 0, progressListener);
-    }
-
-    /** Export with an explicit Region worker cap; zero selects the memory-bounded default. */
-    public Path exportWithProgress(long epochSeconds, Path outputPath, boolean zip,
-            int threads, ProgressListener progressListener) throws IOException {
-        SnapshotManifest snapshot = snapshotManager.loadSnapshot(epochSeconds);
-        if (snapshot == null) {
-            throw new IOException("Snapshot not found at epoch: " + epochSeconds);
-        }
-
-        var progress = new ProgressTracker(progressListener);
-        new SnapshotWorldRestorer(blobStore, compressionLevel, threads)
-                .restore(snapshot, outputPath, progressListener);
-
-        // 可选打包 zip
-        if (zip) {
-            progress.stage("Packaging", 1);
-            progress.current("packaging...");
-
-            Path zipPath = outputPath.resolveSibling(outputPath.getFileName() + ".zip");
-            try (OutputStream fos = Files.newOutputStream(zipPath);
-                    ZipOutputStream zos = new ZipOutputStream(fos)) {
-                Path root = outputPath;
-                Files.walk(root).filter(p -> !Files.isDirectory(p)).forEach(p -> {
-                    String entry = root.relativize(p).toString().replace('\\', '/');
-                    try {
-                        zos.putNextEntry(new ZipEntry(entry));
-                        Files.copy(p, zos);
-                        zos.closeEntry();
-                    } catch (IOException e) {
-                        throw new RuntimeException("Failed to zip " + entry, e);
-                    }
-                });
-            }
-            // 删除临时目录
-            try (var stream = Files.walk(outputPath)) {
-                stream.sorted(java.util.Comparator.reverseOrder())
-                        .forEach(p -> {
-                            try {
-                                Files.deleteIfExists(p);
-                            } catch (IOException ignored) {
-                            }
-                        });
-            }
-
-            progress.done("done");
-            return zipPath;
-        }
-
-        return outputPath;
     }
 }

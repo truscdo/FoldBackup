@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import java.io.IOException;
 import java.nio.file.AccessDeniedException;
 import java.nio.file.DirectoryNotEmptyException;
+import java.nio.file.FileSystemException;
 import java.nio.file.Files;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -17,6 +18,16 @@ class RetryingTempDirFactoryTest {
             int attempt = attempts.incrementAndGet();
             if (attempt == 1) throw new DirectoryNotEmptyException("temporary");
             if (attempt == 2) throw new AccessDeniedException("temporary");
+        }, 3, 0);
+        assertEquals(3, attempts.get());
+    }
+
+    @Test void retriesWindowsSharingViolations() throws Exception {
+        var attempts = new AtomicInteger();
+        var failure = new FileSystemException("busy.dat", null,
+                "The process cannot access the file because it is being used by another process");
+        RetryingTempDirFactory.retryCleanup(() -> {
+            if (attempts.incrementAndGet() < 3) throw failure;
         }, 3, 0);
         assertEquals(3, attempts.get());
     }

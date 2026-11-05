@@ -10,7 +10,11 @@ import io.github.truscdo.foldbackup.core.archive.ArchiveCreator;
 
 import io.github.truscdo.foldbackup.core.LogUtil;
 import io.github.truscdo.foldbackup.core.console.ProgressPrinter;
+import io.github.truscdo.foldbackup.core.console.RestoreStatsPrinter;
 import io.github.truscdo.foldbackup.core.console.SnapshotTablePrinter;
+import io.github.truscdo.foldbackup.core.export.SnapshotZipExport;
+import io.github.truscdo.foldbackup.core.restore.RestoreOperation;
+import io.github.truscdo.foldbackup.core.restore.SnapshotRestoreSource;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -46,7 +50,7 @@ public class BackupTui {
     private StoreContext openStore() throws IOException {
         var store = new SnapshotStore(backupRoot);
         var blobs = new BlobStore(backupRoot, ArchiveDefaults.EXPORT_LEVEL);
-        var backupExporter = new BackupExporter(store, blobs, ArchiveDefaults.EXPORT_LEVEL);
+        var backupExporter = new BackupExporter(store);
         return new StoreContext(store, blobs, backupExporter);
     }
 
@@ -216,9 +220,11 @@ public class BackupTui {
                 // 0 here returns to the ZIP choice.
                 while (true) {
                     System.out.println();
-                    Path defaultOutput = ArchiveDefaults.worldExport(selected.id);
-                    String pathStr = prompt.readLine("Output directory (Enter for default: "
-                            + defaultOutput + ", 0 = back): ");
+                    Path defaultOutput = zip
+                            ? ArchiveDefaults.worldExportZip(selected.id)
+                            : ArchiveDefaults.worldExport(selected.id);
+                    String pathStr = prompt.readLine((zip ? "Output zip path" : "Output directory")
+                            + " (Enter for default: " + defaultOutput + ", 0 = back): ");
                     if (pathStr == null) {
                         return;
                     }
@@ -235,6 +241,24 @@ public class BackupTui {
                         continue;
                     }
 
+                    if (!zip) {
+                        ExportFlow flow = exportDirectory(store, selected, outputPath);
+                        if (flow == ExportFlow.CANCEL) {
+                            System.out.println("Export cancelled.\n");
+                            return;
+                        }
+                        if (flow == ExportFlow.DONE) return;
+                        continue;
+                    }
+
+                    Path zipTarget;
+                    try {
+                        zipTarget = SnapshotZipExport.resolveTarget(outputPath);
+                    } catch (IOException e) {
+                        System.out.println("Invalid output path: " + e.getMessage() + "\n");
+                        continue;
+                    }
+
                     int threads = prompt.readThreadCount();
                     if (threads == ConsolePrompt.EOF) return;
                     if (threads == ConsolePrompt.BACK) continue;
@@ -243,9 +267,9 @@ public class BackupTui {
                     System.out.println("Summary:");
                     System.out.println("  Snapshot: " + selected.id);
                     System.out.println("  Format:   MCA (.mca)");
-                    System.out.println("  Zip:      " + (zip ? "yes" : "no"));
+                    System.out.println("  Zip:      yes");
                     System.out.println("  Threads:  " + (threads > 0 ? threads : "auto"));
-                    System.out.println("  Output:   " + outputPath);
+                    System.out.println("  Output:   " + zipTarget);
                     System.out.println();
 
                     int confirm = prompt.readInt(
@@ -262,8 +286,8 @@ public class BackupTui {
                     try {
                         Path result;
                         try (var progress = new ProgressPrinter(System.out)) {
-                            result = store.exporter().exportWithProgress(selected.epochSeconds, outputPath,
-                                    zip, threads, progress.onProgress());
+                            result = SnapshotZipExport.export(store.snapshotManager(), store.blobStore(),
+                                    selected.id, zipTarget, threads, progress.onProgress());
                         }
                         System.out.println("Done: " + result.toAbsolutePath().normalize() + "\n");
                     } catch (IOException e) {
@@ -272,6 +296,63 @@ public class BackupTui {
                     return;
                 }
             }
+        }
+    }
+
+    // ──────────────────────────────────────────────
+    // 目录导出（检查 → 统计 → 决策 → 线程数 → 执行）
+    // ──────────────────────────────────────────────
+
+    private enum ExportFlow { DONE, BACK_TO_PATH, CANCEL }
+
+    private ExportFlow exportDirectory(StoreContext store, BackupExporter.SnapshotInfo selected, Path outputPath) {
+        SnapshotManifest manifest = store.snapshotManager().loadSnapshot(selected.epochSeconds);
+        if (manifest == null) {
+            System.err.println("Snapshot not found: " + selected.id + "\n");
+            return ExportFlow.CANCEL;
+        }
+        try (var source = new SnapshotRestoreSource(manifest, store.blobStore())) {
+            RestoreOperation.Session session;
+            try (var progress = new ProgressPrinter(System.out)) {
+                session = RestoreOperation.prepare(source, outputPath, 0, progress.onProgress());
+            } catch (IOException e) {
+                System.err.println("Export failed: " + e.getMessage() + "\n");
+                return ExportFlow.CANCEL;
+            }
+            try (session) {
+                System.out.println();
+                RestoreStatsPrinter.print(session.stats(), null, false, session.target(), System.out);
+                System.out.println();
+                while (true) {
+                    int choice = prompt.readInt(
+                            "1 = overwrite, 2 = delete extra, 3 = cancel to main menu, 0 = back: ", 0, 3);
+                    if (choice == 3) return ExportFlow.CANCEL;
+                    // Blank input and EOF follow the existing TUI convention: any non-positive
+                    // choice goes back one level.
+                    if (choice <= 0) return ExportFlow.BACK_TO_PATH;
+
+                    boolean deleteExtra = choice == 2;
+                    while (true) {
+                        int threads = prompt.readThreadCount();
+                        if (threads == ConsolePrompt.EOF) return ExportFlow.CANCEL;
+                        if (threads == ConsolePrompt.BACK) break;
+
+                        System.out.println("Exporting...");
+                        try (var progress = new ProgressPrinter(System.out)) {
+                            var outcome = session.execute(deleteExtra, threads, ArchiveDefaults.EXPORT_LEVEL,
+                                    progress.onProgress());
+                            System.out.println("Done: " + outcome.target().toAbsolutePath().normalize()
+                                    + ", deleted extra: " + outcome.deleted() + "\n");
+                        } catch (IOException e) {
+                            System.err.println("Export failed: " + e.getMessage() + "\n");
+                        }
+                        return ExportFlow.DONE;
+                    }
+                }
+            }
+        } catch (IOException e) {
+            System.err.println("Export failed: " + e.getMessage() + "\n");
+            return ExportFlow.CANCEL;
         }
     }
 

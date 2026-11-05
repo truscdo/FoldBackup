@@ -159,6 +159,15 @@ class BootstrapSupportTest {
         assertFalse(usage.contains("--format"), "online export no longer exposes LRH format selection");
     }
 
+    @Test
+    void usageTextDocumentsDirectoryRestoreOptions() {
+        String usage = BootstrapSupport.usageText();
+        assertTrue(usage.contains("snapshot export <snapshot-id> --output <path> "
+                + "[--zip] [--delete-extra] [--dry-run]"), "snapshot export lists the restore options: " + usage);
+        assertTrue(usage.contains("archive export <archive-file> --output <dir> "
+                + "[--delete-extra] [--dry-run]"), "archive export lists the restore options: " + usage);
+    }
+
     // ── --lib parsing ──────────────────────────────────────────
 
     @Test

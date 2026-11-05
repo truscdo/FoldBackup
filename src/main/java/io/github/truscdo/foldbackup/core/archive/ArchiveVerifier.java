@@ -308,7 +308,7 @@ public class ArchiveVerifier {
         }
     }
 
-    // ── tar location (mirrors ArchiveRestorer) ──
+    // ── tar location (mirrors ArchiveRestoreSource) ──
 
     private Path locateFullTar(Path archiveRoot, Long baseEpochSeconds) throws IOException {
         List<ArchiveTarScanner.ArchiveTarInfo> tars = ArchiveTarScanner.scan(archiveRoot);

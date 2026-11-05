@@ -101,7 +101,7 @@ class StreamingBackupTest {
         Path archive = temp.resolve("archive");
         new io.github.truscdo.foldbackup.core.archive.ArchiveCreator(store, blobs, 6).createFull(100, archive, false, 1);
         Path restored = temp.resolve("restored");
-        new io.github.truscdo.foldbackup.core.archive.ArchiveRestorer(6).restore(archive, 100L, null, restored);
+        io.github.truscdo.foldbackup.core.restore.RestoreTestSupport.restoreTo(archive, 100L, null, restored, false, 1);
         assertEquals("before", Files.readString(restored.resolve("level.dat")));
         assertEquals(1, new io.github.truscdo.foldbackup.core.archive.ArchiveImporter(archive, temp.resolve("imported")).importAll());
     }

@@ -89,7 +89,8 @@ class TarIndexTest {
             writer.putEntry(ArchiveCreator.fileObjectPath("1".repeat(32)), new byte[0]);
         }
         Path world = temp.resolve("must-not-exist");
-        assertThrows(IOException.class, () -> new ArchiveRestorer(6, 2).restore(archiveRoot, meta.epoch, null, world));
+        assertThrows(IOException.class, () -> io.github.truscdo.foldbackup.core.restore.RestoreTestSupport
+                .restoreTo(archiveRoot, meta.epoch, null, world, false, 2));
         assertFalse(Files.exists(world));
     }
 }

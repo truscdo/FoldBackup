@@ -272,6 +272,28 @@ final class ArchiveRestorePlan implements AutoCloseable {
                 includeRegion, completionListener, task);
     }
 
+    /**
+     * Runs only the selected output Regions and leaves out LRHD frames that contain none of them,
+     * so a frame with nothing to publish is never opened. Selected frames are still verified to
+     * their end before the result is considered complete.
+     */
+    <T> List<T> runRegionsSelected(Set<String> paths, ArchiveTasks.TaskWork taskWork, int threads,
+            IntConsumer completionListener, RegionTask<T> task) throws IOException {
+        boolean[] selected = new boolean[regions.size()];
+        Set<LrhdRestoreData> needed = new LinkedHashSet<>();
+        int count = 0;
+        for (int i = 0; i < regions.size(); i++) {
+            var region = regions.get(i);
+            selected[i] = paths.contains(region.path());
+            if (!selected[i]) continue;
+            count++;
+            if (region.delta() != null) needed.add(region.delta());
+        }
+        if (count == 0) return List.of();
+        return new ArchiveRestorePipeline(regions, needed).run(taskWork, threads, null, i -> selected[i],
+                completionListener, task);
+    }
+
     private void validateTargets() throws IOException {
         var targets = new WorldRestoreTargets();
         for (Region region : regions) {

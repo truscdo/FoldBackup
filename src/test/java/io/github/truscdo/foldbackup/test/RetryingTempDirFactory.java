@@ -5,8 +5,7 @@ import org.junit.jupiter.api.extension.ExtensionContext;
 import org.junit.jupiter.api.io.TempDirFactory;
 
 import java.io.IOException;
-import java.nio.file.AccessDeniedException;
-import java.nio.file.DirectoryNotEmptyException;
+import java.nio.file.FileSystemException;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -36,7 +35,10 @@ public final class RetryingTempDirFactory implements TempDirFactory {
             try {
                 cleanup.run();
                 return;
-            } catch (DirectoryNotEmptyException | AccessDeniedException failure) {
+            } catch (FileSystemException failure) {
+                // Windows reports a file still held by another process as a generic
+                // FileSystemException (sharing violation), not AccessDeniedException;
+                // DirectoryNotEmptyException is a subclass and is covered as well.
                 if (attempt >= attempts) throw failure;
                 try {
                     Thread.sleep(delayMillis);

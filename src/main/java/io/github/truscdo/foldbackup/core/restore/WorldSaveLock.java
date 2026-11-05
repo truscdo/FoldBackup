@@ -1,4 +1,4 @@
-package io.github.truscdo.foldbackup.cli;
+package io.github.truscdo.foldbackup.core.restore;
 
 import java.io.IOException;
 import java.nio.channels.FileChannel;
@@ -9,7 +9,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 
 /** Holds the Minecraft save's session lock throughout an offline operation. */
-final class WorldSaveLock implements AutoCloseable {
+public final class WorldSaveLock implements AutoCloseable {
     private final FileChannel channel;
     private final FileLock lock;
 
@@ -18,11 +18,11 @@ final class WorldSaveLock implements AutoCloseable {
         this.lock = lock;
     }
 
-    static WorldSaveLock acquire(Path dimensionDirectory) throws IOException {
+    public static WorldSaveLock acquire(Path dimensionDirectory) throws IOException {
         return acquireRoot(worldRoot(dimensionDirectory));
     }
 
-    static WorldSaveLock acquireRoot(Path worldRoot) throws IOException {
+    public static WorldSaveLock acquireRoot(Path worldRoot) throws IOException {
         if (!Files.isDirectory(worldRoot)) throw new IOException("World directory not found: " + worldRoot);
         Path lockPath = worldRoot.resolve("session.lock");
         FileChannel channel = FileChannel.open(lockPath, StandardOpenOption.CREATE, StandardOpenOption.WRITE);

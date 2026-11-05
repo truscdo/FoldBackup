@@ -76,7 +76,7 @@ class LrhdArchiveRecoveryTest {
 
     @Test void sequentialDeltaMergeIgnoresPhysicalTarAndMetadataOrdering() throws Exception {
         Path archive = archives(false, false), output = temp.resolve("world");
-        new ArchiveRestorer(3, 4).restore(archive, 100L, 200L, output);
+        io.github.truscdo.foldbackup.core.restore.RestoreTestSupport.restoreTo(archive, 100L, 200L, output, false, 4);
         for (int rx : new int[]{-1, 10}) {
             var region = AnvilTestSupport.readRegionAnvil(output.resolve("region/r." + rx + ".0.mca"));
             assertArrayEquals(rx == -1 ? new byte[]{7, 8} : new byte[]{4, 5}, region.getChunk(0).getRawChunk());
@@ -172,18 +172,26 @@ class LrhdArchiveRecoveryTest {
         }
     }
 
-    @Test void lastFrameChecksumFailureDoesNotPublishAnyRestoredFile() throws Exception {
+    @Test void lastFrameChecksumFailureFailsTheRestoreButKeepsUnrelatedContent() throws Exception {
         Path archive = archives(true, false), output = Files.createDirectory(temp.resolve("world"));
         Files.writeString(output.resolve("existing"), "keep");
-        assertThrows(IOException.class, () -> new ArchiveRestorer(3, 4).restore(archive, 100L, 200L, output));
+        // Entries land one by one, so a frame failing at its tail can leave earlier Regions behind;
+        // what must hold is that the restore reports the failure and leaves unrelated content alone.
+        assertThrows(IOException.class,
+                () -> io.github.truscdo.foldbackup.core.restore.RestoreTestSupport
+                        .restoreTo(archive, 100L, 200L, output, false, 4));
         assertEquals("keep", Files.readString(output.resolve("existing")));
-        try (var files = Files.list(output)) { assertEquals(1, files.count()); }
     }
 
-    @Test void hiddenDeltaPayloadStillMustPassChecksum() throws Exception {
+    @Test void framesWithoutSelectedRegionsAreNeverOpened() throws Exception {
         Path archive = archives(true, true), output = temp.resolve("world");
-        assertThrows(IOException.class, () -> new ArchiveRestorer(3, 4).restore(archive, 100L, 200L, output));
-        assertFalse(Files.exists(output));
+        // The only target Region comes from the baseline, so the corrupt LRHD frame is not consumed:
+        // restore verifies the frames it reads, and archive verify owns whole-archive integrity.
+        io.github.truscdo.foldbackup.core.restore.RestoreTestSupport
+                .restoreTo(archive, 100L, 200L, output, false, 4);
+        assertTrue(Files.isRegularFile(output.resolve("region/r.5.0.mca")));
+        assertFalse(Files.exists(output.resolve("region/r.10.0.mca")));
+        assertFalse(Files.exists(output.resolve("region/r.-1.0.mca")));
     }
 
     @Test void corruptDiffCannotPublishImportedSnapshotOrLeavePendingBlobs() throws Exception {

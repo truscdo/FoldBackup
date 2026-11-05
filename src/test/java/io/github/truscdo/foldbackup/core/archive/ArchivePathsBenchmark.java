@@ -37,10 +37,8 @@ final class ArchivePathsBenchmark {
                 for (boolean delta : new boolean[] {false, true}) {
                     Path world = target.resolve(delta ? "diff" : "full");
                     long start = System.nanoTime();
-                    var metrics = parallel ? (java.util.function.Consumer<ArchiveTasks.Metrics>) value ->
-                            report.append("restore tasks: ").append(value).append('\n') : null;
-                    new ArchiveRestorer(6, parallel ? 2 : 1, metrics).restore(archive, full.epoch,
-                            delta ? diff.epoch : null, world);
+                    io.github.truscdo.foldbackup.core.restore.RestoreTestSupport.restoreTo(archive, full.epoch,
+                            delta ? diff.epoch : null, world, false, parallel ? 2 : 1);
                     row(report, round, mode, delta ? "restore-diff" : "restore-full", start);
                     for (var region : regions) {
                         var actual = RegionStream.inspect(McaStream.source(world.resolve(region.getFilename())));

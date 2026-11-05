@@ -197,13 +197,48 @@ final class OfflineRollbackWriter implements AutoCloseable {
                     + (preserve ? "; recovery incomplete, retained files at " + stage : "; previous files restored"), failure);
         } finally {
             if (!preserve) {
-                try (var paths = Files.walk(stage)) {
-                    for (Path p : paths.sorted(Comparator.reverseOrder()).toList()) Files.deleteIfExists(p);
+                try {
+                    deleteTree(stage);
                 } catch (IOException cleanup) {
                     throw new IOException((committed ? "Rollback committed; " : "Rollback recovery finished; ")
                             + "temporary cleanup failed at " + stage, cleanup);
                 }
             }
+        }
+    }
+
+    /** Deletes the staging tree; enumeration handles are released before any path is removed. */
+    private static void deleteTree(Path root) throws IOException {
+        List<Path> paths;
+        try (var walk = Files.walk(root)) {
+            paths = walk.sorted(Comparator.reverseOrder()).toList();
+        }
+        for (Path path : paths) delete(path);
+    }
+
+    /**
+     * Windows can briefly report a directory whose last child was moved out as not empty, or deny
+     * access while a scan still holds it. Bounded retries keep that transient state from turning a
+     * completed rollback into a cleanup failure; cleanup still finishes when the thread is interrupted.
+     */
+    private static void delete(Path path) throws IOException {
+        boolean interrupted = Thread.interrupted();
+        try {
+            for (int attempt = 0; ; attempt++) {
+                try {
+                    Files.deleteIfExists(path);
+                    return;
+                } catch (DirectoryNotEmptyException | AccessDeniedException e) {
+                    if (attempt == 19) throw e;
+                    try {
+                        Thread.sleep(25);
+                    } catch (InterruptedException cancellation) {
+                        interrupted = true;
+                    }
+                }
+            }
+        } finally {
+            if (interrupted) Thread.currentThread().interrupt();
         }
     }
 

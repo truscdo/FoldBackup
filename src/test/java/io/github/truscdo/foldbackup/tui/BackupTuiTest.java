@@ -134,4 +134,84 @@ class BackupTuiTest {
             assertTrue(entries.findAny().isPresent(), "online operation must open the store");
         }
     }
+
+    // ──────────────────────────────────────────────
+    // 目录导出（检查 → 统计 → 决策 → 执行）
+    // ──────────────────────────────────────────────
+
+    /** Creates a store with one real snapshot: level.dat plus one Region file. */
+    private Path createSnapshotStore() throws Exception {
+        Path world = Files.createDirectory(root.resolve("export-source"));
+        Files.createDirectories(world.resolve("region"));
+        Files.writeString(world.resolve("level.dat"), "world metadata");
+        var region = new io.github.truscdo.foldbackup.core.format.Region(0, 0, 0);
+        region.setChunk(0, new io.github.truscdo.foldbackup.core.format.ChunkData(new byte[] {1, 2, 3}, 0, 0));
+        io.github.truscdo.foldbackup.core.format.AnvilTestSupport.writeRegionAnvil(
+                world.resolve("region/r.0.0.mca"), region, 6);
+        Path store = root.resolve("export-store");
+        io.github.truscdo.foldbackup.cli.SnapshotCreation.create(world, store, 1, event -> { });
+        return store;
+    }
+
+    private String runTui(Path store, String input) {
+        var output = new ByteArrayOutputStream();
+        PrintStream previous = System.out;
+        try {
+            System.setOut(new PrintStream(output, true));
+            new BackupTui(store, root.resolve("export-archive"),
+                    new ConsolePrompt(new StringReader(input), System.out)).run();
+        } finally {
+            System.setOut(previous);
+        }
+        return output.toString();
+    }
+
+    @Test
+    void exportDirectoryShowsCheckProgressAndWritesSave() throws Exception {
+        Path store = createSnapshotStore();
+        Path output = root.resolve("exported-world");
+
+        String text = runTui(store, "2\n1\n2\n" + output + "\n1\n\n0\n");
+
+        assertTrue(Files.isRegularFile(output.resolve("level.dat")), text);
+        assertTrue(Files.isRegularFile(output.resolve("region/r.0.0.mca")), text);
+        assertTrue(text.contains("Checking"), "the check phase reports progress: " + text);
+        assertTrue(text.contains("Changes:  1 region(s), 1 file(s)"), text);
+        assertTrue(text.contains("Done: "), text);
+    }
+
+    @Test
+    void blankAtDecisionReturnsToPathWithoutExporting() throws Exception {
+        Path store = createSnapshotStore();
+        Path output = root.resolve("not-exported");
+
+        String text = runTui(store, "2\n1\n2\n" + output + "\n\n0\n0\n0\n");
+
+        assertFalse(Files.exists(output), text);
+        assertTrue(text.contains("Target:"), text);
+        assertFalse(text.contains("Done: "), text);
+    }
+
+    @Test
+    void decisionTwoDeletesUnlistedContentAndDecisionOneKeepsIt() throws Exception {
+        Path store = createSnapshotStore();
+        Path output = root.resolve("existing-world");
+        runTui(store, "2\n1\n2\n" + output + "\n1\n\n0\n");
+
+        Path extra = output.resolve("data/extra.txt");
+        Files.createDirectories(extra.getParent());
+        Files.writeString(extra, "extra");
+
+        String deleted = runTui(store, "2\n1\n2\n" + output + "\n2\n\n0\n");
+        assertFalse(Files.exists(extra), deleted);
+        assertTrue(deleted.contains("Deletion: 1 candidate(s)"), deleted);
+        assertTrue(deleted.contains("deleted extra: true"), deleted);
+
+        Path kept = output.resolve("data-kept/keep.txt");
+        Files.createDirectories(kept.getParent());
+        Files.writeString(kept, "keep");
+        String keeping = runTui(store, "2\n1\n2\n" + output + "\n1\n\n0\n");
+        assertTrue(Files.exists(kept), keeping);
+        assertTrue(keeping.contains("deleted extra: false"), keeping);
+    }
 }

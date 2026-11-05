@@ -177,11 +177,11 @@ final class BootstrapSupport {
                   java -jar foldbackup-<version>.jar snapshot list
                   java -jar foldbackup-<version>.jar snapshot create --world <directory> [--threads <N>]
                   java -jar foldbackup-<version>.jar snapshot import --all-archive
-                  java -jar foldbackup-<version>.jar snapshot export <snapshot-id> --output <path> [--zip] [--threads <N>]
+                  java -jar foldbackup-<version>.jar snapshot export <snapshot-id> --output <path> [--zip] [--delete-extra] [--dry-run] [--threads <N>]
                   java -jar foldbackup-<version>.jar snapshot delete <snapshot-id> [--yes]
                   java -jar foldbackup-<version>.jar snapshot rollback <snapshot-id> --world <dir> --chunk <x> <z> [--yes]
                   java -jar foldbackup-<version>.jar archive create --snapshot <snapshot-id> [--base <snapshot-id>]
-                  java -jar foldbackup-<version>.jar archive export <archive-file> --output <dir> [--threads <N>]
+                  java -jar foldbackup-<version>.jar archive export <archive-file> --output <dir> [--delete-extra] [--dry-run] [--threads <N>]
                   java -jar foldbackup-<version>.jar archive verify [<archive-file>]
                   java -jar foldbackup-<version>.jar tui
 
@@ -194,11 +194,13 @@ final class BootstrapSupport {
 
                 Options:
                   --world <dir>        Closed world directory for snapshot create; dimension directory for rollback
-                  --zip                 Package snapshot export as a zip archive (.zip path required)
+                  --zip                 Package snapshot export as a zip archive (appends .zip when missing)
                   --output <path>       Final world directory or zip file path
                   --level <N>           archive create compression level
                   --no-recompress       archive create full archive without recompressing
                   --threads <N>         archive create/export and snapshot create/export/import worker count
+                  --delete-extra        Remove target content that is not in the restore list
+                  --dry-run             Check only; print the statistics without writing or deleting
                   --yes                 Skip delete/rollback confirmation
                   --lib <path>          Directory with the bundled runtime libraries
                                         (zstd-jni, zero-allocation-hashing)

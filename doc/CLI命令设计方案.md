@@ -1,5 +1,7 @@
 # CLI 命令设计方案
 
+本文件只定义命令行入口。TUI 的菜单、提示与默认路径见 [TUI 设计方案](TUI设计方案.md)。
+
 ## 常用命令
 
 为方便阅读，以下命令均忽略了 `--snapshot-root <dir>`、`--archive-root <dir>`、`--lib <dir>`，实际使用时需要按需添加。
@@ -10,12 +12,12 @@ foldbackup extract [--output <dir>]
 foldbackup snapshot list
 foldbackup snapshot create --world <dir> [--threads <N>]
 foldbackup snapshot import --all-archive
-foldbackup snapshot export <snapshot-id> --output <path> [--zip] [--threads <N>]
+foldbackup snapshot export <snapshot-id> --output <path> [--zip] [--delete-extra] [--dry-run] [--threads <N>]
 foldbackup snapshot delete <snapshot-id>
 foldbackup snapshot rollback <snapshot-id> --world <dir> --chunk <x> <z>
 
 foldbackup archive create --snapshot <snapshot-id> [--base <snapshot-id>]
-foldbackup archive export <archive-file> --output <dir>
+foldbackup archive export <archive-file> --output <dir> [--delete-extra] [--dry-run] [--threads <N>]
 foldbackup archive verify [<archive-file>]
 
 foldbackup tui
@@ -48,8 +50,10 @@ foldbackup tui
 | 命令 | 导出产物 | `--output` 含义 |
 | --- | --- | --- |
 | `snapshot export <snapshot-id>` | 指定快照对应的 Minecraft save 存档目录 | 最终 save 目录路径，不再追加快照名子目录 |
-| `snapshot export <snapshot-id> --zip` | 上述 save 存档的 ZIP 包 | 最终 ZIP 文件路径，必须使用 `.zip` 扩展名 |
+| `snapshot export <snapshot-id> --zip` | 上述 save 存档的 ZIP 包 | 最终 ZIP 文件路径；缺少 `.zip` 时自动补全（`out.tar` 得到 `out.tar.zip`） |
 | `archive export <archive-file>` | 目标归档对应的 Minecraft save 存档目录 | 最终 save 目录路径，不再追加归档名子目录 |
+
+`--output` 为空白或解析后没有文件或目录名（如根路径）时报错，此检查与磁盘状态无关。`--zip` 仅适用于 `snapshot export`。
 
 ### 区块回滚
 
@@ -64,17 +68,20 @@ foldbackup tui
 
 `archive verify <archive-file>` 校验指定归档及其恢复所需的依赖；省略文件参数时，校验归档库中的全部归档。校验包括归档格式、数据完整性和基准依赖是否完整。发现损坏或缺失依赖时报告具体文件并以非零退出码结束；全库校验应继续检查其余归档，最后汇总结果。
 
-## 已有目标与操作确认
+## 已有文件与操作确认
 
-- 两种 `export` 的最终输出路径已存在时默认拒绝执行，不合并目录或覆盖文件。首次实现不提供覆盖选项，用户需选择新的输出路径。
+- 两种目录形态的 `export` 都采用覆盖语义，目录不存在时自动创建（含缺失的父目录），已存在时就地更新：覆盖与目标清单不同的文件，相同的文件不更改。默认保留目标中不在清单里的内容；指定 `--delete-extra` 时移除它们（`session.lock` 除外），包括不在清单中的整个区域单元（`.mca` 及其 32×32 范围内的 `.mcc`）。目录非空时必须包含 `level.dat`，写入前取得世界锁。
+- `--zip` 输出完整打包。暂存目录建在目标 ZIP 同目录，结束后删除。归档导出只输出目录，没有 ZIP 形态。
+- `--dry-run` 只执行检查并输出更改与删除统计，不写入、不删除，但仍取得世界锁，保证统计与随后执行看到同一个世界状态。与 `--zip` 互斥；`--delete-extra` 同样与 `--zip` 互斥。
+- 统计始终输出更改、跳过、删除三组；未指定 `--delete-extra` 时删除组只表示目标中将被保留的条目，不执行删除。
 - `extract` 允许使用已存在的目录，但遇到同名运行库文件时拒绝覆盖；`archive create` 遇到同名归档也拒绝覆盖。
 - 批量导入时，已有且内容一致的快照跳过并报告；相同 ID 对应不同内容时报告冲突，不覆盖已有快照。
-- `snapshot delete` 和 `snapshot rollback` 在交互终端中先显示目标及影响范围，再要求确认。提供 `--yes` 跳过交互确认；非交互环境未指定 `--yes` 时直接报错，不等待输入。
+- `snapshot delete` 和 `snapshot rollback` 在 CLI 交互式终端中（与 TUI 菜单无关）先显示目标及影响范围，再要求确认。提供 `--yes` 跳过交互确认；非交互环境未指定 `--yes` 时直接报错，不等待输入。
 - `--yes` 仅跳过确认，不跳过世界锁、依赖完整性及数据校验。
 
 ## 高级选项
 
-高级选项保留在详细帮助中，不放入常用命令示例。省略时由程序提供合理默认值，具体默认值在实现时确定。
+高级选项保留在详细帮助中，不放入常用命令示例。省略时由程序提供合理默认值，具体默认值在实现时确定。`--no-recompress` 只对完整归档有意义，用于差分归档时忽略该选项并提示。
 
 | 选项 | 适用命令 | 用途 |
 | --- | --- | --- |

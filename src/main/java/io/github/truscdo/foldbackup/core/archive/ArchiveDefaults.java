@@ -42,4 +42,9 @@ public final class ArchiveDefaults {
     public static Path worldExport(String snapshotId) {
         return Path.of("world-export").resolve(snapshotId);
     }
+
+    /** 快照导出为 ZIP 时的默认产物路径。 */
+    public static Path worldExportZip(String snapshotId) {
+        return Path.of("world-export").resolve(snapshotId + ".zip");
+    }
 }

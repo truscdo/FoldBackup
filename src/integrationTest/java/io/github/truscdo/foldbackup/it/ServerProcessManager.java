@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
 import java.nio.channels.OverlappingFileLockException;
+import java.nio.file.FileSystemException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
@@ -35,6 +36,9 @@ public class ServerProcessManager implements AutoCloseable {
     private static final long SERVER_STOP_TIMEOUT_MS = Duration.ofSeconds(30).toMillis();
     private static final long PROCESS_KILL_TIMEOUT_MS = Duration.ofSeconds(15).toMillis();
     private static final long WORLD_LOCK_TIMEOUT_MS = Duration.ofSeconds(15).toMillis();
+    /** Windows 上服务器进程刚退出时文件句柄可能延迟释放，删除需要退避重试。 */
+    private static final int DELETE_ATTEMPTS = 20;
+    private static final long DELETE_RETRY_DELAY_MS = 100;
 
     private final Path runDir;
     private final Path projectDir;
@@ -229,9 +233,36 @@ public class ServerProcessManager implements AutoCloseable {
     private static void deleteRecursively(Path directory) throws IOException {
         if (!Files.exists(directory))
             return;
-        try (var paths = Files.walk(directory)) {
-            for (Path path : paths.sorted(Comparator.reverseOrder()).toList())
-                Files.deleteIfExists(path);
+        retryDelete(() -> {
+            try (var paths = Files.walk(directory)) {
+                for (Path path : paths.sorted(Comparator.reverseOrder()).toList())
+                    Files.deleteIfExists(path);
+            }
+        }, DELETE_ATTEMPTS, DELETE_RETRY_DELAY_MS);
+    }
+
+    @FunctionalInterface
+    private interface DeleteAction {
+        void run() throws IOException;
+    }
+
+    /** 重试 Windows 上临时的共享冲突/访问拒绝，永久失败仍然抛出。 */
+    private static void retryDelete(DeleteAction action, int attempts, long delayMillis) throws IOException {
+        for (int attempt = 1;; attempt++) {
+            try {
+                action.run();
+                return;
+            } catch (FileSystemException failure) {
+                if (attempt >= attempts)
+                    throw failure;
+                try {
+                    Thread.sleep(delayMillis);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    failure.addSuppressed(interrupted);
+                    throw failure;
+                }
+            }
         }
     }
 
