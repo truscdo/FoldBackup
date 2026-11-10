@@ -99,7 +99,14 @@ public class InMemoryChunkRollbackHandler {
             entities = EntityRollbackBridge.preserve(level, new ChunkPos(chunkX, chunkZ), e.getMessage());
         }
 
-        // ── 步骤 5：反序列化为临时 ChunkAccess ──
+        // ── 步骤 5：确认目标区块已加载（在可能改动 POI 的反序列化之前） ──
+        LevelChunk liveChunk = level.getChunkSource().getChunkNow(chunkX, chunkZ);
+        if (liveChunk == null) {
+            // 游戏内仅支持加载区块；未加载区块应停服后使用 CLI。
+            return failure("foldbackup.rollback.failure.chunk_not_loaded", chunkX, chunkZ);
+        }
+
+        // ── 步骤 6：反序列化为临时 ChunkAccess ──
         ChunkAccess sourceChunk;
         try {
             var chunkMap = level.getChunkSource().chunkMap;
@@ -109,29 +116,14 @@ public class InMemoryChunkRollbackHandler {
             return failure("foldbackup.rollback.failure.chunk_deserialize", e);
         }
 
-        // ── 步骤 6：获取活动区块 ──
-        LevelChunk liveChunk = level.getChunkSource().getChunkNow(chunkX, chunkZ);
-        if (liveChunk == null) {
-            // 游戏内仅支持加载区块；未加载区块应停服后使用 CLI。
-            return failure("foldbackup.rollback.failure.chunk_not_loaded", chunkX, chunkZ);
-        }
-
-        // ── 步骤 7：先清除 POI（在 sections/BEs 变更之前） ──
-        try {
-            fixupPoi(level, chunkX, chunkZ);
-        } catch (Exception e) {
-            return failure("foldbackup.rollback.failure.poi", e);
-        }
-
-        // ── 步骤 8：替换 section ──
+        // ── 步骤 7：替换 section ──
         try {
             replaceSections(liveChunk, sourceChunk, level);
         } catch (Exception e) {
             return failure("foldbackup.rollback.failure.sections", e);
         }
 
-        // ── 步骤 9：替换方块实体 ──
-        // （setBlockEntity 会自动为新 BE 注册 POI）
+        // ── 步骤 8：替换方块实体 ──
         // 注意：我们传入原始 chunkNbt，因为 ImposterProtoChunk 的
         // getBlockEntitiesPos()/getBlockEntity() 无法正确委派到包装的
         // ProtoChunk 的 BE 映射——直接从 NBT 读取是获取快照方块实体的
@@ -144,7 +136,7 @@ public class InMemoryChunkRollbackHandler {
             return failure("foldbackup.rollback.failure.block_entities", e);
         }
 
-        // 应用在世界变更之前准备好的实体替换。
+        // ── 步骤 9：应用实体回档（POI 票据要按回档后的村民记忆计算） ──
         try {
             liveChunk.setUnsaved(true);
             entities.apply();
@@ -152,7 +144,14 @@ public class InMemoryChunkRollbackHandler {
             return failure("foldbackup.rollback.failure.entities", e);
         }
 
-        // ── 步骤 10：环境修复 ──
+        // ── 步骤 10：按恢复后的方块重建 POI，并按村民记忆重算票据 ──
+        try {
+            PoiRollbackSupport.rebuild(level, liveChunk);
+        } catch (Exception e) {
+            return failure("foldbackup.rollback.failure.poi", e);
+        }
+
+        // ── 步骤 11：环境修复 ──
         try {
             // 标记光照需要重新计算——false 告诉 MC 内置光照引擎处理排队数据；true 则会跳过。
             liveChunk.setLightCorrect(false);
@@ -339,19 +338,6 @@ public class InMemoryChunkRollbackHandler {
         if (lightEngine instanceof ThreadedLevelLightEngine threaded) {
             threaded.updateChunkStatus(pos);
             threaded.tryScheduleUpdate();
-        }
-    }
-
-    private void fixupPoi(ServerLevel level, int chunkX, int chunkZ) {
-        // 清除 POI 缓存——NeoForge 补丁添加了 SectionStorage.remove()
-        // 我们直接使用 PoiManager，因为它扩展了 SectionStorage
-        // 清除 POI 缓存——遍历此区块中的所有 section 并逐个移除
-        var poiManager = level.getPoiManager();
-        int minSection = level.getMinBuildHeight() >> 4;
-        int maxSection = (level.getMaxBuildHeight() - 1) >> 4;
-        for (int sectionY = minSection; sectionY <= maxSection; sectionY++) {
-            long sectionPos = net.minecraft.core.SectionPos.asLong(chunkX, sectionY, chunkZ);
-            poiManager.remove(sectionPos);
         }
     }
 

@@ -37,6 +37,25 @@ public class ChunkRollbackSupport {
         return dimensionSubPath + "entities/r." + regionX + "." + regionZ + ".mca";
     }
 
+    public static String poiRegionFilename(String dimensionSubPath, int regionX, int regionZ) {
+        return dimensionSubPath + "poi/r." + regionX + "." + regionZ + ".mca";
+    }
+
+    /**
+     * Reads the POI column recorded in the snapshot. Returns {@code null} when the
+     * snapshot has no POI region file or no column for this chunk; callers turn that
+     * into an empty column, or skip the POI unit when the target has no file either.
+     * Absence is not an error on this path.
+     */
+    @Nullable
+    public static ChunkData resolvePoiChunk(SnapshotManifest manifest, BlobStore blobs,
+            int chunkX, int chunkZ, String dimensionSubPath) throws IOException {
+        RegionEntry entry = findRegionEntry(manifest,
+                poiRegionFilename(dimensionSubPath, chunkX >> 5, chunkZ >> 5));
+        if (entry == null) return null;
+        return readChunk(blobs, entry, chunkX, chunkZ);
+    }
+
     /** Uses the already resolved manifest, so latest cannot change between the two reads. */
     public static ResolvedEntitySnapshot resolveEntities(SnapshotManifest manifest, BlobStore blobs,
             int chunkX, int chunkZ, String dimensionSubPath) throws IOException {

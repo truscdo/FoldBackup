@@ -53,6 +53,21 @@ class ChunkRollbackSupportTest {
         assertNull(result);
     }
 
+    // ── POI 区域命名与缺失列 ──
+
+    @Test
+    void poiRegionFilename_usesPoiDirectory() {
+        assertEquals("poi/r.0.0.mca", ChunkRollbackSupport.poiRegionFilename("", 0, 0));
+        assertEquals("DIM-1/poi/r.-1.2.mca", ChunkRollbackSupport.poiRegionFilename("DIM-1/", -1, 2));
+    }
+
+    @Test
+    void resolvePoiChunk_missingRegionReturnsNull(@TempDir Path tmpDir) throws IOException {
+        var manifest = new SnapshotManifest();
+        var blobs = new io.github.truscdo.foldbackup.core.store.BlobStore(tmpDir, 6);
+        assertNull(ChunkRollbackSupport.resolvePoiChunk(manifest, blobs, 0, 0, ""));
+    }
+
     // ── tryLockRegionFile 测试 ──
 
     @Test

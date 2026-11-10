@@ -112,13 +112,17 @@ final class OfflineRollbackWriter implements AutoCloseable {
         return dimensionDir.relativize(absolute);
     }
 
-    void write(McaRegionUpdate blocks, McaRegionUpdate entities, int compression) throws IOException {
+    void write(McaRegionUpdate blocks, McaRegionUpdate entities, McaRegionUpdate poi,
+            int compression) throws IOException {
         try (var pending = Files.newDirectoryStream(dimensionDir, ".foldbackup-rollback-*.wip")) {
             for (Path path : pending) throw new IOException("Previous rollback files require inspection before retry: " + path);
         }
         // The normal backup filter excludes .wip directories, including recovery files left after a crash.
         Path stage = Files.createDirectory(dimensionDir.resolve(".foldbackup-rollback-" + UUID.randomUUID() + ".wip"));
-        List<McaRegionUpdate> updates = entities == null ? List.of(blocks) : List.of(blocks, entities);
+        List<McaRegionUpdate> updates = new ArrayList<>(3);
+        updates.add(blocks);
+        if (entities != null) updates.add(entities);
+        if (poi != null) updates.add(poi);
         List<Path> changed = new ArrayList<>();
         Map<Path, Boolean> existed = new LinkedHashMap<>();
         boolean preserve = false;

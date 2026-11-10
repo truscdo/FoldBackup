@@ -6,10 +6,13 @@ import io.github.truscdo.foldbackup.core.format.EntityRegionCodec;
 import io.github.truscdo.foldbackup.mod.ChunkEntityQuery;
 import io.github.truscdo.foldbackup.mod.SnapshotNbt;
 import net.minecraft.SharedConstants;
+import net.minecraft.core.GlobalPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.ai.memory.MemoryModuleType;
+import net.minecraft.world.entity.npc.Villager;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.ChunkPos;
 
@@ -176,14 +179,21 @@ public final class EntityRollbackBridge {
             used = true;
             List<Entity> created = flatten(replacement);
             try {
-                for (Entity entity : current) entity.discard();
+                for (Entity entity : current) {
+                    releasePoiClaims(entity);
+                    entity.discard();
+                }
                 add(created);
                 LOG.info("Replaced {} entities with {} in {}", current.size(), created.size(), chunk);
             } catch (Exception failure) {
                 try {
                     for (Entity entity : created) if (!entity.isRemoved()) entity.discard();
                     // 移除回调可能中途失败；恢复前先清除仍存活的原有实体。
-                    for (Entity entity : current) if (!entity.isRemoved()) entity.discard();
+                    for (Entity entity : current) {
+                        if (entity.isRemoved()) continue;
+                        releasePoiClaims(entity);
+                        entity.discard();
+                    }
                     add(flatten(fallback));
                 } catch (Exception recovery) {
                     failure.addSuppressed(recovery);
@@ -192,6 +202,17 @@ public final class EntityRollbackBridge {
                 }
                 LOG.error("Entity replacement failed in {}; previous entities restored", chunk, failure);
                 throw new IOException("Entity replacement failed; previous entities restored: " + failure.getMessage(), failure);
+            }
+        }
+
+        /**
+         * 原版只在 Villager#die 里释放 POI 票据。discard() 不经过 die，而 LivingEntity#remove 会清空 brain，
+         * 之后 releasePoi 已读不到记忆，所以必须在删除前手工释放，否则区块外的票据会永久占用。
+         */
+        private static void releasePoiClaims(Entity entity) {
+            if (!(entity instanceof Villager villager)) return;
+            for (MemoryModuleType<GlobalPos> memory : Villager.POI_MEMORIES.keySet()) {
+                villager.releasePoi(memory);
             }
         }
 

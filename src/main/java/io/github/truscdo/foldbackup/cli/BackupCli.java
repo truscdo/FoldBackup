@@ -271,8 +271,8 @@ public class BackupCli {
         System.out.println("  Dimension: " + (dimension.isEmpty() ? "overworld" : dimension));
         System.out.println("  Chunk:     [" + chunkX + ", " + chunkZ + "]");
         System.out.println("  Region:    r." + (chunkX >> 5) + "." + (chunkZ >> 5) + ".mca");
-        System.out.println("  Scope:     terrain, block entities, and recoverable entity data for this chunk");
-        System.out.println("  Excludes:  POI, player data, and world-level configuration");
+        System.out.println("  Scope:     terrain, block entities, entity data, and this chunk's POI column");
+        System.out.println("  Excludes:  player data and world-level configuration");
         if (!confirm("Apply this chunk rollback?", yes)) {
             System.out.println("Rollback cancelled.");
             return;

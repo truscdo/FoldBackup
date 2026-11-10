@@ -55,12 +55,36 @@ class EntityRollbackStorageTest {
             if (++moves[0] == 2) throw new java.io.IOException("injected second commit failure");
             Files.move(source, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
         })) {
-            var failure = assertThrows(java.io.IOException.class, () -> writer.write(next, nextEntities, 6));
+            var failure = assertThrows(java.io.IOException.class, () -> writer.write(next, nextEntities, null, 6));
             assertTrue(failure.getMessage().contains("previous files restored"));
         }
         assertEquals(2, moves[0]);
         assertArrayEquals(oldBlocks, Files.readAllBytes(blocks));
         assertArrayEquals(oldEntities, Files.readAllBytes(entities));
+    }
+
+    @Test void failedThirdFileCommitRestoresBlocksEntitiesAndPoi() throws Exception {
+        Path world = temp.resolve("world");
+        Path blocks = world.resolve("region/r.0.0.mca"), entities = world.resolve("entities/r.0.0.mca"), poi = world.resolve("poi/r.0.0.mca");
+        write(blocks, new byte[]{1}, null);
+        write(entities, chunk(0, 0), null);
+        write(poi, new byte[]{4}, null);
+        byte[] oldBlocks = Files.readAllBytes(blocks), oldEntities = Files.readAllBytes(entities), oldPoi = Files.readAllBytes(poi);
+        var nextBlocks = new McaRegionUpdate(blocks, 0, 0, 1000, 0, new byte[]{2}, 0);
+        var nextEntities = new McaRegionUpdate(entities, 0, 0, 1000, 0, new byte[]{3}, 0);
+        var nextPoi = new McaRegionUpdate(poi, 0, 0, 1000, 0, new byte[]{5}, 0);
+        int[] moves = {0};
+        try (var writer = new OfflineRollbackWriter(blocks.getParent(), (source, target) -> {
+            if (++moves[0] == 3) throw new java.io.IOException("injected third commit failure");
+            Files.move(source, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+        })) {
+            var failure = assertThrows(java.io.IOException.class,
+                    () -> writer.write(nextBlocks, nextEntities, nextPoi, 6));
+            assertTrue(failure.getMessage().contains("previous files restored"));
+        }
+        assertArrayEquals(oldBlocks, Files.readAllBytes(blocks));
+        assertArrayEquals(oldEntities, Files.readAllBytes(entities));
+        assertArrayEquals(oldPoi, Files.readAllBytes(poi));
     }
 
     @Test void streamingRewritePreservesExternalNeighborAndRemovesStaleMcc() throws Exception {
@@ -75,7 +99,7 @@ class EntityRollbackStorageTest {
         Files.write(staleMcc, new byte[]{4, 5, 6});
 
         var update = new McaRegionUpdate(mca, 0, 0, 1000, 0, new byte[]{9}, 99);
-        try (var writer = new OfflineRollbackWriter(regionDir)) { writer.write(update, null, 6); }
+        try (var writer = new OfflineRollbackWriter(regionDir)) { writer.write(update, null, null, 6); }
 
         Region rewritten = AnvilTestSupport.readRegionAnvil(mca);
         assertArrayEquals(new byte[]{9}, rewritten.getChunk(0).getRawChunk());
@@ -94,7 +118,7 @@ class EntityRollbackStorageTest {
             if (zeroByteSource) Files.createFile(mca);
             var update = new McaRegionUpdate(mca, 0, 0, McaRegionUpdate.mtime(mca), 35,
                     new byte[]{7, 8, 9}, 321);
-            try (var writer = new OfflineRollbackWriter(regionDir)) { writer.write(update, null, 6); }
+            try (var writer = new OfflineRollbackWriter(regionDir)) { writer.write(update, null, null, 6); }
             var summary = RegionStream.inspect(McaStream.source(mca));
             assertEquals(3, summary.lengths()[35]);
             assertEquals(321, summary.timestamps()[35]);
@@ -117,7 +141,7 @@ class EntityRollbackStorageTest {
             if (++moves[0] == 2) throw new java.io.IOException("injected MCC removal failure");
             Files.move(source, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
         })) {
-            var failure = assertThrows(java.io.IOException.class, () -> writer.write(update, null, 6));
+            var failure = assertThrows(java.io.IOException.class, () -> writer.write(update, null, null, 6));
             assertTrue(failure.getMessage().contains("previous files restored"));
         }
         assertEquals(2, moves[0]);
@@ -222,6 +246,50 @@ class EntityRollbackStorageTest {
         assertArrayEquals(new byte[]{1}, read(blocks, 0));
         assertArrayEquals(before, Files.readAllBytes(entities));
         assertTrue(result.message().contains("current entity files preserved"));
+    }
+
+    @Test void offlineRestoresTargetPoiColumnAndKeepsNeighborCells() throws Exception {
+        Path world = temp.resolve("world"), blocks = world.resolve("region/r.0.0.mca"), poi = world.resolve("poi/r.0.0.mca");
+        byte[] snapshotPoi = {11, 12, 13};
+        write(blocks, new byte[]{1}, null);
+        write(poi, snapshotPoi, new byte[]{21, 22});
+        var snapshot = backup(world);
+        write(poi, new byte[]{31}, new byte[]{32});
+
+        var result = new ChunkRollbackCoordinator(snapshots, blobs, 6)
+                .rollbackChunk(blocks.getParent(), 0, 0, snapshot.getEpochSeconds(), "");
+        assertTrue(result.success(), result.message());
+        assertArrayEquals(snapshotPoi, read(poi, 0));
+        assertArrayEquals(new byte[]{32}, read(poi, 1));
+        assertTrue(result.message().contains("POI column restored"), result.message());
+    }
+
+    @Test void offlineClearsPoiColumnWhenSnapshotHasNoPoi() throws Exception {
+        Path world = temp.resolve("world"), blocks = world.resolve("region/r.0.0.mca"), poi = world.resolve("poi/r.0.0.mca");
+        write(blocks, new byte[]{1}, null);
+        var snapshot = backup(world);
+        write(poi, new byte[]{9}, new byte[]{8});
+
+        var result = new ChunkRollbackCoordinator(snapshots, blobs, 6)
+                .rollbackChunk(blocks.getParent(), 0, 0, snapshot.getEpochSeconds(), "");
+        assertTrue(result.success(), result.message());
+        assertNull(read(poi, 0));
+        assertArrayEquals(new byte[]{8}, read(poi, 1));
+        assertTrue(result.message().contains("POI column cleared"), result.message());
+        assertNull(ChunkRollbackSupport.resolvePoiChunk(snapshot, blobs, 0, 0, ""));
+    }
+
+    @Test void offlineLeavesPoiUntouchedWhenSnapshotAndTargetHaveNoPoi() throws Exception {
+        Path world = temp.resolve("world"), blocks = world.resolve("region/r.0.0.mca"), poi = world.resolve("poi/r.0.0.mca");
+        write(blocks, new byte[]{1}, null);
+        var snapshot = backup(world);
+
+        var result = new ChunkRollbackCoordinator(snapshots, blobs, 6)
+                .rollbackChunk(blocks.getParent(), 0, 0, snapshot.getEpochSeconds(), "");
+        assertTrue(result.success(), result.message());
+        assertFalse(Files.exists(poi));
+        assertFalse(Files.exists(poi.getParent()), "no POI directory should be created");
+        assertTrue(result.message().contains("POI column absent"), result.message());
     }
 
     @Test void missingRegionOrChunkMeansEmptyAndLocksPreventAnyWrites() throws Exception {

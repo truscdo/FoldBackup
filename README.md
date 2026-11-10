@@ -160,7 +160,7 @@ java -jar ../mods/foldbackup-0.3.0.jar snapshot rollback <snapshot-id> --world .
 
 `--world` points to the target dimension directory: use the world root for the Overworld, `../world/DIM-1` for the Nether, `../world/DIM1` for the End, or the corresponding `dimensions/<namespace>/<path>` directory for a custom dimension. `--chunk` takes signed integer chunk coordinates, not block coordinates. For example, block coordinate `-1` belongs to chunk coordinate `-1`. The CLI asks for confirmation before proceeding; append `--yes` to skip the prompt.
 
-The CLI restores the target chunk's terrain, block entities, and recoverable entity data. It does not restore POI, player data, or world-level configuration. Check the target snapshot, dimension, and chunk coordinates before confirming the operation.
+The CLI restores the target chunk's terrain, block entities, recoverable entity data, and that chunk's points of interest exactly as recorded in the snapshot, including ticket occupancy. It does not restore player data or world-level configuration.
 
 ### Full and Differential Archives
 

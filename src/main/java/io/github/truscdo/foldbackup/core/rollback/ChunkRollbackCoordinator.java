@@ -1,6 +1,7 @@
 package io.github.truscdo.foldbackup.core.rollback;
 
 import io.github.truscdo.foldbackup.core.LogUtil;
+import io.github.truscdo.foldbackup.core.format.ChunkData;
 import io.github.truscdo.foldbackup.core.format.EntityRegionCodec;
 import io.github.truscdo.foldbackup.core.store.BlobStore;
 import io.github.truscdo.foldbackup.core.store.SnapshotStore;
@@ -82,13 +83,27 @@ public class ChunkRollbackCoordinator {
 
         // ── build region file path ──
         Path regionFile = regionDir.resolve("r." + regionX + "." + regionZ + ".mca");
-
         Path entityFile = regionDir.resolveSibling("entities").resolve(regionFile.getFileName());
+        Path poiFile = regionDir.resolveSibling("poi").resolve(regionFile.getFileName());
+
+        ChunkData poiChunk;
+        try {
+            poiChunk = ChunkRollbackSupport.resolvePoiChunk(
+                    resolved.manifest(), blobStore, chunkX, chunkZ, dimensionSubPath);
+        } catch (IOException e) {
+            return new ChunkRollbackResult(false, "POI data read failed: " + e.getMessage());
+        }
+
         boolean existed = Files.exists(regionFile);
+        // 快照没有该列、目标也没有 poi 文件时没有内容可写、也没有记录可清；跳过整个单元，
+        // 避免给从未有过 POI 的存档新建目录与空文件。
+        boolean poiStaged = poiChunk != null || Files.exists(poiFile);
         String entityReport;
         try (var writer = new OfflineRollbackWriter(regionDir)) {
-            if (!ChunkRollbackSupport.tryLockRegionFile(regionFile) || !ChunkRollbackSupport.tryLockRegionFile(entityFile))
-                return new ChunkRollbackResult(false, "Region or entity file is locked; stop the server before rollback");
+            if (!ChunkRollbackSupport.tryLockRegionFile(regionFile)
+                    || !ChunkRollbackSupport.tryLockRegionFile(entityFile)
+                    || !ChunkRollbackSupport.tryLockRegionFile(poiFile))
+                return new ChunkRollbackResult(false, "Region, entity, or POI file is locked; stop the server before rollback");
             McaRegionUpdate currentRegion = new McaRegionUpdate(regionFile, regionX, regionZ,
                     McaRegionUpdate.mtime(regionFile), gridIndex, resolved.chunk().getRawChunk(),
                     (int) (System.currentTimeMillis() / 1000L));
@@ -142,7 +157,13 @@ public class ChunkRollbackCoordinator {
                 entityReport = "entities restored=0, removed=0, skipped=all (count unknown), current entity files preserved: " + e.getMessage();
             }
             LogUtil.getLogger("foldbackup-entities").info("Chunk [{}, {}]: {}", chunkX, chunkZ, entityReport);
-            writer.write(currentRegion, currentEntities, compressionLevel);
+            McaRegionUpdate currentPoi = poiStaged
+                    ? new McaRegionUpdate(poiFile, regionX, regionZ,
+                            McaRegionUpdate.mtime(poiFile), gridIndex,
+                            poiChunk == null ? null : poiChunk.getRawChunk(),
+                            (int) (System.currentTimeMillis() / 1000L))
+                    : null;
+            writer.write(currentRegion, currentEntities, currentPoi, compressionLevel);
         } catch (IOException e) {
             return new ChunkRollbackResult(false, e.getMessage());
         }
@@ -150,7 +171,9 @@ public class ChunkRollbackCoordinator {
         String detail = "Chunk [" + chunkX + ", " + chunkZ
                 + "] restored from " + resolved.manifest().getSnapshotId()
                 + " (r." + regionX + "." + regionZ + ".mca)"
-                + (existed ? "" : ", region file was created") + "; " + entityReport;
+                + (existed ? "" : ", region file was created") + "; " + entityReport
+                + "; POI " + (poiChunk != null ? "column restored"
+                        : poiStaged ? "column cleared" : "column absent in snapshot and target");
         return new ChunkRollbackResult(true, detail);
     }
 }
