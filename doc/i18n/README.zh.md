@@ -198,21 +198,24 @@ CLI会恢复目标区块的地形、方块实体、可恢复的实体数据，�
 | `general.enabled` | `true` | 开启自动备份 |
 | `general.backupPath` | `./foldbackups` | 相对于服务端运行目录的备份根，也支持绝对路径。专用服务器直接以它为仓库；单机在其下按存档目录名各建一个仓库 |
 | `general.compressionLevel` | `6` | Zstd 压缩级别，范围 1–22 |
-| `scheduling.intervalMinutes` | `120` | 自动备份的玩家在线时间累计间隔，单位分钟 |
+| `scheduling.intervalMinutes` | `30` | 自动备份的玩家在线时间累计间隔，单位分钟 |
 | `scheduling.minIntervalMinutes` | `10` | 两次备份的最小墙钟间隔，单位分钟 |
 | `scheduling.savePauseStallSeconds` | `300` | 世界扫描无进展多少秒后中止备份并恢复自动保存；0 表示不检查 |
 | `scheduling.backupOnStart` | `false` | 启动时备份 |
 | `scheduling.backupOnStop` | `false` | 关闭时备份 |
 | `retention.enabled` | `true` | 开启自动清理 |
 | `retention.maxSizeGB` | `50` | 清理后的仓库容量目标，单位 GiB；0 表示不限 |
-| `retention.minFreeSpaceGB` | `10` | 文件系统剩余空间目标，单位 GiB；0 表示禁用 |
-| `retention.maxAgeDays` | `30` | 快照最大保留天数；0 表示不限 |
+| `retention.minFreeSpaceGB` | `5` | 文件系统剩余空间目标，单位 GiB；0 表示禁用 |
+| `retention.maxAgeDays` | `0` | 快照最大保留天数；0 表示不限 |
 | `performance.regionThreads` | `0` | 处理工作线程数，0 表示自动 |
 | `performance.regionMemoryLimitMB` | `0` | 流式任务内存预算，0 表示自动 |
+| `logging.progressLogIntervalSeconds` | `3` | 进度日志的输出间隔秒数（1 最详细，300 最简略） |
+| `localization.defaultLanguage` | `en_us` | 未开启玩家语言检测或上报语言不受支持时使用的语言；可选 `zh_cn`、`en_us`、`es_es`、`pt_br`、`ru_ru` |
+| `localization.autoDetectPlayerLanguage` | `true` | 玩家上报的语言受支持时按其显示 |
 
-**自动清理可能删除包括手动备份在内的全部历史快照。** 容量或剩余空间限制也可能导致未满 30 天的快照被删除；剩余空间目标不代表已为下一次备份预留空间。三个清理限制均设为 0 时禁用自动删除，也可以通过 `retention.enabled` 关闭自动清理。
+**自动清理可能删除包括手动备份在内的全部历史快照。** 默认只限制仓库容量（50 GiB）与剩余空间（5 GiB），不设保留天数上限，因此清理可能为满足这两个目标而删除较新的快照；剩余空间目标不代表已为下一次备份预留空间。三个清理限制均设为 0 时禁用自动删除，也可以通过 `retention.enabled` 关闭自动清理。
 
-`general.excludePatterns` 按世界目录内的相对路径匹配，路径分隔符使用 `/`。默认排除 `**/session.lock`、`**/backups`、`**/.backups` 和 `**/*.wip`；匹配目录时会排除整个子目录树。
+`general.excludePatterns` 按世界目录内的相对路径匹配，路径分隔符使用 `/`。默认排除 `**/session.lock`、`**/backups`、`**/.backups`、`**/*.wip` 和 `**/DistantHorizons.sqlite`；匹配目录时会排除整个子目录树。
 
 ## 从源码构建
 

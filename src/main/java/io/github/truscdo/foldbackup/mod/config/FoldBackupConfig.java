@@ -101,7 +101,7 @@ public class FoldBackupConfig {
                 builder.comment("Backup scheduling").push("scheduling");
                 intervalMinutes = builder
                                 .comment("Backup interval (minutes of player online time)")
-                                .defineInRange("intervalMinutes", 120, 1, 10080);
+                                .defineInRange("intervalMinutes", 30, 1, 10080);
                 minIntervalMinutes = builder
                                 .comment("Minimum wall-clock interval between backups (minutes)")
                                 .defineInRange("minIntervalMinutes", 10, 0, 10080);
@@ -147,11 +147,11 @@ public class FoldBackupConfig {
                 minFreeSpaceGB = builder
                                 .comment("Minimum filesystem free space target in GiB (1024^3 bytes; 0 = disabled). "
                                                 + "This does not reserve space for the next backup.")
-                                .defineInRange("minFreeSpaceGB", 10, 0, 10000);
+                                .defineInRange("minFreeSpaceGB", 5, 0, 10000);
                 maxAgeDays = builder
                                 .comment("Maximum age in days of 86400 seconds (0 = unlimited). "
                                                 + "Capacity limits may delete younger snapshots. All limits zero disables automatic deletion.")
-                                .defineInRange("maxAgeDays", 30, 0, 36500);
+                                .defineInRange("maxAgeDays", 0, 0, 36500);
                 builder.pop();
 
                 // Localization

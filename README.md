@@ -196,21 +196,24 @@ Configuration is managed through NeoForge's SERVER configuration system. Names i
 | `general.enabled` | `true` | Enable automatic backups |
 | `general.backupPath` | `./foldbackups` | Backup root relative to the server's working directory; absolute paths are also supported. A dedicated server uses it as the repository; singleplayer creates one repository per world folder under it |
 | `general.compressionLevel` | `6` | Zstd compression level, from 1 to 22 |
-| `scheduling.intervalMinutes` | `120` | Accumulated player online time between automatic backups, in minutes |
+| `scheduling.intervalMinutes` | `30` | Accumulated player online time between automatic backups, in minutes |
 | `scheduling.minIntervalMinutes` | `10` | Minimum wall-clock time between backups, in minutes |
 | `scheduling.savePauseStallSeconds` | `300` | Abort the backup and restore world auto-saving when the world scan makes no progress for this long; 0 disables the check |
 | `scheduling.backupOnStart` | `false` | Back up on startup |
 | `scheduling.backupOnStop` | `false` | Back up on shutdown |
 | `retention.enabled` | `true` | Enable automatic cleanup |
 | `retention.maxSizeGB` | `50` | Target repository size after cleanup, in GiB; 0 means unlimited |
-| `retention.minFreeSpaceGB` | `10` | Target free space on the file system, in GiB; 0 disables this limit |
-| `retention.maxAgeDays` | `30` | Maximum snapshot retention age, in days; 0 means unlimited |
+| `retention.minFreeSpaceGB` | `5` | Target free space on the file system, in GiB; 0 disables this limit |
+| `retention.maxAgeDays` | `0` | Maximum snapshot retention age, in days; 0 means unlimited |
 | `performance.regionThreads` | `0` | Number of worker threads; 0 selects automatically |
 | `performance.regionMemoryLimitMB` | `0` | Memory budget for streaming tasks; 0 selects automatically |
+| `logging.progressLogIntervalSeconds` | `3` | Seconds between progress log messages (1 is most verbose, 300 is least) |
+| `localization.defaultLanguage` | `en_us` | Language used when player language detection is disabled or the reported language is unsupported; one of `zh_cn`, `en_us`, `es_es`, `pt_br`, `ru_ru` |
+| `localization.autoDetectPlayerLanguage` | `true` | Use each player's reported language when it is supported |
 
-**Automatic cleanup may delete all historical snapshots, including manually created backups.** Repository size and free-space limits may also cause snapshots younger than 30 days to be deleted. The free-space target does not mean space has been reserved for the next backup. Set all three cleanup limits to 0 to disable automatic deletion, or turn off automatic cleanup with `retention.enabled`.
+**Automatic cleanup may delete all historical snapshots, including manually created backups.** The default limits bound only repository size (50 GiB) and free space (5 GiB); there is no age limit, so cleanup can delete recent snapshots to satisfy those targets. The free-space target does not mean space has been reserved for the next backup. Set all three cleanup limits to 0 to disable automatic deletion, or turn off automatic cleanup with `retention.enabled`.
 
-`general.excludePatterns` matches paths relative to the world directory, using `/` as the path separator. By default, it excludes `**/session.lock`, `**/backups`, `**/.backups`, and `**/*.wip`. If a directory matches, its entire subtree is excluded.
+`general.excludePatterns` matches paths relative to the world directory, using `/` as the path separator. By default, it excludes `**/session.lock`, `**/backups`, `**/.backups`, `**/*.wip`, and `**/DistantHorizons.sqlite`. If a directory matches, its entire subtree is excluded.
 
 ## Build from Source
 
