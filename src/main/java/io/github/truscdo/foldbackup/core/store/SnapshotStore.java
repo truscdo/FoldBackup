@@ -39,6 +39,7 @@ public class SnapshotStore {
     private volatile MetadataIndex metadataIndex;
     private final BlobMaintenance blobMaintenance;
     private final BackupDirectoryLock directoryLock;
+    private final long lockTimeoutMillis;
     private final ThreadLocal<Integer> writeDepth = ThreadLocal.withInitial(() -> 0);
 
     public SnapshotStore(Path backupRoot) throws IOException {
@@ -50,9 +51,15 @@ public class SnapshotStore {
     }
 
     SnapshotStore(Path backupRoot, IndexStore indexStore, BlobMaintenance blobMaintenance) throws IOException {
+        this(backupRoot, indexStore, blobMaintenance, BackupDirectoryLock.DEFAULT_TIMEOUT_MILLIS);
+    }
+
+    SnapshotStore(Path backupRoot, IndexStore indexStore, BlobMaintenance blobMaintenance,
+            long lockTimeoutMillis) throws IOException {
         this.backupRoot = backupRoot;
         this.indexStore = indexStore;
         this.blobMaintenance = blobMaintenance;
+        this.lockTimeoutMillis = Math.max(0L, lockTimeoutMillis);
         this.directoryLock = BackupDirectoryLock.forRoot(backupRoot);
         try (WriteSession ignored = beginWrite()) {
             // beginWrite loads under the directory lock.
@@ -65,7 +72,7 @@ public class SnapshotStore {
      * 普通查询读取本实例最近加载/提交的稳定视图，不自动刷新其他进程的提交。
      */
     public WriteSession beginWrite() throws IOException {
-        directoryLock.lock(this);
+        directoryLock.lock(this, lockTimeoutMillis);
         try {
             if (writeDepth.get() == 0) metadataIndex = indexStore.load().freeze();
             writeDepth.set(writeDepth.get() + 1);

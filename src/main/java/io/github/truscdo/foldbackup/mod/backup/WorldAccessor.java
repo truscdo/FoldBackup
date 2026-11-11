@@ -58,11 +58,28 @@ public class WorldAccessor {
 
     /**
      * 恢复本次暂停前各维度的保存状态；未暂停时不修改任何维度。
+     * <p>
+     * 单个维度恢复失败不会阻止其余维度恢复，也不会把暂停状态留在列表里。
      */
     public void enableSaving() {
-        savingRestorations.forEach(Runnable::run);
+        if (savingRestorations.isEmpty())
+            return;
+        List<Runnable> restorations = new ArrayList<>(savingRestorations);
         savingRestorations.clear();
+        RuntimeException failure = null;
+        for (Runnable restore : restorations) {
+            try {
+                restore.run();
+            } catch (RuntimeException e) {
+                if (failure == null)
+                    failure = e;
+                else
+                    failure.addSuppressed(e);
+            }
+        }
         LOG.info("World saving state restored across all dimensions");
+        if (failure != null)
+            throw failure;
     }
 
     /**

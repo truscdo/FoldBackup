@@ -40,7 +40,7 @@ FoldBackup 是面向 Minecraft NeoForge 服务端的世界备份工具，支持�
 
    单机存档即使未开启作弊，主机玩家也能使用这些命令；通过局域网加入的其它玩家不能使用。
 
-默认备份目录是服务端运行目录下的 `foldbackups/`，可以通过 `general.backupPath` 修改。该配置是备份根：专用服务器直接以它为仓库，单机则使用 `foldbackups/<存档目录名>`，每个存档各自持有独立仓库。备份前会强制保存世界并暂时关闭自动保存，结束后恢复保存状态。
+默认备份目录是服务端运行目录下的 `foldbackups/`，可以通过 `general.backupPath` 修改。该配置是备份根：专用服务器直接以它为仓库，单机则使用 `foldbackups/<存档目录名>`，每个存档各自持有独立仓库。备份前会强制保存世界并暂时关闭自动保存；世界扫描结束即恢复保存，之后的快照提交与清理不再占用暂停时间。如果扫描连续 `scheduling.savePauseStallSeconds`（默认 300）秒没有进展，本次备份会被中止、保存立即恢复、在线玩家收到提示，下一次计划备份需要重新攒满一个完整间隔。
 
 默认开启自动备份，间隔按有玩家在线时的累计时间计算。手动备份也受最小备份间隔限制，需要跳过该间隔时可以使用 `/foldbackup backup --force`。
 
@@ -200,6 +200,7 @@ CLI会恢复目标区块的地形、方块实体、可恢复的实体数据，�
 | `general.compressionLevel` | `6` | Zstd 压缩级别，范围 1–22 |
 | `scheduling.intervalMinutes` | `120` | 自动备份的玩家在线时间累计间隔，单位分钟 |
 | `scheduling.minIntervalMinutes` | `10` | 两次备份的最小墙钟间隔，单位分钟 |
+| `scheduling.savePauseStallSeconds` | `300` | 世界扫描无进展多少秒后中止备份并恢复自动保存；0 表示不检查 |
 | `scheduling.backupOnStart` | `false` | 启动时备份 |
 | `scheduling.backupOnStop` | `false` | 关闭时备份 |
 | `retention.enabled` | `true` | 开启自动清理 |

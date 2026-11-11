@@ -82,6 +82,19 @@ public class BackupScheduler {
         saveState();
     }
 
+    /**
+     * 把一次被中止的尝试计入计时，避免刚失败就再次触发。
+     * <p>
+     * 中止后累积时间清零：下一次计划备份需要重新攒满 {@code intervalMinutes}，
+     * 而不是在最小间隔一到就立刻重试，从而给管理员留出排查时间。
+     */
+    public void markAttemptFailed() {
+        lastBackupTime = System.currentTimeMillis();
+        accumulatedOnlineMillis = 0;
+        saveState();
+        LOG.warn("Backup attempt aborted; the next scheduled backup waits for a full interval");
+    }
+
     // --- 查询 ---
 
     /** 上次成功备份的墙钟时间戳（毫秒）。 */

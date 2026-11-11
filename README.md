@@ -40,7 +40,7 @@ FoldBackup also introduces the LRHD format to record chunk differences in archiv
 
    In singleplayer, the world host can use these commands even when cheats are off. Other players joining over LAN cannot use them.
 
-By default, backups are stored under `foldbackups/` in the server's working directory. You can change this with `general.backupPath`, which is the backup root: a dedicated server uses it directly as the repository, while singleplayer uses `foldbackups/<world-folder-name>` so each world keeps its own repository. Before a backup, FoldBackup forces the world to save and temporarily disables automatic saving. It restores the previous saving state when the backup finishes.
+By default, backups are stored under `foldbackups/` in the server's working directory. You can change this with `general.backupPath`, which is the backup root: a dedicated server uses it directly as the repository, while singleplayer uses `foldbackups/<world-folder-name>` so each world keeps its own repository. Before a backup, FoldBackup forces the world to save and temporarily disables automatic saving. Saving is restored as soon as the world scan finishes, so committing the snapshot and cleaning up do not keep it disabled. If the scan makes no progress for `scheduling.savePauseStallSeconds` (default 300), the backup is aborted, saving is restored, players are warned, and the next scheduled attempt waits for a full interval.
 
 Automatic backups are enabled by default. The interval counts accumulated time while players are online. Manual backups are also subject to the minimum interval between backups; use `/foldbackup backup --force` to bypass it.
 
@@ -198,6 +198,7 @@ Configuration is managed through NeoForge's SERVER configuration system. Names i
 | `general.compressionLevel` | `6` | Zstd compression level, from 1 to 22 |
 | `scheduling.intervalMinutes` | `120` | Accumulated player online time between automatic backups, in minutes |
 | `scheduling.minIntervalMinutes` | `10` | Minimum wall-clock time between backups, in minutes |
+| `scheduling.savePauseStallSeconds` | `300` | Abort the backup and restore world auto-saving when the world scan makes no progress for this long; 0 disables the check |
 | `scheduling.backupOnStart` | `false` | Back up on startup |
 | `scheduling.backupOnStop` | `false` | Back up on shutdown |
 | `retention.enabled` | `true` | Enable automatic cleanup |

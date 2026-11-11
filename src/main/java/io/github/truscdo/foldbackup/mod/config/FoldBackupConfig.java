@@ -26,6 +26,7 @@ public class FoldBackupConfig {
         // --- 调度 ---
         private final ModConfigSpec.IntValue intervalMinutes;
         private final ModConfigSpec.IntValue minIntervalMinutes;
+        private final ModConfigSpec.IntValue savePauseStallSeconds;
         private final ModConfigSpec.BooleanValue backupOnStart;
         private final ModConfigSpec.BooleanValue backupOnStop;
 
@@ -104,6 +105,12 @@ public class FoldBackupConfig {
                 minIntervalMinutes = builder
                                 .comment("Minimum wall-clock interval between backups (minutes)")
                                 .defineInRange("minIntervalMinutes", 10, 0, 10080);
+                savePauseStallSeconds = builder
+                                .comment("Abort a running backup and restore world auto-saving when the world scan "
+                                                + "makes no progress for this many seconds. The pause only covers the "
+                                                + "world scan; committing the snapshot happens after saving resumes. "
+                                                + "0 disables the check.")
+                                .defineInRange("savePauseStallSeconds", 300, 0, 86400);
                 backupOnStart = builder
                                 .comment("Run a backup when the server starts")
                                 .define("backupOnStart", false);
@@ -193,6 +200,11 @@ public class FoldBackupConfig {
 
         public int getMinIntervalMinutes() {
                 return minIntervalMinutes.get();
+        }
+
+        /** 世界扫描无进展多少秒后中止备份并恢复保存；0 表示不检查。 */
+        public int getSavePauseStallSeconds() {
+                return savePauseStallSeconds.get();
         }
 
         public boolean isBackupOnStart() {

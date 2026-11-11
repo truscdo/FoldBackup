@@ -137,6 +137,17 @@ public class FoldBackupMod {
         return current == null ? null : current.executor();
     }
 
+    /**
+     * 服务器线程每刻调用：仓库因被占用而没打开时在后台重试。
+     * 后端正常时只是一次 volatile 读。
+     */
+    public void tickBackendInit() {
+        WorldRuntime current = runtime;
+        if (current != null) {
+            current.tickBackendInit();
+        }
+    }
+
     public BackupProgressNotifier getProgressNotifier() {
         return progressNotifier;
     }
@@ -160,7 +171,7 @@ public class FoldBackupMod {
         return current == null ? null : current.blobStore();
     }
 
-    /** 后端初始化失败的提示键；正常或尚未启动时为 {@code null}。 */
+    /** 后端当前不可用的提示键（初始化失败，或仓库被占用仍在重试）；正常或尚未启动时为 {@code null}。 */
     public String getBackendErrorKey() {
         WorldRuntime current = runtime;
         return current == null ? null : current.initErrorKey();

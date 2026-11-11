@@ -79,16 +79,22 @@ public class BlobMaintenance {
         return Files.deleteIfExists(file);
     }
 
-    /** Delete stale temporary files created by atomic storage operations. */
-    public int cleanupWipFiles() {
+    /**
+     * 删除原子存储操作遗留的临时文件。
+     *
+     * @throws RepositoryBusyException 仓库正被另一方占用，调用方应稍后重试
+     */
+    public int cleanupWipFiles() throws RepositoryBusyException {
         try {
             BackupDirectoryLock lock = BackupDirectoryLock.forRoot(rootDir);
-            lock.lock(this);
+            lock.lock(this, BackupDirectoryLock.DEFAULT_TIMEOUT_MILLIS);
             try {
                 return cleanupWipFilesLocked();
             } finally {
                 lock.unlock();
             }
+        } catch (RepositoryBusyException e) {
+            throw e;
         } catch (IOException e) {
             LOG.warn("Could not lock backup directory for temporary blob cleanup", e);
             return 0;

@@ -51,6 +51,10 @@ public class ServerLifecycleHandler {
         if (runtime.server() != event.getServer()) {
             return;
         }
+        // 兜底：仍在进行的异步备份必须先中止并恢复保存，否则关停备份会撞上它的运行位。
+        if (runtime.executor() != null) {
+            runtime.executor().cancelForShutdown();
+        }
         if (runtime.scheduler() != null) {
             runtime.scheduler().saveState();
         }

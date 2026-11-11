@@ -11,7 +11,7 @@ import net.neoforged.neoforge.event.tick.ServerTickEvent;
  * 处理备份调度和进度日志的服务器刻更新事件。
  * <p>
  * 委托给 {@link BackupScheduler#shouldTrigger(boolean)} 决定何时启动计划备份，
- * 并对任务进度日志消息进行限速，以免刷屏服务器日志。
+ * 并对任务进度日志消息进行限速，以免刷屏服务器日志。同时驱动仓库的后台重试。
  */
 public class TickHandler {
 
@@ -27,12 +27,21 @@ public class TickHandler {
 
     @SubscribeEvent
     public void onServerTick(ServerTickEvent.Post event) {
+        // 仓库被占用时的后台重试：后端正常时只是一次 volatile 读。
+        mod.tickBackendInit();
+
+        // 保存暂停的看门狗：没有进行中的备份时只是一次 volatile 读。
+        BackupExecutor executor = mod.getExecutor();
+        if (executor != null) {
+            executor.checkSavePause();
+        }
+
         BackupScheduler scheduler = mod.getScheduler();
-        if (scheduler != null && mod.getExecutor() != null && scheduler.shouldTrigger(
+        if (scheduler != null && executor != null && scheduler.shouldTrigger(
                 mod.getServer() != null && mod.getServer().getPlayerCount() > 0)) {
             LOG.info("Scheduled backup triggered ({} min of online time accumulated)",
                     mod.getConfig().getIntervalMinutes());
-            mod.getExecutor().triggerBackup(false);
+            executor.triggerBackup(false);
         }
 
         // 限速的任务进度日志
