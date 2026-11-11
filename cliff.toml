@@ -1,0 +1,38 @@
+[changelog]
+body = """
+{% set groups = ["🚀 Features", "🐛 Bug Fixes", "⚡ Performance", "♻️ Refactoring", "📝 Documentation", "📦 Build", "👷 CI", "🔧 Chores", "⚠️ Other"] -%}
+{% for group in groups -%}
+{% set items = commits | filter(attribute="group", value=group) -%}
+{% if items | length > 0 %}### {{ group }}
+{% for commit in items %}- {% if commit.scope %}**{{ commit.scope }}**: {% endif %}{% if commit.breaking %}**BREAKING** {% endif %}{{ commit.message | upper_first }} — {{ commit.id | truncate(length=8, end="") }} by {% if commit.remote.username %}@{{ commit.remote.username }}{% else %}{{ commit.author.name }}{% endif %}
+{% endfor %}
+{% endif -%}
+{% endfor -%}
+{% if previous.version %}
+---
+**Changes since** `{{ previous.version }}` · {{ statistics.commit_count }} commits
+{%- endif %}
+"""
+footer = ""
+trim = true
+
+[git]
+conventional_commits = true
+filter_unconventional = false
+split_commits = false
+commit_parsers = [
+    { message = "^Merge ", skip = true },
+    { message = "^feat", group = "🚀 Features" },
+    { message = "^fix", group = "🐛 Bug Fixes" },
+    { message = "^perf", group = "⚡ Performance" },
+    { message = "^refactor", group = "♻️ Refactoring" },
+    { message = "^docs?", group = "📝 Documentation" },
+    { message = "^build", group = "📦 Build" },
+    { message = "^ci", group = "👷 CI" },
+    { message = "^chore|^style|^test", group = "🔧 Chores" },
+    { message = "^.*", group = "⚠️ Other" },
+]
+protect_breaking_commits = false
+filter_commits = false
+tag_pattern = '^v[0-9]+\.[0-9]+\.[0-9]+'
+sort_commits = "newest"

@@ -1,0 +1,91 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Tag '${GITHUB_REF_NAME}' is not a valid release tag (expected vX.Y.Z)."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Releasing FoldBackup $version"
+
+      - name: Generate changelog
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: --latest --strip header --github-repo=${{ github.repository }}
+        env:
+          OUTPUT: RELEASE_NOTES.md
+
+      - name: Compose release body
+        shell: bash
+        run: |
+          set -euo pipefail
+          minecraft="$(sed -n 's/^minecraft_version=//p' gradle.properties)"
+          neoforge="$(sed -n 's/^neo_version=//p' gradle.properties)"
+          {
+            printf '**Minecraft %s** · **NeoForge %s** · **Java 21**\n\n' "$minecraft" "$neoforge"
+            cat RELEASE_NOTES.md
+          } > RELEASE_BODY.md
+
+      - name: Build jar
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew jar -Pmod_version="${{ steps.version.outputs.version }}" --stacktrace
+
+      - name: Verify jar
+        shell: bash
+        run: |
+          set -euo pipefail
+          jar="build/libs/foldbackup-${{ steps.version.outputs.version }}.jar"
+          test -f "$jar"
+          ls -lh "$jar"
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v3
+        with:
+          name: FoldBackup v${{ steps.version.outputs.version }}
+          tag_name: ${{ github.ref_name }}
+          body_path: RELEASE_BODY.md
+          files: build/libs/foldbackup-${{ steps.version.outputs.version }}.jar
+          fail_on_unmatched_files: true
+          generate_release_notes: false
+          prerelease: ${{ contains(steps.version.outputs.version, '-') }}
