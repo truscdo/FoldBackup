@@ -212,8 +212,8 @@ public final class WorldRuntime {
      * 读取持久化的计时状态；只在服务器线程上执行一次。
      * <p>
      * 仓库被占用时构造期读不到，重试成功后的第一个刻补读；重试不会覆盖已经
-     * 累积的在线时间。必须在任何 {@code triggerBackup} 之前完成，否则
-     * {@code backupOnStart} 会被最小间隔误判为过快。
+     * 累积的在线时间。已有持久化记录时，必须在任何 {@code triggerBackup} 之前
+     * 完成，否则记录会被当作“无记录”，从而跳过最小备份间隔。
      */
     private void initSchedulerOnce() {
         if (schedulerInitialized)

@@ -27,7 +27,8 @@ public class BackupScheduler {
     private final FoldBackupConfig config;
     private Path timerStatePath;
 
-    private long lastBackupTime = System.currentTimeMillis();
+    /** 上一次计时基准的墙钟毫秒；{@code 0} 表示还没有任何记录（全新安装或状态丢失）。 */
+    private long lastBackupTime = 0;
     private long accumulatedOnlineMillis = 0;
     private long tickCounter = 0;
 
@@ -97,7 +98,7 @@ public class BackupScheduler {
 
     // --- 查询 ---
 
-    /** 上次成功备份的墙钟时间戳（毫秒）。 */
+    /** 上次成功备份的墙钟时间戳（毫秒）；{@code 0} 表示没有任何记录。 */
     public long getLastBackupTime() {
         return lastBackupTime;
     }
@@ -130,7 +131,7 @@ public class BackupScheduler {
 
     /**
      * 恢复先前持久化的计时器状态。
-     * 如果文件不存在或损坏，则静默回退到默认值。
+     * 如果文件不存在或损坏，则保持初始的无记录状态（{@code lastBackupTime == 0}）。
      */
     private void loadState() {
         if (timerStatePath == null || !Files.exists(timerStatePath))
