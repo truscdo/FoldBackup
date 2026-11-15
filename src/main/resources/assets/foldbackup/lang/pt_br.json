@@ -45,7 +45,6 @@
   "foldbackup.progress.scanning": "§7Processando: §f%s/%s §7regiões%s, §f%s/%s §7arquivos, §f%s §7falhas%s",
   "foldbackup.progress.preparing": "§7Preparando snapshot: §f%s §7regiões (§e%s §7alteradas), §f%s §7arquivos (§e%s §7alterados)",
   "foldbackup.progress.completed": "§7Backup concluído: §f%s §7(%s regiões, §e%s §7alteradas, %s arquivos, §e%s §7alterados, §e+%s §7novos)",
-  "foldbackup.progress.push_percent": "§6[FoldBackup] §7[%s%%] §f%s",
   "foldbackup.progress.push": "§6[FoldBackup] §f%s",
   "foldbackup.rollback.chunk_not_loaded_command": "§c[FoldBackup] O chunk [%s, %s] não está carregado. Aproxime-se ou use a ferramenta CLI para recuperação offline.",
   "foldbackup.rollback.failure.server_thread": "§c[FoldBackup] A restauração do chunk deve ser executada na thread do servidor.",

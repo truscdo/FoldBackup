@@ -49,7 +49,6 @@ final class ArchiveBaseline implements Baseline {
         }
         Set<String> regionHashes = new HashSet<>();
         for (var info : meta.regions) {
-            TarIndex.validatePath(info.filename);
             if (regions.put(info.filename, new RegionInfo(info.filename, info.contentHash,
                     info.sizeUncompressed, info.sourceMetadata)) != null)
                 throw new IOException("Duplicate region metadata: " + info.filename);
@@ -57,7 +56,6 @@ final class ArchiveBaseline implements Baseline {
         }
         Set<String> fileHashes = new HashSet<>();
         for (var info : meta.files) {
-            TarIndex.validatePath(info.filename);
             if (files.put(info.filename, new FileInfo(info.filename, info.sourceHash,
                     info.sizeUncompressed, info.sourceMetadata)) != null)
                 throw new IOException("Duplicate file metadata: " + info.filename);

@@ -1,13 +1,11 @@
 package io.github.truscdo.foldbackup.core.task;
 
-import java.util.concurrent.atomic.AtomicInteger;
-
 /**
  * Mutable progress status for one tracked asynchronous task.
  * <p>
  * Created by {@link TaskRegistry#startTask(TaskType)} and shared between
  * the worker thread (which writes) and consumer threads (which read).
- * All mutable fields use {@code volatile} or {@link AtomicInteger} for
+ * All mutable fields use {@code volatile} for
  * safe cross-thread visibility without locking.
  */
 public class TaskStatus {
@@ -44,8 +42,6 @@ public class TaskStatus {
     private volatile Long artifactEpochSeconds;
     /** User-facing artifact label; presentation only. */
     private volatile String artifactId;
-    /** 0-100, or -1 when unknown. */
-    private final AtomicInteger progressPercent = new AtomicInteger(-1);
 
     // package-private constructor — only TaskRegistry creates these
     TaskStatus(TaskId taskId, TaskType type) {
@@ -67,7 +63,6 @@ public class TaskStatus {
     public Long artifactEpochSeconds() { return artifactEpochSeconds; }
     /** Returns the presentation label for the task artifact, if any. */
     public String artifactId()   { return artifactId; }
-    public int progressPercent() { return progressPercent.get(); }
 
     public StepProgress stepProgress() { return stepProgress; }
 
@@ -99,11 +94,6 @@ public class TaskStatus {
 
     public TaskStatus setMessage(String message) {
         this.message = message;
-        return this;
-    }
-
-    public TaskStatus setProgressPercent(int pct) {
-        this.progressPercent.set(pct);
         return this;
     }
 

@@ -45,7 +45,6 @@
   "foldbackup.progress.scanning": "§7Обработка: регионы §f%s/%s§7%s, файлы §f%s/%s§7, ошибок §f%s§7%s",
   "foldbackup.progress.preparing": "§7Подготовка снимка: §f%s §7регионов (изменено §e%s§7), §f%s §7файлов (изменено §e%s§7)",
   "foldbackup.progress.completed": "§7Копирование завершено: §f%s §7(%s регионов, изменено §e%s§7, %s файлов, изменено §e%s§7, новых данных §e+%s§7)",
-  "foldbackup.progress.push_percent": "§6[FoldBackup] §7[%s%%] §f%s",
   "foldbackup.progress.push": "§6[FoldBackup] §f%s",
   "foldbackup.rollback.chunk_not_loaded_command": "§c[FoldBackup] Чанк [%s, %s] не загружен. Подойдите ближе или используйте CLI для автономного восстановления.",
   "foldbackup.rollback.failure.server_thread": "§c[FoldBackup] Откат чанка должен выполняться в потоке сервера.",

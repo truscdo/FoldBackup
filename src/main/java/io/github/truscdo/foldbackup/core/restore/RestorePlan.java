@@ -95,16 +95,4 @@ public final class RestorePlan {
     public RestoreStats stats() {
         return stats;
     }
-
-    /** Region entries grouped by their directory, preserving the source order inside each group. */
-    public Map<String, List<RestoreEntry>> regionsByDirectory() {
-        Map<String, List<RestoreEntry>> grouped = new LinkedHashMap<>();
-        for (RestoreEntry entry : regions) {
-            String path = entry.path();
-            int slash = path.lastIndexOf('/');
-            String directory = slash < 0 ? "" : path.substring(0, slash);
-            grouped.computeIfAbsent(directory, key -> new ArrayList<>()).add(entry);
-        }
-        return grouped;
-    }
 }

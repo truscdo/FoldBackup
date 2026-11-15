@@ -22,8 +22,6 @@ final class LrhdRestoreData implements AutoCloseable {
     private InputStream input;
     private LrhdFormat.DataReader data;
     private int nextRegion;
-    private int lastRx, lastRz;
-    private boolean mergedRegion;
 
     @FunctionalInterface private interface Opener { InputStream open() throws IOException; }
 
@@ -79,41 +77,6 @@ final class LrhdRestoreData implements AutoCloseable {
             throw failure;
         }
         return retain ? new StagedRegion(region, hasPayload ? payload : null) : null;
-    }
-
-    RegionStream.Source merge(int rx, int rz, RegionStream.Source base) {
-        return output -> {
-            if (mergedRegion && LrhdFormat.compareRegions(lastRx, lastRz, rx, rz) >= 0)
-                throw new IOException("LRHD restore regions must be consumed in order");
-            lastRx = rx; lastRz = rz; mergedRegion = true;
-            openData();
-            while (nextRegion < regions.size()) {
-                var r = regions.get(nextRegion);
-                if (LrhdFormat.compareRegions(r.rx, r.rz, rx, rz) >= 0) break;
-                for (var c : r.chunks) data.skip(c); // e.g. a whole-region deletion
-                nextRegion++;
-            }
-            var selected = new LrhdFormat.ChunkIndex[1024];
-            if (nextRegion < regions.size()) {
-                var r = regions.get(nextRegion);
-                if (r.rx == rx && r.rz == rz) {
-                    for (var c : r.chunks) selected[(c.cz & 31) * 32 + (c.cx & 31)] = c;
-                    nextRegion++;
-                }
-            }
-            base.read(new RegionStream.Consumer() {
-                LrhdFormat.ChunkIndex replacement;
-                public void begin(int i, int timestamp) throws IOException {
-                    replacement = selected[i];
-                    output.begin(i, replacement == null ? timestamp : (int) replacement.ts);
-                    if (replacement != null) data.transfer(replacement, output);
-                }
-                public void data(byte[] b, int off, int len) throws IOException {
-                    if (replacement == null) output.data(b, off, len);
-                }
-                public void end() throws IOException { output.end(); }
-            });
-        };
     }
 
     /** Merges a region whose LRHD replacement payloads were verified and staged by the frame reader. */

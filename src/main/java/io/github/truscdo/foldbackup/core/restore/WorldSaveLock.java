@@ -18,10 +18,6 @@ public final class WorldSaveLock implements AutoCloseable {
         this.lock = lock;
     }
 
-    public static WorldSaveLock acquire(Path dimensionDirectory) throws IOException {
-        return acquireRoot(worldRoot(dimensionDirectory));
-    }
-
     public static WorldSaveLock acquireRoot(Path worldRoot) throws IOException {
         if (!Files.isDirectory(worldRoot)) throw new IOException("World directory not found: " + worldRoot);
         Path lockPath = worldRoot.resolve("session.lock");
@@ -37,18 +33,6 @@ public final class WorldSaveLock implements AutoCloseable {
             channel.close();
             throw e;
         }
-    }
-
-    private static Path worldRoot(Path dimensionDirectory) {
-        Path directory = dimensionDirectory.toAbsolutePath().normalize();
-        for (Path current = directory; current != null; current = current.getParent()) {
-            Path name = current.getFileName();
-            if (name == null) continue;
-            String value = name.toString();
-            if ("dimensions".equals(value)) return current.getParent();
-            if ("DIM-1".equals(value) || "DIM1".equals(value)) return current.getParent();
-        }
-        return directory;
     }
 
     @Override

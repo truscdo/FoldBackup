@@ -16,14 +16,6 @@ public record RestoreStats(int changedRegions, int changedFiles, int skippedRegi
         emptiedDirectories = List.copyOf(emptiedDirectories);
     }
 
-    public int changed() {
-        return changedRegions + changedFiles;
-    }
-
-    public int skipped() {
-        return skippedRegions + skippedFiles;
-    }
-
     /** Suffix used for grouping, including the dot; empty when the name has none. */
     public static String suffixOf(String path) {
         int slash = path.lastIndexOf('/');

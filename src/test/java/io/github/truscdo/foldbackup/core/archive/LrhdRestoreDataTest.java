@@ -39,9 +39,13 @@ class LrhdRestoreDataTest {
             base.setTimestamp(i, 10 + i);
         }
         byte[] bytes = delta();
-        try (var data = read(bytes)) {
+        Path payload = temp.resolve("overlay-region.bin");
+        try (var data = read(bytes);
+                var staged = data.stageNext(payload, true)) {
+            data.finish();
             Region result = new Region(-1, -1, 0);
-            data.merge(-1, -1, RegionStream.of(base)).read(io.github.truscdo.foldbackup.core.format.LrhTestSupport.objectConsumer(result));
+            data.mergeStaged(-1, -1, RegionStream.of(base), staged)
+                    .read(io.github.truscdo.foldbackup.core.format.LrhTestSupport.objectConsumer(result));
             assertArrayEquals(new byte[]{9, 8}, result.getChunk(0).getRawChunk());
             assertNull(result.getChunk(1));
             assertArrayEquals(new byte[]{2}, result.getChunk(2).getRawChunk());
@@ -111,10 +115,14 @@ class LrhdRestoreDataTest {
     @Test void tombstoneOnlyDeltaNeedsNoCompressedFrame() throws Exception {
         byte[] bytes = io.github.truscdo.foldbackup.core.format.LrhdTestSupport.write(3,
                 List.of(new io.github.truscdo.foldbackup.core.format.LrhdTestSupport.ChunkEntry(0, 0, 0, 0, 17, null)));
-        try (var data = read(bytes)) {
-            var summary = RegionStream.inspect(data.merge(0, 0, consumer -> {
+        Path payload = temp.resolve("tombstone-region.bin");
+        try (var data = read(bytes);
+                var staged = data.stageNext(payload, true)) {
+            assertNull(staged.payload());
+            data.finish();
+            var summary = RegionStream.inspect(data.mergeStaged(0, 0, consumer -> {
                 consumer.begin(0, 1); consumer.data(new byte[]{1}, 0, 1); consumer.end();
-            }));
+            }, staged));
             assertEquals(0, summary.nbtBytes());
             assertEquals(17, summary.timestamps()[0]);
         }

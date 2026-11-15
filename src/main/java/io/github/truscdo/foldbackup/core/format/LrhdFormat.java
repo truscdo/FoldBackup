@@ -95,7 +95,6 @@ public final class LrhdFormat {
     }
 
     static int chunkX(int rx, int slot) throws IOException {
-        validateCoordinates(rx, 0);
         try {
             return Math.addExact(Math.multiplyExact(rx, 32), slot % 32);
         } catch (ArithmeticException e) {
@@ -104,7 +103,6 @@ public final class LrhdFormat {
     }
 
     static int chunkZ(int rz, int slot) throws IOException {
-        validateCoordinates(0, rz);
         try {
             return Math.addExact(Math.multiplyExact(rz, 32), slot / 32);
         } catch (ArithmeticException e) {

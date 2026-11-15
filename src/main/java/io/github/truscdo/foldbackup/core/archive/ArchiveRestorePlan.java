@@ -25,8 +25,6 @@ final class ArchiveRestorePlan implements AutoCloseable {
         T run(int index, RegionStream.Source source) throws IOException;
     }
 
-    private record Coordinate(int rx, int rz) {}
-
     /** 基线中不存在的 Region（新增）合成空内容：1024 个空区块、时间戳 0。 */
     private static final RegionStream.Source EMPTY_REGION = consumer -> {
         for (int i = 0; i < 1024; i++) {
@@ -98,7 +96,6 @@ final class ArchiveRestorePlan implements AutoCloseable {
             throws IOException {
         Map<String, RegionInfo> baseRegions = base.regions();
         for (var info : target.regions) {
-            TarIndex.validatePath(info.filename);
             if (!targetPaths.add(info.filename)) throw new IOException("Duplicate region metadata: " + info.filename);
             SourceMetadata metadata = ArchiveObjects.metadata(info.sourceMetadata);
             String dir = DiffComputer.directoryOf(info.filename);
@@ -140,7 +137,6 @@ final class ArchiveRestorePlan implements AutoCloseable {
         Set<String> seen = new HashSet<>();
         Map<String, FileInfo> baseFiles = base.files();
         for (var info : target.files) {
-            TarIndex.validatePath(info.filename);
             if (!seen.add(info.filename)) throw new IOException("Duplicate file metadata: " + info.filename);
             targetPaths.add(info.filename);
             SourceMetadata metadata = ArchiveObjects.metadata(info.sourceMetadata);
@@ -184,7 +180,6 @@ final class ArchiveRestorePlan implements AutoCloseable {
                 if (files == null || files.files == null) throw new IOException("Invalid files.bin");
                 if (files.baseEpoch != base.epoch()) throw new IOException("files.bin baseline mismatch");
                 for (var file : files.files) if (file.deleted) {
-                    TarIndex.validatePath(file.path);
                     deleted.add(file.path);
                 } else if (fileUpdates.putIfAbsent(file.path, file) != null)
                     throw new IOException("Duplicate files.bin path: " + file.path);
@@ -222,23 +217,6 @@ final class ArchiveRestorePlan implements AutoCloseable {
     }
 
     Map<String, FileRef> files() { return Collections.unmodifiableMap(files); }
-
-    /** Region entries represented by an LRHD change record. */
-    Set<Integer> changedRegionIndexes() {
-        var coordinates = new IdentityHashMap<LrhdRestoreData, Set<Coordinate>>();
-        for (var delta : diffs.entries.values()) {
-            var changed = new HashSet<Coordinate>();
-            for (var indexed : delta.regions) changed.add(new Coordinate(indexed.rx, indexed.rz));
-            coordinates.put(delta, changed);
-        }
-        var indexes = new LinkedHashSet<Integer>();
-        for (int i = 0; i < regions.size(); i++) {
-            var region = regions.get(i);
-            if (region.delta() != null && coordinates.getOrDefault(region.delta(), Set.of())
-                    .contains(new Coordinate(region.rx(), region.rz()))) indexes.add(i);
-        }
-        return Collections.unmodifiableSet(indexes);
-    }
 
     /**
      * 本计划全部 Region 的源帧级别上界；合成 Region（无基础 LRH 帧）计 0。

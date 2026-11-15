@@ -52,15 +52,8 @@ public final class BackupProgressNotifier {
         for (var player : watchers.values()) {
             String language = FoldBackupTranslations.resolveLanguage(player, config);
             String progress = BackupStepFormat.formatLocalized(active.stepProgress(), language);
-            String key = active.progressPercent() >= 0
-                    ? "foldbackup.progress.push_percent"
-                    : "foldbackup.progress.push";
-            if (active.progressPercent() >= 0) {
-                player.sendSystemMessage(FoldBackupTranslations.componentForLanguage(language, key,
-                        active.progressPercent(), progress));
-            } else {
-                player.sendSystemMessage(FoldBackupTranslations.componentForLanguage(language, key, progress));
-            }
+            player.sendSystemMessage(
+                    FoldBackupTranslations.componentForLanguage(language, "foldbackup.progress.push", progress));
         }
     }
 }

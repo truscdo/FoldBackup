@@ -1,7 +1,6 @@
 package io.github.truscdo.foldbackup.mod.rollback;
 
 import io.github.truscdo.foldbackup.core.LogUtil;
-import io.github.truscdo.foldbackup.core.format.EntityRegionCodec.EntityChunkSnapshot;
 import io.github.truscdo.foldbackup.core.format.EntityRegionCodec;
 import io.github.truscdo.foldbackup.mod.ChunkEntityQuery;
 import io.github.truscdo.foldbackup.mod.SnapshotNbt;
@@ -22,10 +21,6 @@ import java.util.*;
 /** 服务器线程上的实体替换。准备阶段必须在任何方块或实体变更之前完成。 */
 public final class EntityRollbackBridge {
     private static final LogUtil LOG = LogUtil.getLogger("foldbackup-entities");
-
-    public Prepared prepare(ServerLevel level, ChunkPos chunk, EntityChunkSnapshot snapshot) throws IOException {
-        return prepare(level, chunk, EntityRegionCodec.recover(snapshot.nbt(), chunk.x, chunk.z));
-    }
 
     public Prepared prepare(ServerLevel level, ChunkPos chunk, EntityRegionCodec.Recovery recovery) throws IOException {
         checkThread(level);
@@ -122,14 +117,14 @@ public final class EntityRollbackBridge {
         String report = "entities restored=" + restored
                 + ", removed=" + removed + ", skipped trees=" + skippedTrees + ", preserved=" + preserved;
         if (!issues.isEmpty()) { report += "; " + String.join("; ", issues); LOG.warn("{}: {}", chunk, report); }
-        return new Prepared(level, chunk, current, replacement, fallback, report,
+        return new Prepared(level, chunk, current, replacement, fallback,
                 new Summary(restored, removed, skippedTrees, preserved, false));
     }
 
     public static Prepared preserve(ServerLevel level, ChunkPos chunk, String reason) {
         String report = "entities restored=0, skipped=all (count unknown), current entities preserved: " + reason;
         LOG.warn("{}: {}", chunk, report);
-        return new Prepared(level, chunk, List.of(), List.of(), List.of(), report,
+        return new Prepared(level, chunk, List.of(), List.of(), List.of(),
                 new Summary(0, 0, -1, -1, true));
     }
 
@@ -162,14 +157,11 @@ public final class EntityRollbackBridge {
         private final ChunkPos chunk;
         private final List<Entity> current, replacement, fallback;
         private boolean used;
-        private final String report;
         private final Summary summary;
-        public String report() { return report; }
         public Summary summary() { return summary; }
         private Prepared(ServerLevel level, ChunkPos chunk, List<Entity> current, List<Entity> replacement,
-                List<Entity> fallback, String report, Summary summary) {
+                List<Entity> fallback, Summary summary) {
             this.level = level; this.chunk = chunk; this.current = current; this.replacement = replacement; this.fallback = fallback;
-            this.report = report;
             this.summary = summary;
         }
 
