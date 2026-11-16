@@ -215,7 +215,9 @@ public class IndexStore implements AutoCloseable {
             }
         }
         Counter counter = new Counter();
-        writeIndex(index, new DataOutputStream(counter));
+        try (var out = new DataOutputStream(counter)) {
+            writeIndex(index, out);
+        }
         return counter.count;
     }
 

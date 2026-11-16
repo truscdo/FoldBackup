@@ -25,7 +25,7 @@ public final class LrhdEncodingWriter implements AutoCloseable {
         this.output = output; this.level = level; this.workers = workers;
         index = FileChannel.open(indexPath, StandardOpenOption.CREATE_NEW,
                 StandardOpenOption.READ, StandardOpenOption.WRITE);
-        try { new DataOutputStream(output).writeLong(LrhdFormat.SIGNATURE); }
+        try { writeSignature(); }
         catch (IOException | RuntimeException | Error e) { index.close(); throw e; }
     }
 
@@ -103,10 +103,14 @@ public final class LrhdEncodingWriter implements AutoCloseable {
         }
         System.arraycopy(hash.digest(), 0, header, LrhdFormat.METADATA_HASH_OFFSET, LrhdFormat.METADATA_HASH_SIZE);
         output.write(header, LrhdFormat.SIGNATURE_SIZE, LrhdFormat.METADATA_SIZE);
-        new DataOutputStream(output).writeLong(LrhdFormat.SIGNATURE);
+        writeSignature();
         output.flush();
         finished = true;
         return regions;
+    }
+
+    private void writeSignature() throws IOException {
+        output.write(ByteBuffer.allocate(Long.BYTES).putLong(LrhdFormat.SIGNATURE).array());
     }
 
     @Override public void close() throws IOException {

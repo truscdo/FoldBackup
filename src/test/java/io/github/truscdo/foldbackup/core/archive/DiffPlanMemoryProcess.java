@@ -83,7 +83,9 @@ public final class DiffPlanMemoryProcess {
                 }
             }
             if (decoded != raw || raw != (long) count * 1024) throw new AssertionError("Data length");
-            if (new DataInputStream(input).readLong() != LrhdFormat.SIGNATURE) throw new AssertionError("Footer");
+            byte[] footer = input.readNBytes(Long.BYTES);
+            if (footer.length < Long.BYTES) throw new EOFException();
+            if (ByteBuffer.wrap(footer).getLong() != LrhdFormat.SIGNATURE) throw new AssertionError("Footer");
         }
         System.out.println("DIFF_PLAN_MEMORY_OK regions=" + count);
     }
