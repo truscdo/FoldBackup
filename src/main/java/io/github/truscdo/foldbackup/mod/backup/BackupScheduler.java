@@ -9,6 +9,8 @@ import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Properties;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.IntSupplier;
 
 /**
  * 在线时间累加器和备份触发调度器。
@@ -24,16 +26,24 @@ public class BackupScheduler {
     private static final long TICK_INTERVAL = 200; // 每 200 刻检查一次
     private static final long TICK_INTERVAL_MS = 10_000; // 200 刻 × 50 毫秒
 
-    private final FoldBackupConfig config;
+    private final IntSupplier intervalMinutes;
+    private final IntSupplier minIntervalMinutes;
     private Path timerStatePath;
 
     /** 上一次计时基准的墙钟毫秒；{@code 0} 表示还没有任何记录（全新安装或状态丢失）。 */
     private long lastBackupTime = 0;
     private long accumulatedOnlineMillis = 0;
     private long tickCounter = 0;
+    private final AtomicBoolean minIntervalDeferralLogged = new AtomicBoolean();
 
     public BackupScheduler(FoldBackupConfig config) {
-        this.config = config;
+        this(config == null ? () -> 0 : config::getIntervalMinutes,
+                config == null ? () -> 0 : config::getMinIntervalMinutes);
+    }
+
+    BackupScheduler(IntSupplier intervalMinutes, IntSupplier minIntervalMinutes) {
+        this.intervalMinutes = intervalMinutes;
+        this.minIntervalMinutes = minIntervalMinutes;
     }
 
     // --- 初始化 ---
@@ -61,17 +71,34 @@ public class BackupScheduler {
         if (tickCounter % TICK_INTERVAL != 0)
             return false;
 
-        // 墙钟最小间隔（防止快速手动备份的安全网）
-        if (System.currentTimeMillis() - lastBackupTime < config.getMinIntervalMinutes() * 60000L) {
-            return false;
-        }
-
         // 仅当有玩家在线时才累积
         if (hasPlayers) {
             accumulatedOnlineMillis += TICK_INTERVAL_MS;
         }
 
-        return accumulatedOnlineMillis >= config.getIntervalMinutes() * 60000L;
+        return accumulatedOnlineMillis >= intervalMinutes.getAsInt() * 60000L;
+    }
+
+    /** 是否已过最小墙钟间隔（{@code minIntervalMinutes}）。 */
+    public boolean isMinIntervalElapsed(long nowMillis) {
+        return nowMillis - lastBackupTime >= minIntervalMinutes.getAsInt() * 60000L;
+    }
+
+    int getIntervalMinutes() {
+        return intervalMinutes.getAsInt();
+    }
+
+    int getMinIntervalMinutes() {
+        return minIntervalMinutes.getAsInt();
+    }
+
+    /**
+     * 消费一次“因最小间隔尚未到达而推迟”的边沿通知标志。
+     * <p>
+     * 在一轮等待期内仅第一次返回 {@code true}，直到备份完成或中止重置计时器为止。
+     */
+    public boolean consumeMinIntervalDeferralNotice() {
+        return minIntervalDeferralLogged.compareAndSet(false, true);
     }
 
     /**
@@ -80,6 +107,7 @@ public class BackupScheduler {
     public void markBackupComplete() {
         lastBackupTime = System.currentTimeMillis();
         accumulatedOnlineMillis = 0;
+        minIntervalDeferralLogged.set(false);
         saveState();
     }
 
@@ -92,6 +120,7 @@ public class BackupScheduler {
     public void markAttemptFailed() {
         lastBackupTime = System.currentTimeMillis();
         accumulatedOnlineMillis = 0;
+        minIntervalDeferralLogged.set(false);
         saveState();
         LOG.warn("Backup attempt aborted; the next scheduled backup waits for a full interval");
     }

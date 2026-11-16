@@ -65,6 +65,7 @@ public class BackupExecutor {
     private final TaskRegistry taskRegistry;
     /** 停滞阈值的来源；每次运行开始时读取一次，测试可注入固定值。 */
     private final LongSupplier savePauseTimeoutMillis;
+    private final LongSupplier clock;
     private final AtomicReference<Run> currentRun = new AtomicReference<>();
 
     public BackupExecutor(MinecraftServer server, WorldAccessor worldAccessor,
@@ -87,6 +88,14 @@ public class BackupExecutor {
             WorldAccessor worldAccessor, BackupCoordinator coordinator, FoldBackupConfig config,
             BackupScheduler scheduler, ExecutorService backupExecutor, TaskRegistry taskRegistry,
             LongSupplier savePauseTimeoutMillis) {
+        this(mainThread, playerWarning, worldAccessor, coordinator, config, scheduler, backupExecutor,
+                taskRegistry, savePauseTimeoutMillis, System::currentTimeMillis);
+    }
+
+    BackupExecutor(java.util.concurrent.Executor mainThread, PlayerWarning playerWarning,
+            WorldAccessor worldAccessor, BackupCoordinator coordinator, FoldBackupConfig config,
+            BackupScheduler scheduler, ExecutorService backupExecutor, TaskRegistry taskRegistry,
+            LongSupplier savePauseTimeoutMillis, LongSupplier clock) {
         this.mainThread = mainThread;
         this.playerWarning = playerWarning;
         this.worldAccessor = worldAccessor;
@@ -96,6 +105,7 @@ public class BackupExecutor {
         this.backupExecutor = backupExecutor;
         this.taskRegistry = taskRegistry;
         this.savePauseTimeoutMillis = savePauseTimeoutMillis;
+        this.clock = clock;
     }
 
     private static PlayerWarning playersOf(MinecraftServer server, FoldBackupConfig config) {
@@ -120,8 +130,7 @@ public class BackupExecutor {
     private boolean minIntervalOk(boolean force) {
         if (force)
             return true;
-        long elapsed = System.currentTimeMillis() - scheduler.getLastBackupTime();
-        return elapsed >= config.getMinIntervalMinutes() * 60000L;
+        return scheduler.isMinIntervalElapsed(clock.getAsLong());
     }
 
     /**
@@ -144,9 +153,16 @@ public class BackupExecutor {
      * 触发备份，自动创建新的 {@link TaskStatus}。
      */
     public CompletableFuture<BackupResult> triggerBackup(boolean force) {
+        return triggerBackup(force, null);
+    }
+
+    /**
+     * 触发备份；仅在成功占用运行位、准备启动任务时调用 {@code onAccepted}。
+     */
+    CompletableFuture<BackupResult> triggerBackup(boolean force, Runnable onAccepted) {
         if (!minIntervalOk(force)) {
             LOG.info("Backup skipped — minimum interval of {} min not elapsed",
-                    config.getMinIntervalMinutes());
+                    scheduler.getMinIntervalMinutes());
             return CompletableFuture.completedFuture(BackupResult.TOO_SOON);
         }
         if (worldAccessor == null || coordinator == null) {
@@ -159,6 +175,8 @@ public class BackupExecutor {
         Run run = claimRun(status);
         if (run == null)
             return CompletableFuture.completedFuture(BackupResult.ALREADY_RUNNING);
+        if (onAccepted != null)
+            onAccepted.run();
         startAsync(run);
         return run.future;
     }
@@ -298,7 +316,7 @@ public class BackupExecutor {
     public BackupResult triggerBackupBlocking(boolean force) {
         if (!minIntervalOk(force)) {
             LOG.info("Backup skipped — minimum interval of {} min not elapsed",
-                    config.getMinIntervalMinutes());
+                    scheduler.getMinIntervalMinutes());
             return BackupResult.TOO_SOON;
         }
         if (worldAccessor == null || coordinator == null)

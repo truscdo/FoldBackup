@@ -37,11 +37,9 @@ public class TickHandler {
         }
 
         BackupScheduler scheduler = mod.getScheduler();
-        if (scheduler != null && executor != null && scheduler.shouldTrigger(
-                mod.getServer() != null && mod.getServer().getPlayerCount() > 0)) {
-            LOG.info("Scheduled backup triggered ({} min of online time accumulated)",
-                    mod.getConfig().getIntervalMinutes());
-            executor.triggerBackup(false);
+        if (scheduler != null && executor != null) {
+            boolean hasPlayers = mod.getServer() != null && mod.getServer().getPlayerCount() > 0;
+            tickScheduledBackup(scheduler, executor, hasPlayers, System.currentTimeMillis());
         }
 
         // 限速的任务进度日志
@@ -49,6 +47,27 @@ public class TickHandler {
 
         // 推送进度给正在查看备份的玩家
         mod.getProgressNotifier().pushProgress(mod.getTaskRegistry().getCurrentActive(), mod.getConfig());
+    }
+
+    /**
+     * 推进定时备份调度：仅在真正受理启动时记录触发日志，
+     * 冷却跳过在同一等待周期内按边沿只记录一次，避免重复刷屏。
+     */
+    static void tickScheduledBackup(BackupScheduler scheduler, BackupExecutor executor,
+            boolean hasPlayers, long nowMillis) {
+        if (!scheduler.shouldTrigger(hasPlayers))
+            return;
+        if (executor.isBackupRunning())
+            return;
+        if (!scheduler.isMinIntervalElapsed(nowMillis)) {
+            if (scheduler.consumeMinIntervalDeferralNotice()) {
+                LOG.info("Scheduled backup deferred — {} min of online time accumulated, waiting for minimum interval of {} min",
+                        scheduler.getIntervalMinutes(), scheduler.getMinIntervalMinutes());
+            }
+            return;
+        }
+        executor.triggerBackup(false, () -> LOG.info("Scheduled backup triggered ({} min of online time accumulated)",
+                scheduler.getIntervalMinutes()));
     }
 
     /**

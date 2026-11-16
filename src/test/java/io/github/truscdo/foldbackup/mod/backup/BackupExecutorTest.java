@@ -260,6 +260,57 @@ class BackupExecutorTest {
         }
     }
 
+    @Test void onAcceptedRunsOnlyWhenBackupSlotIsClaimed() throws Exception {
+        var scheduler = new BackupScheduler(() -> 30, () -> 10);
+        scheduler.markBackupComplete();
+
+        var world = new WorldAccessorTest.World();
+        var tasks = new TaskRegistry();
+        var mainQueue = new LinkedBlockingQueue<Runnable>();
+        var started = new CountDownLatch(1);
+        var release = new Semaphore(0);
+        var coordinator = new BackupCoordinator(null, null, null, null) {
+            @Override public SnapshotManifest runBackup(TaskStatus status, Consumer<BackupStep> listener) {
+                started.countDown();
+                awaitUninterruptibly(release);
+                return null;
+            }
+        };
+        var accepted = new AtomicInteger();
+
+        try (var worker = Executors.newSingleThreadExecutor()) {
+            // 未初始化时不得触发 onAccepted
+            var unready = new BackupExecutor(mainQueue::add, (key, args) -> {}, null, null, null,
+                    scheduler, worker, tasks, () -> 0L);
+            assertEquals(BackupResult.NOT_INITIALIZED,
+                    unready.triggerBackup(true, accepted::incrementAndGet).getNow(null));
+            assertEquals(0, accepted.get());
+
+            var executor = new BackupExecutor(mainQueue::add, (key, args) -> {}, world, coordinator, null,
+                    scheduler, worker, tasks, () -> 0L);
+
+            // 最小间隔未到时不得触发 onAccepted
+            assertEquals(BackupResult.TOO_SOON,
+                    executor.triggerBackup(false, accepted::incrementAndGet).getNow(null));
+            assertEquals(0, accepted.get());
+
+            // 强制触发成功占槽：触发一次 onAccepted
+            var future = executor.triggerBackup(true, accepted::incrementAndGet);
+            assertEquals(1, accepted.get());
+
+            // 运行期间再次触发返回 ALREADY_RUNNING，不得再次触发 onAccepted
+            assertEquals(BackupResult.ALREADY_RUNNING,
+                    executor.triggerBackup(true, accepted::incrementAndGet).getNow(null));
+            assertEquals(1, accepted.get());
+
+            mainQueue.remove().run();
+            assertTrue(started.await(5, TimeUnit.SECONDS));
+            release.release();
+            mainQueue.take().run();
+            assertEquals(BackupResult.SUCCESS, future.get(2, TimeUnit.SECONDS));
+        }
+    }
+
     /** 扫描一开始就阻塞，等待测试触发中止；被中断时按既有取消协议抛出。 */
     private static BackupCoordinator blockingScanCoordinator(CountDownLatch started) {
         return new BackupCoordinator(null, null, null, null) {

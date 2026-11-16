@@ -43,4 +43,23 @@ class BackupSchedulerTest {
 
         assertEquals(0, scheduler.getLastBackupTime());
     }
+
+    @Test void deferralNoticeIsEdgeTriggeredUntilReset() {
+        var scheduler = new BackupScheduler(() -> 30, () -> 10);
+        scheduler.markBackupComplete();
+        long base = scheduler.getLastBackupTime();
+
+        assertFalse(scheduler.isMinIntervalElapsed(base + 5 * 60_000L));
+        assertTrue(scheduler.isMinIntervalElapsed(base + 10 * 60_000L));
+
+        assertTrue(scheduler.consumeMinIntervalDeferralNotice());
+        assertFalse(scheduler.consumeMinIntervalDeferralNotice());
+
+        scheduler.markBackupComplete();
+        assertTrue(scheduler.consumeMinIntervalDeferralNotice());
+        assertFalse(scheduler.consumeMinIntervalDeferralNotice());
+
+        scheduler.markAttemptFailed();
+        assertTrue(scheduler.consumeMinIntervalDeferralNotice());
+    }
 }
