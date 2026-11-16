@@ -296,11 +296,12 @@ public class ArchiveCreator {
             try (var scratch = new ArchiveTemporaryDirectory();
                     var result = new StreamingDiff(blobStore, scratch.path)) {
                 result.compare(base, diff, progress);
-                progress.stage("Writing archive", 1 + result.directories.size()
+                progress.stage("Writing archive", 1 + result.diffRegionCount()
                         + (result.filesBin == null ? 0 : 1) + result.fileObjects.size());
                 try (var channel = java.nio.channels.FileChannel.open(tmpPath, java.nio.file.StandardOpenOption.CREATE_NEW,
                         java.nio.file.StandardOpenOption.WRITE);
                         TarWriter tar = new TarWriter(channel)) {
+                    progress.current("snapshot.bin");
                     tar.putEntry("snapshot.bin", ArchiveSnapshotCodec.encode(meta));
                     progress.done("snapshot.bin");
 
@@ -309,6 +310,7 @@ public class ArchiveCreator {
 
                     // files.bin (non-.mca changes and whole-region deletions)
                     if (result.filesBin != null) {
+                        progress.current("files.bin");
                         tar.putEntry("files.bin", result.filesBin);
                         progress.done("files.bin");
                     }
@@ -398,6 +400,9 @@ public class ArchiveCreator {
     OrderedCompressionPipeline.Metrics exportRegionsParallel(TarWriter tar, List<RegionEntry> regions,
             BackupResourceBudget.RegionQuota quota, long bufferBytes, int level, ProgressTracker progress)
             throws IOException {
+        if (!regions.isEmpty()) {
+            progress.current(regionObjectPath(regions.getFirst().getContentHash()));
+        }
         return OrderedCompressionPipeline.<io.github.truscdo.foldbackup.core.format.RegionStream.Summary>run(
                 regions.size(), quota.workers(), quota.inFlightWindow(), REGION_BLOCK_BYTES, bufferBytes,
                 (index, output) -> LrhFormat.compress(output,

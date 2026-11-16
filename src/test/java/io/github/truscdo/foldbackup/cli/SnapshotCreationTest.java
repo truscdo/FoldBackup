@@ -81,7 +81,6 @@ class SnapshotCreationTest {
         Path output = Files.createDirectory(temp.resolve("export"));
         Files.writeString(output.resolve("existing.txt"), "keep");
 
-        var store = new SnapshotStore(root);
         assertThrows(IOException.class, () -> {
             try (var source = new SnapshotRestoreSource(snapshot, new BlobStore(root, 6))) {
                 RestoreOperation.run(source, output, new RestoreOperation.Options(false, false, 2, 6), null);

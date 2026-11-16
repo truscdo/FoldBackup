@@ -12,6 +12,18 @@ public final class ProgressTracker {
         this.listener = listener;
     }
 
+    /** Wraps {@code delegate} so every emitted event's phase is prefixed with {@code prefix}. */
+    public static ProgressListener prefixed(ProgressListener delegate, String prefix) {
+        if (delegate == null) {
+            return null;
+        }
+        if (prefix == null || prefix.isEmpty()) {
+            return delegate;
+        }
+        return event -> delegate.onProgress(
+                new ProgressEvent(prefix + event.phase(), event.completed(), event.total(), event.item()));
+    }
+
     public void stage(String phase, long total) {
         if (phase == null || phase.isBlank()) {
             throw new IllegalArgumentException("phase must not be blank");

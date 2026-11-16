@@ -59,7 +59,6 @@ public class BackupExecutor {
     private final WorldAccessor worldAccessor;
     /** 仓库延迟就绪时由 {@link #attachCoordinator} 补挂；挂上后不再变化。 */
     private volatile BackupCoordinator coordinator;
-    private final FoldBackupConfig config;
     private final BackupScheduler scheduler;
     private final ExecutorService backupExecutor;
     private final TaskRegistry taskRegistry;
@@ -72,35 +71,34 @@ public class BackupExecutor {
             BackupCoordinator coordinator, FoldBackupConfig config,
             BackupScheduler scheduler, ExecutorService backupExecutor,
             TaskRegistry taskRegistry) {
-        this(server::execute, playersOf(server, config), worldAccessor, coordinator, config, scheduler,
+        this(server::execute, playersOf(server, config), worldAccessor, coordinator, scheduler,
                 backupExecutor, taskRegistry, () -> Math.max(0, config.getSavePauseStallSeconds()) * 1000L);
     }
 
     /** 测试用：不启用看门狗。 */
     BackupExecutor(java.util.concurrent.Executor mainThread, PlayerWarning playerWarning,
-            WorldAccessor worldAccessor, BackupCoordinator coordinator, FoldBackupConfig config,
+            WorldAccessor worldAccessor, BackupCoordinator coordinator,
             BackupScheduler scheduler, ExecutorService backupExecutor, TaskRegistry taskRegistry) {
-        this(mainThread, playerWarning, worldAccessor, coordinator, config, scheduler, backupExecutor, taskRegistry,
+        this(mainThread, playerWarning, worldAccessor, coordinator, scheduler, backupExecutor, taskRegistry,
                 () -> 0L);
     }
 
     BackupExecutor(java.util.concurrent.Executor mainThread, PlayerWarning playerWarning,
-            WorldAccessor worldAccessor, BackupCoordinator coordinator, FoldBackupConfig config,
+            WorldAccessor worldAccessor, BackupCoordinator coordinator,
             BackupScheduler scheduler, ExecutorService backupExecutor, TaskRegistry taskRegistry,
             LongSupplier savePauseTimeoutMillis) {
-        this(mainThread, playerWarning, worldAccessor, coordinator, config, scheduler, backupExecutor,
+        this(mainThread, playerWarning, worldAccessor, coordinator, scheduler, backupExecutor,
                 taskRegistry, savePauseTimeoutMillis, System::currentTimeMillis);
     }
 
     BackupExecutor(java.util.concurrent.Executor mainThread, PlayerWarning playerWarning,
-            WorldAccessor worldAccessor, BackupCoordinator coordinator, FoldBackupConfig config,
+            WorldAccessor worldAccessor, BackupCoordinator coordinator,
             BackupScheduler scheduler, ExecutorService backupExecutor, TaskRegistry taskRegistry,
             LongSupplier savePauseTimeoutMillis, LongSupplier clock) {
         this.mainThread = mainThread;
         this.playerWarning = playerWarning;
         this.worldAccessor = worldAccessor;
         this.coordinator = coordinator;
-        this.config = config;
         this.scheduler = scheduler;
         this.backupExecutor = backupExecutor;
         this.taskRegistry = taskRegistry;

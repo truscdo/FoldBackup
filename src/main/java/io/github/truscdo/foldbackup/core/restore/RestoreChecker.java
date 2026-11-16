@@ -49,12 +49,15 @@ public final class RestoreChecker {
         List<RestoreEntry> entries = source.entries();
         Map<String, RestoreEntry> index = index(entries);
 
+        var progress = new ProgressTracker(listener);
         List<Path> targetFiles = new ArrayList<>();
         List<Path> targetDirectories = new ArrayList<>();
         List<Path> otherEntries = new ArrayList<>();
         if (Files.isDirectory(root)) {
+            progress.stage("Scanning target", -1);
             try (var walk = Files.walk(root)) {
                 walk.filter(path -> !path.equals(root)).forEach(path -> {
+                    progress.current(relative(root, path));
                     if (Files.isRegularFile(path)) targetFiles.add(path);
                     else if (Files.isDirectory(path)) targetDirectories.add(path);
                     else otherEntries.add(path);
@@ -62,8 +65,10 @@ public final class RestoreChecker {
             }
         }
 
-        var progress = new ProgressTracker(listener);
         progress.stage("Checking", entries.size());
+        if (!entries.isEmpty()) {
+            progress.current(entries.getFirst().path());
+        }
         boolean[] write = compareAll(root, entries, threads, progress);
 
         List<RestoreEntry> regions = new ArrayList<>();

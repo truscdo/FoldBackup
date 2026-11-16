@@ -46,4 +46,21 @@ class ProgressPrinterTest {
         assertTrue(bytes.toString().contains("[ --%] Verifying 1/?"));
         assertTrue(bytes.toString().contains("bad?name"));
     }
+
+    @Test
+    void heartbeatRefreshesElapsedSecondsWhileSingleStepStalls() throws Exception {
+        var bytes = new ByteArrayOutputStream();
+        var clock = new AtomicLong(0L);
+        try (var printer = ProgressPrinterAccess.create(new PrintStream(bytes, true), clock::get, null, true, 20L)) {
+            printer.print(new ProgressEvent("Committing snapshot", 0, -1, "S-20261116_100000"));
+            assertTrue(bytes.toString().contains("| 0s |"), bytes.toString());
+
+            clock.set(2_000_000_000L);
+            long deadline = System.nanoTime() + 2_000_000_000L;
+            while (!bytes.toString().contains("| 2s |") && System.nanoTime() < deadline) {
+                Thread.sleep(15L);
+            }
+            assertTrue(bytes.toString().contains("| 2s |"), bytes.toString());
+        }
+    }
 }

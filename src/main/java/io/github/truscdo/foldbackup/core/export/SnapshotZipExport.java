@@ -106,6 +106,7 @@ public final class SnapshotZipExport {
                 ZipOutputStream zip = new ZipOutputStream(out)) {
             for (Path file : files) {
                 String name = root.relativize(file).toString().replace('\\', '/');
+                progress.current(name);
                 ZipEntry entry = new ZipEntry(name);
                 entry.setLastModifiedTime(Files.getLastModifiedTime(file));
                 zip.putNextEntry(entry);

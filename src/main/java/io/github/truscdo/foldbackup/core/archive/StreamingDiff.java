@@ -77,6 +77,14 @@ final class StreamingDiff implements AutoCloseable {
         progress.done("files.bin");
     }
 
+    int diffRegionCount() {
+        int count = 0;
+        for (var list : directories.values()) {
+            count += list.size();
+        }
+        return count;
+    }
+
     void writeDirectories(TarWriter tar, int level, int threads, ProgressTracker progress) throws IOException {
         if (closed) throw new IOException("Diff generator closed");
         if (directories.isEmpty()) return;
@@ -85,11 +93,10 @@ final class StreamingDiff implements AutoCloseable {
             StreamIo.checkCancelled();
             String prefix = group.getKey();
             String name = prefix.isEmpty() ? "diff.lrhd" : prefix + "/diff.lrhd";
-            progress.current(name);
             var tasks = new ArrayList<DiffRegionPipeline.RegionTask>(group.getValue().size());
             for (var pair : group.getValue()) {
                 RegionEntry base = pair.base();
-                tasks.add(new DiffRegionPipeline.RegionTask(pair.rx(), pair.rz(),
+                tasks.add(new DiffRegionPipeline.RegionTask(pair.target().getFilename(), pair.rx(), pair.rz(),
                         base == null ? null : consumer -> LrhFormat.read(
                                 blobs.getRootDir().resolve(base.getBlobPath()), consumer),
                         consumer -> LrhFormat.read(blobs.getRootDir().resolve(pair.target().getBlobPath()),
@@ -100,12 +107,11 @@ final class StreamingDiff implements AutoCloseable {
                 tar.putEntry(name, channel -> {
                     try (var writer = new LrhdEncodingWriter(StreamIo.output(channel), spool, level,
                             limits.zstdWorkers())) {
-                        DiffRegionPipeline.run(tasks, limits.chunkBytes(), scratch, writer);
+                        DiffRegionPipeline.run(tasks, limits.chunkBytes(), scratch, writer, progress);
                         // A directory with no changed chunk still owns an entry; roll it back.
                         if (writer.finish() == 0) throw new TarWriter.EntryCancelledException();
                     }
                 });
-                progress.done(name);
             } finally {
                 Files.deleteIfExists(spool);
             }

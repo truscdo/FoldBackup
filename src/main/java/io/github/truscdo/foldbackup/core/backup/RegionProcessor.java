@@ -129,6 +129,7 @@ public class RegionProcessor {
         int workers = BackupResourceBudget.modRegionQuota(Integer.MAX_VALUE, memory, 0,
                 BackupResourceBudget.compressTaskBytes(compressionLevel),
                 Runtime.getRuntime().availableProcessors(), regionThreads).workers();
+        final Object progressLock = new Object();
         try (var work = new BoundedWork<ScanResult>(workers, partial -> {
             blobStore.checkBackupWrites();
             for (var entry : partial.getRegions())
@@ -141,9 +142,6 @@ public class RegionProcessor {
             result.changedFiles += partial.changedFiles;
             result.unchangedFiles += partial.unchangedFiles;
             result.newBytes += partial.newBytes;
-            if (progressCallback != null)
-                progressCallback.accept(new ScanEvent.Completed(partial.path,
-                        partial.regionTask, !partial.getErrors().isEmpty()));
         })) {
             Files.walkFileTree(worldDir, new SimpleFileVisitor<>() {
                 public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
@@ -159,12 +157,13 @@ public class RegionProcessor {
                     if (backupFilter.skipFile(relative) || name.endsWith(".mcc"))
                         return FileVisitResult.CONTINUE;
                     boolean region = REGION_FILE.matcher(name).matches();
-                    if (progressCallback != null)
-                        progressCallback.accept(region ? new ScanEvent.Region(relative) : new ScanEvent.File(relative));
+                    emitProgress(progressCallback, progressLock,
+                            region ? new ScanEvent.Region(relative) : new ScanEvent.File(relative));
                     work.submit(() -> {
                         ScanResult partial = new ScanResult();
                         partial.path = relative;
                         partial.regionTask = region;
+                        boolean succeeded = false;
                         try {
                             blobStore.checkBackupWrites();
                             if (region) {
@@ -175,12 +174,18 @@ public class RegionProcessor {
                                 else
                                     partial.unchangedRegions++;
                                 partial.newBytes += outcome.newBytes();
-                            } else
+                            } else {
                                 processExtraFile(file, relative, latestFiles, partial);
+                            }
+                            succeeded = true;
                         } catch (Exception e) {
                             partial.addError(relative, e);
                             stats.errors.increment();
                             LOG.warn("Failed to process file: " + relative, e);
+                        } finally {
+                            // 直接在 worker 完成时触发进度事件，避免 BoundedWork 队头大文件阻塞后续已完成任务的进度更新与看门狗续期。
+                            emitProgress(progressCallback, progressLock,
+                                    new ScanEvent.Completed(relative, region, !succeeded));
                         }
                         return partial;
                     });
@@ -193,6 +198,14 @@ public class RegionProcessor {
             return result;
         } finally {
             stats.log();
+        }
+    }
+
+    private static void emitProgress(Consumer<ScanEvent> callback, Object lock, ScanEvent event) {
+        if (callback == null)
+            return;
+        synchronized (lock) {
+            callback.accept(event);
         }
     }
 

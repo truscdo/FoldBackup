@@ -66,7 +66,7 @@ class LrhFormatTest {
     }
 
     /** 解压 payload → 修改 → 重压 → 重组（保留原 preheader 的 content_hash）。 */
-    private byte[] tamperPayload(byte[] lrhData, java.util.function.IntUnaryOperator sizeMutator,
+    private byte[] tamperPayload(byte[] lrhData,
             java.util.function.BiConsumer<byte[], Integer> chunkMutator) throws IOException {
         byte[] payload = decompressPayload(lrhData);
         chunkMutator.accept(payload, 0);
@@ -185,7 +185,7 @@ class LrhFormatTest {
         byte[] lrh = Files.readAllBytes(file);
         // 篡改第一个非空 chunk（grid 序中 chunk 0，offset = HEADER_TABLE_SIZE），同长度替换
         byte[] replacement = chunkBytes(777, region.getChunk(0).getRawChunk().length);
-        byte[] tampered = tamperPayload(lrh, i -> i, (data, off) -> {
+        byte[] tampered = tamperPayload(lrh, (data, off) -> {
             if (off == 0) {
                 System.arraycopy(replacement, 0, data, off, replacement.length);
             }

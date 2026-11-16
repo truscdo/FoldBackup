@@ -1,25 +1,29 @@
 package io.github.truscdo.foldbackup.mod.backup;
 
 import io.github.truscdo.foldbackup.core.LogUtil;
+import io.github.truscdo.foldbackup.core.logging.ProgressThrottler;
 import io.github.truscdo.foldbackup.core.task.TaskStatus;
 import io.github.truscdo.foldbackup.mod.FoldBackupMod;
 import io.github.truscdo.foldbackup.mod.i18n.BackupStepFormat;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
 
+import java.util.concurrent.TimeUnit;
+
 /**
  * 处理备份调度和进度日志的服务器刻更新事件。
  * <p>
  * 委托给 {@link BackupScheduler#shouldTrigger(boolean)} 决定何时启动计划备份，
- * 并对任务进度日志消息进行限速，以免刷屏服务器日志。同时驱动仓库的后台重试。
+ * 并通过 {@link ProgressThrottler} 对任务进度日志消息进行限速与去重，以免刷屏服务器日志。
+ * 同时驱动仓库的后台重试。
  */
 public class TickHandler {
 
     private static final LogUtil LOG = LogUtil.getLogger(TickHandler.class);
 
     private final FoldBackupMod mod;
-    private long lastTaskLogTime;
-    private String lastTaskMessage = "";
+    private final ProgressThrottler taskLogThrottler =
+            new ProgressThrottler(ProgressThrottler.DEFAULT_INTERVAL_NANOS, true);
 
     public TickHandler(FoldBackupMod mod) {
         this.mod = mod;
@@ -75,18 +79,14 @@ public class TickHandler {
      */
     private void logTaskProgress() {
         TaskStatus active = mod.getTaskRegistry().getCurrentActive();
-        if (active == null)
+        if (active == null) {
+            taskLogThrottler.reset();
             return;
+        }
 
-        long intervalMs = mod.getConfig().getProgressLogIntervalSeconds() * 1000L;
-        long now = System.currentTimeMillis();
-        if (now - lastTaskLogTime < intervalMs)
-            return;
-        lastTaskLogTime = now;
-
+        long intervalNanos = TimeUnit.SECONDS.toNanos(Math.max(1, mod.getConfig().getProgressLogIntervalSeconds()));
         String msg = BackupStepFormat.format(active.stepProgress());
-        if (!msg.isEmpty() && !msg.equals(lastTaskMessage)) {
-            lastTaskMessage = msg;
+        if (taskLogThrottler.allowMessage(msg, intervalNanos, false)) {
             LOG.info("[{}] {}", active.taskId(), msg);
         }
     }

@@ -1,6 +1,8 @@
 package io.github.truscdo.foldbackup.core.archive;
 
 import io.github.truscdo.foldbackup.core.HashUtil;
+import io.github.truscdo.foldbackup.core.LogUtil;
+import io.github.truscdo.foldbackup.core.ProgressEvent;
 import io.github.truscdo.foldbackup.core.ProgressListener;
 import io.github.truscdo.foldbackup.core.ProgressTracker;
 import io.github.truscdo.foldbackup.core.store.BlobStore;
@@ -40,6 +42,8 @@ import java.util.Set;
  * exists is reused without being read or verified.
  */
 public class ArchiveImporter {
+
+    private static final LogUtil LOG = LogUtil.getLogger(ArchiveImporter.class);
 
     private final Path archiveRoot;
     private final Path backupRoot;
@@ -86,7 +90,7 @@ public class ArchiveImporter {
         progress.stage("Scanning archives", 1);
         ArchiveLibrary library = ArchiveLibrary.scan(archiveRoot);
         for (String warning : library.warnings()) {
-            System.out.println("Warning: " + warning);
+            LOG.warn("{}", warning);
         }
         progress.done("archives");
 
@@ -96,30 +100,33 @@ public class ArchiveImporter {
 
         try (SnapshotStore.WriteSession ignored = snapshots.beginWrite()) {
             int imported = 0;
-            progress.stage("Importing snapshots", library.entries().size());
-            for (ArchiveLibrary.Entry entry : library.entries()) {
-                String item = entry.meta().sourceSnapshotId != null
-                        ? entry.meta().sourceSnapshotId
-                        : entry.fileName();
+            List<ArchiveLibrary.Entry> entries = library.entries();
+            int totalEntries = entries.size();
+            progress.stage("Importing snapshots", totalEntries);
+            for (int i = 0; i < totalEntries; i++) {
+                ArchiveLibrary.Entry entry = entries.get(i);
+                ProgressListener subListener = ProgressTracker.prefixed(
+                        listener, "[" + (i + 1) + "/" + totalEntries + "] ");
                 try {
                     String id;
                     if (entry.meta().isFull()) {
-                        id = importFull(entry, snapshots, blobs, listener);
+                        id = importFull(entry, snapshots, blobs, subListener);
                     } else if (entry.meta().isDiff()) {
-                        id = importDiff(entry, snapshots, blobs, listener);
+                        id = importDiff(entry, snapshots, blobs, subListener);
                     } else {
                         throw new IOException("unsupported archive type: " + entry.meta().type);
                     }
                     if (id != null) imported++;
                 } catch (IOException | RuntimeException e) {
                     errors.add(entry.fileName() + ": " + e.getMessage());
-                } finally {
-                    progress.done(item);
                 }
             }
             if (!errors.isEmpty()) {
                 throw new IOException("Import completed with " + imported + " snapshot(s) imported and "
                         + errors.size() + " archive error(s):\n - " + String.join("\n - ", errors));
+            }
+            if (listener != null && totalEntries > 0) {
+                listener.onProgress(new ProgressEvent("Importing snapshots", totalEntries, totalEntries, ""));
             }
             return imported;
         }
@@ -184,7 +191,7 @@ public class ArchiveImporter {
             throw new IOException("snapshot " + id + " already exists with different content"
                     + " (archive: " + entry.fileName() + ")");
         }
-        System.out.println("Skipped " + id + " (identical snapshot already exists)");
+        LOG.info("Skipped {} (identical snapshot already exists)", id);
         progress.stage("Committing snapshot", 1);
         progress.done(id);
         return true;
@@ -201,15 +208,17 @@ public class ArchiveImporter {
         SnapshotManifest manifest = buildManifest(meta, regions, files);
         snapshots.saveSnapshot(manifest);
         progress.done(manifest.getSnapshotId());
-        System.out.println("Imported " + manifest.getSnapshotId() + " (source: "
-                + meta.sourceSnapshotId + ", epoch: " + meta.epoch + "; " + regions.size()
-                + " regions, " + files.size() + " files)");
+        LOG.info("Imported {} (source: {}, epoch: {}; {} regions, {} files)",
+                manifest.getSnapshotId(), meta.sourceSnapshotId, meta.epoch, regions.size(), files.size());
         return manifest.getSnapshotId();
     }
 
     /** Whole-archive Region objects: reuse the blob when present, otherwise copy and verify. */
     private List<RegionEntry> importRegionObjects(ArchiveRestorePlan plan, BlobStore blobs, ProgressTracker progress)
             throws IOException {
+        if (!plan.regions.isEmpty()) {
+            progress.current(plan.regions.getFirst().path());
+        }
         return ArchiveTasks.run(plan.regions.size(),
                 ArchiveTasks.decompressQuota(plan.regions.size(), plan.maxSourceFrameLevel(), threads), 2,
                 index -> importRegionObject(plan.regions.get(index), blobs),
@@ -232,6 +241,9 @@ public class ArchiveImporter {
             }
         }
         progress.stage("Merging missing regions", missing.size());
+        if (!missing.isEmpty()) {
+            progress.current(plan.regions.get(missing.iterator().next()).path());
+        }
         List<RegionEntry> processed = plan.runRegions(
                 ArchiveTasks.TaskWork.recompress(ArchiveDefaults.RESTORE_LEVEL), threads, metrics,
                 missing::contains, index -> progress.done(plan.regions.get(index).path()), (index, source) -> {

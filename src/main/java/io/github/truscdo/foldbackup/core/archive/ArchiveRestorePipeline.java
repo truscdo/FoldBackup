@@ -15,22 +15,19 @@ final class ArchiveRestorePipeline {
     private record Coordinate(int rx, int rz) {}
     private static final class DeltaWork {
         final LrhdRestoreData delta;
-        final List<Integer> indexes = new ArrayList<>();
         final Map<Coordinate, Integer> byCoordinate = new HashMap<>();
         final Set<Coordinate> diffCoordinates = new HashSet<>();
-        int expected, completed;
         int ordinal;
-        boolean frameVerified, notified;
         DeltaWork(LrhdRestoreData delta, int ordinal) { this.delta = delta; this.ordinal = ordinal; }
     }
 
     private interface PipelineEvent<T> {}
-    private record RegionCompleted<T>(int index, LrhdRestoreData owner, T value, Throwable failure)
+    private record RegionCompleted<T>(int index, T value, Throwable failure)
             implements PipelineEvent<T> {}
-    private record ProducerCompleted<T>(LrhdRestoreData owner, Throwable failure) implements PipelineEvent<T> {}
+    private record ProducerCompleted<T>(Throwable failure) implements PipelineEvent<T> {}
 
     @FunctionalInterface private interface SubmitRegion<T> {
-        void submit(int index, LrhdRestoreData owner, LrhdRestoreData.StagedRegion staged) throws IOException;
+        void submit(int index, LrhdRestoreData.StagedRegion staged) throws IOException;
     }
 
     private final List<ArchiveRestorePlan.Region> regions;
@@ -78,7 +75,6 @@ final class ArchiveRestorePipeline {
                 DeltaWork work = byDelta.get(region.delta());
                 if (work == null) throw new IOException("Missing LRHD worker for " + region.path());
                 var coordinate = new Coordinate(region.rx(), region.rz());
-                work.indexes.add(i);
                 if (work.diffCoordinates.contains(coordinate)) {
                     if (work.byCoordinate.putIfAbsent(coordinate, i) != null)
                         throw new IOException("Duplicate LRHD region coordinates: " + region.path());
@@ -113,7 +109,7 @@ final class ArchiveRestorePipeline {
         var scratch = new ArchiveTemporaryDirectory();
         try (scratch) {
           try {
-            SubmitRegion<T> submit = (index, owner, staged) -> {
+            SubmitRegion<T> submit = (index, staged) -> {
                 var region = regions.get(index);
                 try {
                     regionPool.execute(() -> {
@@ -139,7 +135,7 @@ final class ArchiveRestorePipeline {
                                 }
                             }
                         }
-                        events.offer(new RegionCompleted<>(index, owner, value, failure));
+                        events.offer(new RegionCompleted<>(index, value, failure));
                     });
                 } catch (RuntimeException rejected) {
                     if (staged != null) {
@@ -156,7 +152,7 @@ final class ArchiveRestorePipeline {
                         checkPipeline(fatal);
                         reserve(permits, inFlight, peakInFlight);
                         try {
-                            submit.submit(index, regions.get(index).delta(), null);
+                            submit.submit(index, null);
                         } catch (Throwable e) {
                             permits.release(); inFlight.decrementAndGet(); throw e;
                         }
@@ -165,7 +161,7 @@ final class ArchiveRestorePipeline {
                     failure = e; fatal.compareAndSet(null, e);
                     if (e instanceof InterruptedException) Thread.currentThread().interrupt();
                 }
-                events.offer(new ProducerCompleted<>(null, failure));
+                events.offer(new ProducerCompleted<>(failure));
             };
 
             for (DeltaWork work : deltaWorks) producerPool.execute(() -> {
@@ -184,7 +180,7 @@ final class ArchiveRestorePipeline {
                             if (staged == null && retain)
                                 throw new IOException("Missing staged LRHD region " + index.rx + "," + index.rz);
                             if (retain) {
-                                submit.submit(target, work.delta, staged);
+                                submit.submit(target, staged);
                             }
                         } catch (Throwable e) {
                             if (retain) { permits.release(); inFlight.decrementAndGet(); }
@@ -196,7 +192,7 @@ final class ArchiveRestorePipeline {
                     failure = e; fatal.compareAndSet(null, e);
                     if (e instanceof InterruptedException) Thread.currentThread().interrupt();
                 }
-                events.offer(new ProducerCompleted<>(work.delta, failure));
+                events.offer(new ProducerCompleted<>(failure));
             });
             producerPool.execute(baseProducer);
 
@@ -220,24 +216,12 @@ final class ArchiveRestorePipeline {
                     if (completed.failure() != null)
                         throw asIOException("Region task failed: " + regions.get(completed.index()).path(), completed.failure());
                     values[completed.index()] = completed.value();
-                    if (completed.owner() == null) {
-                        if (completionListener != null) completionListener.accept(completed.index());
-                    } else {
-                        DeltaWork work = byDelta.get(completed.owner());
-                        work.completed++;
-                        notifyDeltaIfComplete(work, completionListener);
-                    }
+                    if (completionListener != null) completionListener.accept(completed.index());
                 } else if (event instanceof ProducerCompleted<?> raw) {
                     @SuppressWarnings("unchecked") var completed = (ProducerCompleted<T>) raw;
                     finishedProducers++;
                     if (completed.failure() != null)
                         throw asIOException("LRHD reader failed", completed.failure());
-                    if (completed.owner() != null) {
-                        DeltaWork work = byDelta.get(completed.owner());
-                        work.expected = work.indexes.size();
-                        work.frameVerified = true;
-                        notifyDeltaIfComplete(work, completionListener);
-                    }
                     if (finishedProducers == producerCount) tailStart = System.nanoTime();
                 }
             }
@@ -275,13 +259,6 @@ final class ArchiveRestorePipeline {
 
     private static IOException asIOException(String message, Throwable cause) {
         return cause instanceof IOException io ? io : new IOException(message, cause);
-    }
-
-    private static void notifyDeltaIfComplete(DeltaWork work, IntConsumer listener) {
-        if (!work.notified && work.frameVerified && work.completed == work.expected) {
-            work.notified = true;
-            if (listener != null) for (int index : work.indexes) listener.accept(index);
-        }
     }
 
     private static void stopPool(ExecutorService pool, boolean cancel) {

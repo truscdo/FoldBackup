@@ -1,9 +1,10 @@
 package io.github.truscdo.foldbackup.core.backup;
 
+import io.github.truscdo.foldbackup.core.LogUtil;
+import io.github.truscdo.foldbackup.core.logging.ProgressThrottler;
 import io.github.truscdo.foldbackup.core.store.SnapshotManifest;
 import io.github.truscdo.foldbackup.core.store.SnapshotStore;
 import io.github.truscdo.foldbackup.core.task.TaskStatus;
-import io.github.truscdo.foldbackup.core.LogUtil;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -262,31 +263,27 @@ public class BackupCoordinator {
     }
 
     /**
-     * Rate-limited scan progress tracker that updates the TaskStatus
-     * every 1 second. Receives callbacks from RegionProcessor during
-     * world scanning.
+     * 使用 {@link ProgressThrottler} 按 1 秒间隔限流的扫描进度跟踪器；
+     * 首次发现条目时立即发布以便终端与监控尽早可见，并同步保护来自多个工作线程的回调。
      */
     private static class ScanProgressTracker implements java.util.function.Consumer<ScanEvent> {
 
         private final Consumer<BackupStep> progress;
+        private final ProgressThrottler throttler =
+                new ProgressThrottler(ProgressThrottler.DEFAULT_INTERVAL_NANOS, false);
         private int regionsProcessed;
         private int filesProcessed;
         private int regionsDiscovered, filesDiscovered, failures;
-        private String lastDiscoveredRegion;
-        private String lastDiscoveredFile;
-        private long lastLogTime;
+        private String lastDiscoveredRegion = "";
+        private String lastDiscoveredFile = "";
+        private boolean firstPublished;
 
         ScanProgressTracker(Consumer<BackupStep> progress) {
             this.progress = progress;
-            this.regionsProcessed = 0;
-            this.filesProcessed = 0;
-            this.lastDiscoveredRegion = "";
-            this.lastDiscoveredFile = "";
-            this.lastLogTime = System.currentTimeMillis();
         }
 
         @Override
-        public void accept(ScanEvent event) {
+        public synchronized void accept(ScanEvent event) {
             switch (event) {
                 case ScanEvent.Region r -> {
                     regionsDiscovered++;
@@ -297,16 +294,19 @@ public class BackupCoordinator {
                     lastDiscoveredFile = f.relPath();
                 }
                 case ScanEvent.Completed c -> {
-                    if (c.failed()) failures++;
-                    if (!c.failed()) {
-                        if (c.region()) regionsProcessed++; else filesProcessed++;
+                    if (c.failed()) {
+                        failures++;
+                    } else if (c.region()) {
+                        regionsProcessed++;
+                    } else {
+                        filesProcessed++;
                     }
                 }
             }
 
-            long now = System.currentTimeMillis();
-            if (now - lastLogTime >= 1000) {
-                lastLogTime = now;
+            boolean forceFirst = !firstPublished && (regionsDiscovered + filesDiscovered) > 0;
+            if (throttler.tryAcquire(forceFirst)) {
+                firstPublished = true;
                 logProgress();
             }
         }
@@ -317,7 +317,7 @@ public class BackupCoordinator {
                     regionsDiscovered, filesDiscovered, failures));
         }
 
-        void logFinal() {
+        synchronized void logFinal() {
             progress.accept(new BackupStep.ScanningWorld(
                     regionsProcessed, filesProcessed, "", "", true, regionsDiscovered, filesDiscovered, failures));
         }

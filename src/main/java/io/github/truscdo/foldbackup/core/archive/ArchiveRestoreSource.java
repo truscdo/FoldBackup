@@ -23,7 +23,6 @@ import java.util.stream.Collectors;
  */
 public final class ArchiveRestoreSource implements RestoreSource {
     private final ArchiveBaseline base;
-    private final TarIndex diff;
     private final ArchiveRestorePlan plan;
     private final List<RestoreEntry> entries;
     private final List<RestoreEntry> regionEntries;
@@ -66,7 +65,6 @@ public final class ArchiveRestoreSource implements RestoreSource {
             throw failure;
         }
         this.base = baseline;
-        this.diff = index;
         this.plan = restorePlan;
 
         List<RestoreEntry> regions = new ArrayList<>(plan.regions.size());

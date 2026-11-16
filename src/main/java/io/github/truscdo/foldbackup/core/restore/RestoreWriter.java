@@ -51,6 +51,7 @@ public final class RestoreWriter {
 
         progress.stage("Restoring regions", plan.regions().size());
         if (!plan.regions().isEmpty()) {
+            progress.current(plan.regions().getFirst().path());
             source.readRegions(plan.regions(), (entry, region) -> {
                 writeRegion(root, entry, region, compressionLevel);
                 synchronized (progress) {

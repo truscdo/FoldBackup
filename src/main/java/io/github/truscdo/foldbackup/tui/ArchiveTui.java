@@ -38,7 +38,6 @@ public class ArchiveTui {
             }
 
             String targetId = selected.target().meta().sourceSnapshotId;
-            String diffId = selected.target().meta().isDiff() ? targetId : null;
 
             // 0 returns to selecting the archive.
             while (true) {

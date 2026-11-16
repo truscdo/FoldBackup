@@ -29,7 +29,7 @@ class BackupExecutorTest {
         try (var worker = Executors.newSingleThreadExecutor()) {
             worker.shutdown();
             var executor = new BackupExecutor(Runnable::run, (key, args) -> warnings.add(key),
-                    world, new BackupCoordinator(null, null, null, null), null, null, worker, tasks);
+                    world, new BackupCoordinator(null, null, null, null), null, worker, tasks);
             assertEquals(BackupResult.FAILED, executor.triggerBackup(true).get(2, TimeUnit.SECONDS));
             world.assertRestored();
             assertFalse(executor.isBackupRunning());
@@ -55,7 +55,7 @@ class BackupExecutorTest {
         try (var worker = Executors.newSingleThreadExecutor()) {
             var executor = new BackupExecutor(Runnable::run,
                     (key, args) -> warnings.add(args.length == 0 ? key : key + ":" + args[0]),
-                    world, coordinator, null, new BackupScheduler(null), worker, tasks);
+                    world, coordinator, new BackupScheduler(null), worker, tasks);
             assertEquals(BackupResult.FAILED, executor.triggerBackup(true).get(2, TimeUnit.SECONDS));
             world.assertRestored();
             assertFalse(executor.isBackupRunning());
@@ -73,7 +73,7 @@ class BackupExecutorTest {
             var tasks = new TaskRegistry();
             try (var worker = Executors.newSingleThreadExecutor()) {
                 var executor = new BackupExecutor(Runnable::run, (key, args) -> {}, world,
-                        new BackupCoordinator(null, null, null, null), null, null, worker, tasks);
+                        new BackupCoordinator(null, null, null, null), null, worker, tasks);
                 assertEquals(BackupResult.FAILED, executor.triggerBackup(true).get(2, TimeUnit.SECONDS));
                 world.assertRestored();
                 assertFalse(executor.isBackupRunning());
@@ -97,7 +97,7 @@ class BackupExecutorTest {
             };
             try (var worker = Executors.newSingleThreadExecutor()) {
                 var executor = new BackupExecutor(mainQueue::add, (key, args) -> {}, world, coordinator,
-                        null, new BackupScheduler(null), worker, tasks);
+                        new BackupScheduler(null), worker, tasks);
                 var future = executor.triggerBackup(true);
                 mainQueue.remove().run();
                 assertEquals(BackupResult.ALREADY_RUNNING, executor.triggerBackup(true).join());
@@ -121,7 +121,7 @@ class BackupExecutorTest {
         world.failAfterSuspend = true;
         try (var worker = Executors.newSingleThreadExecutor()) {
             var executor = new BackupExecutor(Runnable::run, (key, args) -> {}, world,
-                    new BackupCoordinator(null, null, null, null), null, null, worker, new TaskRegistry());
+                    new BackupCoordinator(null, null, null, null), null, worker, new TaskRegistry());
             assertEquals(BackupResult.FAILED, executor.triggerBackupBlocking(true));
             world.assertRestored();
             assertFalse(executor.isBackupRunning());
@@ -146,7 +146,7 @@ class BackupExecutorTest {
         };
         try (var worker = Executors.newSingleThreadExecutor()) {
             var executor = new BackupExecutor(mainQueue::add, (key, args) -> {}, world, coordinator,
-                    null, new BackupScheduler(null), worker, tasks, () -> 60_000L);
+                    new BackupScheduler(null), worker, tasks, () -> 60_000L);
             var future = executor.triggerBackup(true);
             mainQueue.remove().run();
             assertTrue(afterScan.await(5, TimeUnit.SECONDS));
@@ -182,7 +182,7 @@ class BackupExecutorTest {
         try (var worker = Executors.newSingleThreadExecutor()) {
             var scheduler = new BackupScheduler(null);
             var executor = new BackupExecutor(mainQueue::add, (key, args) -> warnings.add(key),
-                    world, coordinator, null, scheduler, worker, tasks, () -> 60_000L);
+                    world, coordinator, scheduler, worker, tasks, () -> 60_000L);
             var future = executor.triggerBackup(true);
             mainQueue.remove().run();
             assertTrue(started.await(5, TimeUnit.SECONDS));
@@ -216,7 +216,7 @@ class BackupExecutorTest {
         var coordinator = blockingScanCoordinator(started);
         try (var worker = Executors.newSingleThreadExecutor()) {
             var executor = new BackupExecutor(mainQueue::add, (key, args) -> {}, world, coordinator,
-                    null, new BackupScheduler(null), worker, tasks, () -> {
+                    new BackupScheduler(null), worker, tasks, () -> {
                         reads.incrementAndGet();
                         return 60_000L;
                     });
@@ -246,7 +246,7 @@ class BackupExecutorTest {
         var coordinator = blockingScanCoordinator(started);
         try (var worker = Executors.newSingleThreadExecutor()) {
             var executor = new BackupExecutor(mainQueue::add, (key, args) -> warnings.incrementAndGet(),
-                    world, coordinator, null, new BackupScheduler(null), worker, tasks, () -> 60_000L);
+                    world, coordinator, new BackupScheduler(null), worker, tasks, () -> 60_000L);
             var future = executor.triggerBackup(true);
             mainQueue.remove().run();
             assertTrue(started.await(5, TimeUnit.SECONDS));
@@ -280,13 +280,13 @@ class BackupExecutorTest {
 
         try (var worker = Executors.newSingleThreadExecutor()) {
             // 未初始化时不得触发 onAccepted
-            var unready = new BackupExecutor(mainQueue::add, (key, args) -> {}, null, null, null,
+            var unready = new BackupExecutor(mainQueue::add, (key, args) -> {}, null, null,
                     scheduler, worker, tasks, () -> 0L);
             assertEquals(BackupResult.NOT_INITIALIZED,
                     unready.triggerBackup(true, accepted::incrementAndGet).getNow(null));
             assertEquals(0, accepted.get());
 
-            var executor = new BackupExecutor(mainQueue::add, (key, args) -> {}, world, coordinator, null,
+            var executor = new BackupExecutor(mainQueue::add, (key, args) -> {}, world, coordinator,
                     scheduler, worker, tasks, () -> 0L);
 
             // 最小间隔未到时不得触发 onAccepted

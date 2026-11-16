@@ -1,6 +1,7 @@
 package io.github.truscdo.foldbackup.core.archive;
 
 import io.github.truscdo.foldbackup.core.HashUtil;
+import io.github.truscdo.foldbackup.core.ProgressTracker;
 import io.github.truscdo.foldbackup.core.StreamingHash;
 import io.github.truscdo.foldbackup.core.format.*;
 import java.io.IOException;
@@ -24,10 +25,19 @@ import java.util.concurrent.Future;
  */
 final class DiffRegionPipeline {
     private static final int HEADER_CELLS = 1024;
-    record RegionTask(int rx, int rz, RegionStream.Source base, RegionStream.Source target) {}
+    record RegionTask(String label, int rx, int rz, RegionStream.Source base, RegionStream.Source target) {
+        RegionTask(int rx, int rz, RegionStream.Source base, RegionStream.Source target) {
+            this("r." + rx + "." + rz + ".mca", rx, rz, base, target);
+        }
+    }
 
     static void run(List<RegionTask> tasks, long chunkLimit, Path scratch, LrhdEncodingWriter writer)
             throws IOException {
+        run(tasks, chunkLimit, scratch, writer, null);
+    }
+
+    static void run(List<RegionTask> tasks, long chunkLimit, Path scratch, LrhdEncodingWriter writer,
+            ProgressTracker progress) throws IOException {
         if (tasks.isEmpty()) return;
         if (chunkLimit < 1) throw new IllegalArgumentException("Invalid diff chunk budget");
         ExecutorService prefetch = Executors.newSingleThreadExecutor(
@@ -37,6 +47,9 @@ final class DiffRegionPipeline {
             for (int i = 0; i < tasks.size(); i++) {
                 StreamIo.checkCancelled();
                 RegionTask task = tasks.get(i);
+                if (progress != null && task.label() != null && !task.label().isEmpty()) {
+                    progress.current(task.label());
+                }
                 // The first baseline has no predecessor to overlap with, so it is decoded inline.
                 String[] baseline = pending == null ? baselineOf(task) : await(pending);
                 // Submit before decoding the target so the two run concurrently.
@@ -48,6 +61,9 @@ final class DiffRegionPipeline {
                 var region = new LrhdFormat.RegionIndex(); region.rx = task.rx; region.rz = task.rz;
                 produce(task, baseline, chunkLimit, scratch, writer, region);
                 writer.region(region);
+                if (progress != null) {
+                    progress.done(task.label() == null ? "" : task.label());
+                }
             }
         } finally {
             prefetch.shutdownNow();

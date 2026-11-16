@@ -1,5 +1,6 @@
 package io.github.truscdo.foldbackup.core.archive;
 
+import io.github.truscdo.foldbackup.core.ProgressEvent;
 import io.github.truscdo.foldbackup.core.ProgressListener;
 import io.github.truscdo.foldbackup.core.ProgressTracker;
 import io.github.truscdo.foldbackup.core.format.LrhdFormat;
@@ -172,22 +173,27 @@ public class ArchiveVerifier {
         }
         var progress = new ProgressTracker(listener);
         progress.stage("Verifying archives", archives.size());
-        for (Path archive : archives) {
-            progress.current(archive.getFileName().toString());
+        for (int i = 0; i < archives.size(); i++) {
+            Path archive = archives.get(i);
+            String archiveName = archive.getFileName().toString();
+            progress.current(archiveName);
+            ProgressListener subListener = ProgressTracker.prefixed(
+                    listener, "[" + (i + 1) + "/" + archives.size() + " " + archiveName + "] ");
             try {
-                Result one = verifyArchive(archiveRoot, archive);
+                Result one = verifyArchive(archiveRoot, archive, subListener);
                 combined.lrhChecked += one.lrhChecked;
                 combined.lrhdChecked += one.lrhdChecked;
                 combined.chunkHashesChecked += one.chunkHashesChecked;
                 combined.totalBytes += one.totalBytes;
                 for (String error : one.errors)
-                    combined.errors.add(error.startsWith(archive.getFileName() + ":")
-                            ? error : archive.getFileName() + ": " + error);
+                    combined.errors.add(error.startsWith(archiveName + ":")
+                            ? error : archiveName + ": " + error);
             } catch (IOException | RuntimeException e) {
-                combined.errors.add(archive.getFileName() + ": " + e.getMessage());
-            } finally {
-                progress.done(archive.getFileName().toString());
+                combined.errors.add(archiveName + ": " + e.getMessage());
             }
+        }
+        if (!archives.isEmpty() && listener != null) {
+            listener.onProgress(new ProgressEvent("Verifying archives", archives.size(), archives.size(), ""));
         }
         return combined;
     }
@@ -196,10 +202,18 @@ public class ArchiveVerifier {
 
     private void verifyFullTar(Path fullTar, ArchiveBaseline baseline, Result result,
             ProgressTracker progress) throws IOException {
-        progress.stage("Verifying " + fullTar.getFileName(), -1);
+        progress.stage("Verifying " + fullTar.getFileName(), countUniqueObjects(baseline.meta()));
         verifyBaselineObjects(baseline, result, progress);
         // Coordinate/path conflicts are only visible when the whole target is assembled.
         try (var ignored = ArchiveRestorePlan.open(baseline, baseline.meta(), null)) { }
+    }
+
+    private static int countUniqueObjects(ArchiveSnapshot meta) {
+        Set<String> regions = new HashSet<>();
+        for (var region : meta.regions) regions.add(region.contentHash);
+        Set<String> files = new HashSet<>();
+        for (var file : meta.files) files.add(file.sourceHash);
+        return regions.size() + files.size();
     }
 
     /** Every referenced object is present and matches its declared identity. */
@@ -233,8 +247,8 @@ public class ArchiveVerifier {
 
     private void verifyDiffTar(ArchiveBaseline baseline, Path diffTar, Result result, ProgressTracker progress)
             throws IOException {
-        progress.stage("Verifying " + diffTar.getFileName(), -1);
         TarIndex archive = TarIndex.read(diffTar);
+        progress.stage("Verifying " + diffTar.getFileName(), archive.entries.size());
         ArchiveSnapshot meta = archive.snapshot("diff");
         ArchiveSnapshot base = baseline.meta();
         Map<String, Long> targetSizes = new HashMap<>();
@@ -264,6 +278,9 @@ public class ArchiveVerifier {
         }
         try (var plan = ArchiveRestorePlan.open(baseline, meta, archive)) {
             progress.stage("Reconstructing diff regions", plan.regions.size());
+            if (!plan.regions.isEmpty()) {
+                progress.current(plan.regions.getFirst().path());
+            }
             plan.runRegions(ArchiveTasks.TaskWork.decompress(), 0, null,
                     index -> progress.done(plan.regions.get(index).path()), (index, source) -> {
                         var region = plan.regions.get(index);

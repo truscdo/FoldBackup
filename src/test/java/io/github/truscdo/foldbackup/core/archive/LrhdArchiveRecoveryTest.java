@@ -116,8 +116,9 @@ class LrhdArchiveRecoveryTest {
         assertEquals(blobs.getRelativePath(changedTarget.getContentHash(), "lrh"), changedTarget.getBlobPath());
         assertTrue(blobs.exists(changedTarget.getContentHash(), "lrh"));
 
-        var processing = events.stream().filter(event -> event.phase().equals("Merging missing regions"))
+        var processing = events.stream().filter(event -> event.phase().endsWith("Merging missing regions"))
                 .findFirst().orElseThrow();
+        assertTrue(processing.phase().startsWith("[2/2] "), processing.phase());
         assertEquals(2, processing.total());
     }
 
@@ -135,7 +136,7 @@ class LrhdArchiveRecoveryTest {
         assertEquals("region/r.5.0.mca", target.getRegions().get(0).getFilename());
         assertEquals(base.getRegions().stream().filter(region -> region.getFilename().equals("region/r.5.0.mca"))
                 .findFirst().orElseThrow().getBlobPath(), target.getRegions().get(0).getBlobPath());
-        assertEquals(0, events.stream().filter(event -> event.phase().equals("Merging missing regions"))
+        assertEquals(0, events.stream().filter(event -> event.phase().endsWith("Merging missing regions"))
                 .findFirst().orElseThrow().total());
     }
 

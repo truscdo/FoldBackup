@@ -162,7 +162,7 @@ public class BackupTui {
         System.out.println("The world must be closed before creating a snapshot.");
         try {
             SnapshotManifest snapshot;
-            try (var progress = new ProgressPrinter(System.err)) {
+            try (var progress = new ProgressPrinter(System.out)) {
                 snapshot = SnapshotCreation.create(
                         Path.of(input.trim()), backupRoot, threads, progress.onProgress());
             }

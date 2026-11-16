@@ -48,7 +48,7 @@ class TickHandlerTest {
 
         try (var worker = Executors.newSingleThreadExecutor()) {
             var executor = new BackupExecutor(Runnable::run, (key, args) -> {}, world, coordinator,
-                    null, scheduler, worker, tasks, () -> 0L, now::get) {
+                    scheduler, worker, tasks, () -> 0L, now::get) {
                 @Override CompletableFuture<BackupResult> triggerBackup(boolean force, Runnable onAccepted) {
                     var f = super.triggerBackup(force, onAccepted);
                     f.whenComplete((r, e) -> done.countDown());
@@ -103,7 +103,7 @@ class TickHandlerTest {
 
         try (var worker = Executors.newSingleThreadExecutor()) {
             var executor = new BackupExecutor(mainQueue::add, (key, args) -> {}, world, coordinator,
-                    null, scheduler, worker, tasks, () -> 0L);
+                    scheduler, worker, tasks, () -> 0L);
 
             long now = System.currentTimeMillis() + 60_000L;
             advanceTicks(scheduler, executor, true, 1200, now);
