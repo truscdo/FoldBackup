@@ -45,7 +45,7 @@ public final class RegionStream {
         }
         public Summary finish() throws IOException {
             if (active) throw new IOException("Unfinished chunk");
-            byte[] table = ByteBuffer.allocate(4096).array();
+            byte[] table = ByteBuffer.allocate(lengths.length * Integer.BYTES).array();
             ByteBuffer b = ByteBuffer.wrap(table);
             for (int length : lengths) b.putInt(length);
             // finish is called once by each core operation.

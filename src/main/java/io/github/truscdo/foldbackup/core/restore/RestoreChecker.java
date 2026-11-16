@@ -93,6 +93,10 @@ public final class RestoreChecker {
         return new RestorePlan(regions, files, skippedRegions, skippedFiles, deletions, emptied);
     }
 
+    /**
+     * P3 快照恢复的唯一路径去重防线，同时为 {@link #classifyDeletions} 提供大小写无关索引。
+     * P7 归档路径虽已在 {@code ArchiveRestorePlan} 校验过，此处仍须建索引且保持两路径边界独立。
+     */
     private static Map<String, RestoreEntry> index(List<RestoreEntry> entries) throws IOException {
         Map<String, RestoreEntry> index = new HashMap<>();
         for (RestoreEntry entry : entries) {

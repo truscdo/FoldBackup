@@ -165,21 +165,14 @@ public class ArchiveCreator {
                                 compressionLevel, progress);
                     } else if (recompress) {
                         for (RegionEntry re : uniqueRegions) {
-                            String object = regionObjectPath(re.getContentHash());
-                            progress.current(object);
-                            tar.putEntry(object, out -> LrhFormat.recompress(
-                                    blobStore.getRootDir().resolve(re.getBlobPath()), out,
-                                    compressionLevel));
-                            progress.done(object);
+                            writeRegionObject(re, progress, object -> tar.putEntry(object,
+                                    out -> LrhFormat.recompress(
+                                            blobStore.getRootDir().resolve(re.getBlobPath()), out, compressionLevel)));
                         }
                     } else {
                         for (RegionEntry re : uniqueRegions) {
-                            String object = regionObjectPath(re.getContentHash());
-                            progress.current(object);
-                            try (var input = blobStore.open(re.getBlobPath())) {
-                                tar.putEntry(object, input, blobStore.size(re.getBlobPath()));
-                            }
-                            progress.done(object);
+                            writeRegionObject(re, progress,
+                                    object -> copyBlobEntry(tar, object, re.getBlobPath()));
                         }
                     }
                 }
@@ -187,15 +180,7 @@ public class ArchiveCreator {
                 // Store each distinct compressed file payload once.
                 progress.stage("Copying files", sn.getExtraFiles() == null ? 0 : sn.getExtraFiles().size());
                 if (sn.getExtraFiles() != null) {
-                    Set<String> written = new HashSet<>();
-                    for (FileEntry fe : sn.getExtraFiles()) {
-                        String object = fileObjectPath(fe.getSourceHash());
-                        progress.current(object);
-                        if (written.add(fe.getSourceHash())) try (var input = blobStore.open(fe.getBlobPath())) {
-                            tar.putEntry(object, input, blobStore.size(fe.getBlobPath()));
-                        }
-                        progress.done(object);
-                    }
+                    writeFileObjects(tar, sn.getExtraFiles(), true, progress);
                 }
                 progress.stage("Finalizing archive", 1);
                 progress.current(tarName);
@@ -316,14 +301,7 @@ public class ArchiveCreator {
                     }
 
                     // Changed file payloads are stored once by content identity.
-                    for (FileEntry fe : result.fileObjects) {
-                        String object = fileObjectPath(fe.getSourceHash());
-                        progress.current(object);
-                        try (var input = blobStore.open(fe.getBlobPath())) {
-                            tar.putEntry(object, input, blobStore.size(fe.getBlobPath()));
-                        }
-                        progress.done(object);
-                    }
+                    writeFileObjects(tar, result.fileObjects, false, progress);
                     progress.stage("Finalizing archive", 1);
                     progress.current(tarName);
                 }
@@ -397,6 +375,38 @@ public class ArchiveCreator {
         return new RegionPlan(quota, bufferBytes);
     }
 
+    @FunctionalInterface
+    private interface ObjectWriter {
+        void write(String objectPath) throws IOException;
+    }
+
+    private static void writeRegionObject(RegionEntry entry, ProgressTracker progress, ObjectWriter writer)
+            throws IOException {
+        String object = regionObjectPath(entry.getContentHash());
+        progress.current(object);
+        writer.write(object);
+        progress.done(object);
+    }
+
+    private void writeFileObjects(TarWriter tar, Iterable<FileEntry> entries, boolean deduplicate,
+            ProgressTracker progress) throws IOException {
+        Set<String> written = deduplicate ? new HashSet<>() : null;
+        for (FileEntry fe : entries) {
+            String object = fileObjectPath(fe.getSourceHash());
+            progress.current(object);
+            if (written == null || written.add(fe.getSourceHash())) {
+                copyBlobEntry(tar, object, fe.getBlobPath());
+            }
+            progress.done(object);
+        }
+    }
+
+    private void copyBlobEntry(TarWriter tar, String object, String blobPath) throws IOException {
+        try (var input = blobStore.open(blobPath)) {
+            tar.putEntry(object, input, blobStore.size(blobPath));
+        }
+    }
+
     OrderedCompressionPipeline.Metrics exportRegionsParallel(TarWriter tar, List<RegionEntry> regions,
             BackupResourceBudget.RegionQuota quota, long bufferBytes, int level, ProgressTracker progress)
             throws IOException {
@@ -408,17 +418,14 @@ public class ArchiveCreator {
                 (index, output) -> LrhFormat.compress(output,
                         consumer -> LrhFormat.read(blobStore.getRootDir().resolve(
                                 regions.get(index).getBlobPath()), consumer), level),
-                (index, result) -> {
-                    RegionEntry entry = regions.get(index);
-                    String object = regionObjectPath(entry.getContentHash());
-                    progress.current(object);
-                    tar.putEntry(object, output -> {
-                        long start = output.position();
-                        io.github.truscdo.foldbackup.core.format.StreamIo.write(output, new byte[LrhFormat.COMPRESSED_DATA_OFFSET]);
-                        var summary = result.drainTo(io.github.truscdo.foldbackup.core.format.StreamIo.output(output));
-                        LrhFormat.finish(output, start, summary, level);
-                    });
-                    progress.done(object);
-                });
+                (index, result) -> writeRegionObject(regions.get(index), progress,
+                        object -> tar.putEntry(object, output -> {
+                            long start = output.position();
+                            io.github.truscdo.foldbackup.core.format.StreamIo.write(output,
+                                    new byte[LrhFormat.COMPRESSED_DATA_OFFSET]);
+                            var summary = result.drainTo(
+                                    io.github.truscdo.foldbackup.core.format.StreamIo.output(output));
+                            LrhFormat.finish(output, start, summary, level);
+                        })));
     }
 }

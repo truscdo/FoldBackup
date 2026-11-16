@@ -43,7 +43,10 @@ public final class BackupFilter {
     private final Pattern compiled;
 
     /**
-     * 默认过滤规则：与原硬编码跳过行为一致的默认值。
+     * 离线与核心层默认过滤规则：仅包含 4 条核心保护规则（{@code session.lock}、{@code backups}、
+     * {@code .backups}、{@code *.wip}），故意不包含 Mod 在线默认排除的
+     * {@code **&#47;DistantHorizons.sqlite}——离线模式无 {@code --exclude} 配置入口，保持更保守的
+     * 4 条默认值避免静默漏备第三方模组数据。
      */
     public static BackupFilter defaults() {
         return new BackupFilter(List.of(

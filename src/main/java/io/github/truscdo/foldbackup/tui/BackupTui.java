@@ -10,10 +10,8 @@ import io.github.truscdo.foldbackup.core.archive.ArchiveCreator;
 
 import io.github.truscdo.foldbackup.core.LogUtil;
 import io.github.truscdo.foldbackup.core.console.ProgressPrinter;
-import io.github.truscdo.foldbackup.core.console.RestoreStatsPrinter;
 import io.github.truscdo.foldbackup.core.console.SnapshotTablePrinter;
 import io.github.truscdo.foldbackup.core.export.SnapshotZipExport;
-import io.github.truscdo.foldbackup.core.restore.RestoreOperation;
 import io.github.truscdo.foldbackup.core.restore.SnapshotRestoreSource;
 
 import java.io.IOException;
@@ -242,12 +240,12 @@ public class BackupTui {
                     }
 
                     if (!zip) {
-                        ExportFlow flow = exportDirectory(store, selected, outputPath);
-                        if (flow == ExportFlow.CANCEL) {
+                        var flow = exportDirectory(store, selected, outputPath);
+                        if (flow == RestoreInteraction.Flow.CANCEL) {
                             System.out.println("Export cancelled.\n");
                             return;
                         }
-                        if (flow == ExportFlow.DONE) return;
+                        if (flow == RestoreInteraction.Flow.DONE) return;
                         continue;
                     }
 
@@ -303,57 +301,15 @@ public class BackupTui {
     // 目录导出（检查 → 统计 → 决策 → 线程数 → 执行）
     // ──────────────────────────────────────────────
 
-    private enum ExportFlow { DONE, BACK_TO_PATH, CANCEL }
-
-    private ExportFlow exportDirectory(StoreContext store, BackupExporter.SnapshotInfo selected, Path outputPath) {
+    private RestoreInteraction.Flow exportDirectory(
+            StoreContext store, BackupExporter.SnapshotInfo selected, Path outputPath) {
         SnapshotManifest manifest = store.snapshotManager().loadSnapshot(selected.epochSeconds);
         if (manifest == null) {
             System.err.println("Snapshot not found: " + selected.id + "\n");
-            return ExportFlow.CANCEL;
+            return RestoreInteraction.Flow.CANCEL;
         }
-        try (var source = new SnapshotRestoreSource(manifest, store.blobStore())) {
-            RestoreOperation.Session session;
-            try (var progress = new ProgressPrinter(System.out)) {
-                session = RestoreOperation.prepare(source, outputPath, 0, progress.onProgress());
-            } catch (IOException e) {
-                System.err.println("Export failed: " + e.getMessage() + "\n");
-                return ExportFlow.CANCEL;
-            }
-            try (session) {
-                System.out.println();
-                RestoreStatsPrinter.print(session.stats(), null, false, session.target(), System.out);
-                System.out.println();
-                while (true) {
-                    int choice = prompt.readInt(
-                            "1 = overwrite, 2 = delete extra, 3 = cancel to main menu, 0 = back: ", 0, 3);
-                    if (choice == 3) return ExportFlow.CANCEL;
-                    // Blank input and EOF follow the existing TUI convention: any non-positive
-                    // choice goes back one level.
-                    if (choice <= 0) return ExportFlow.BACK_TO_PATH;
-
-                    boolean deleteExtra = choice == 2;
-                    while (true) {
-                        int threads = prompt.readThreadCount();
-                        if (threads == ConsolePrompt.EOF) return ExportFlow.CANCEL;
-                        if (threads == ConsolePrompt.BACK) break;
-
-                        System.out.println("Exporting...");
-                        try (var progress = new ProgressPrinter(System.out)) {
-                            var outcome = session.execute(deleteExtra, threads, ArchiveDefaults.EXPORT_LEVEL,
-                                    progress.onProgress());
-                            System.out.println("Done: " + outcome.target().toAbsolutePath().normalize()
-                                    + ", deleted extra: " + outcome.deleted() + "\n");
-                        } catch (IOException e) {
-                            System.err.println("Export failed: " + e.getMessage() + "\n");
-                        }
-                        return ExportFlow.DONE;
-                    }
-                }
-            }
-        } catch (IOException e) {
-            System.err.println("Export failed: " + e.getMessage() + "\n");
-            return ExportFlow.CANCEL;
-        }
+        return RestoreInteraction.run(prompt, () -> new SnapshotRestoreSource(manifest, store.blobStore()),
+                outputPath, ArchiveDefaults.EXPORT_LEVEL, "Exporting...", "Export failed: ");
     }
 
     // ──────────────────────────────────────────────
@@ -459,27 +415,16 @@ public class BackupTui {
             if (baseChoice <= 0) return false;
 
             BackupExporter.SnapshotInfo base = bases.get(baseChoice - 1);
-            int threads = prompt.readThreadCount();
-            if (threads == ConsolePrompt.EOF) return true;
-            if (threads == ConsolePrompt.BACK) continue;
+            var decision = confirmArchiveCreate(threads -> List.of(
+                    "  Type:   diff",
+                    "  Base:   " + base.id,
+                    "  Target: " + target.id,
+                    "  Threads: " + (threads > 0 ? threads : "auto"),
+                    "  Output: " + archiveRoot));
+            if (decision.action() == ArchiveConfirm.BACK) continue;
+            if (decision.action() == ArchiveConfirm.LEAVE) return true;
 
-            System.out.println();
-            System.out.println("Summary:");
-            System.out.println("  Type:   diff");
-            System.out.println("  Base:   " + base.id);
-            System.out.println("  Target: " + target.id);
-            System.out.println("  Threads: " + (threads > 0 ? threads : "auto"));
-            System.out.println("  Output: " + archiveRoot);
-            System.out.println();
-            int confirm = prompt.readInt(
-                    "Proceed? (1 = confirm, 2 = cancel to main menu, 0 = back): ", 0, 2);
-            if (confirm == 2) {
-                System.out.println("Archive cancelled.\n");
-                return true;
-            }
-            if (confirm <= 0) continue;
-
-            runArchiveCreate(store, base.epochSeconds, base.id, target.epochSeconds, target.id, true, threads);
+            runArchiveCreate(store, base.epochSeconds, base.id, target.epochSeconds, target.id, true, decision.threads());
             return true;
         }
     }
@@ -493,29 +438,43 @@ public class BackupTui {
             if (recompressChoice <= 0) return false;
 
             boolean recompress = recompressChoice == 1;
-            int threads = prompt.readThreadCount();
-            if (threads == ConsolePrompt.EOF) return true;
-            if (threads == ConsolePrompt.BACK) continue;
+            var decision = confirmArchiveCreate(threads -> List.of(
+                    "  Type:       full",
+                    "  Target:     " + target.id,
+                    "  Recompress: " + (recompress ? "yes (level 19)" : "no (verbatim)")
+                            + (recompress && threads > 0 ? ", threads=" + threads : ""),
+                    "  Output:     " + archiveRoot));
+            if (decision.action() == ArchiveConfirm.BACK) continue;
+            if (decision.action() == ArchiveConfirm.LEAVE) return true;
 
-            System.out.println();
-            System.out.println("Summary:");
-            System.out.println("  Type:       full");
-            System.out.println("  Target:     " + target.id);
-            System.out.println("  Recompress: " + (recompress ? "yes (level 19)" : "no (verbatim)")
-                    + (recompress && threads > 0 ? ", threads=" + threads : ""));
-            System.out.println("  Output:     " + archiveRoot);
-            System.out.println();
-            int confirm = prompt.readInt(
-                    "Proceed? (1 = confirm, 2 = cancel to main menu, 0 = back): ", 0, 2);
-            if (confirm == 2) {
-                System.out.println("Archive cancelled.\n");
-                return true;
-            }
-            if (confirm <= 0) continue;
-
-            runArchiveCreate(store, null, null, target.epochSeconds, target.id, recompress, threads);
+            runArchiveCreate(store, null, null, target.epochSeconds, target.id, recompress, decision.threads());
             return true;
         }
+    }
+
+    private enum ArchiveConfirm { PROCEED, BACK, LEAVE }
+    private record ArchiveCreateDecision(ArchiveConfirm action, int threads) {}
+
+    /** 提示线程数、打印摘要并读取归档创建最终确认。 */
+    private ArchiveCreateDecision confirmArchiveCreate(java.util.function.IntFunction<List<String>> summaryLines) {
+        int threads = prompt.readThreadCount();
+        if (threads == ConsolePrompt.EOF) return new ArchiveCreateDecision(ArchiveConfirm.LEAVE, 0);
+        if (threads == ConsolePrompt.BACK) return new ArchiveCreateDecision(ArchiveConfirm.BACK, 0);
+
+        System.out.println();
+        System.out.println("Summary:");
+        for (String line : summaryLines.apply(threads)) {
+            System.out.println(line);
+        }
+        System.out.println();
+        int confirm = prompt.readInt(
+                "Proceed? (1 = confirm, 2 = cancel to main menu, 0 = back): ", 0, 2);
+        if (confirm == 2) {
+            System.out.println("Archive cancelled.\n");
+            return new ArchiveCreateDecision(ArchiveConfirm.LEAVE, 0);
+        }
+        if (confirm <= 0) return new ArchiveCreateDecision(ArchiveConfirm.BACK, 0);
+        return new ArchiveCreateDecision(ArchiveConfirm.PROCEED, threads);
     }
 
     private void runArchiveCreate(StoreContext store, Long baseEpoch, String baseId,

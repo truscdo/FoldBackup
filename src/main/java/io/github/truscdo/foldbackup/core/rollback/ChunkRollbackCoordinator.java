@@ -100,6 +100,8 @@ public class ChunkRollbackCoordinator {
         boolean poiStaged = poiChunk != null || Files.exists(poiFile);
         String entityReport;
         try (var writer = new OfflineRollbackWriter(regionDir)) {
+            // 取得 session.lock 后先做 fail-fast 预检：避免跑完实体全盘扫描（L117）与 staging 后
+            // 才在 writer.commit 内发现目标 .mca 被占用；writer 侧仍会统一校验含 .mcc 的 affected 集合。
             if (!ChunkRollbackSupport.tryLockRegionFile(regionFile)
                     || !ChunkRollbackSupport.tryLockRegionFile(entityFile)
                     || !ChunkRollbackSupport.tryLockRegionFile(poiFile))

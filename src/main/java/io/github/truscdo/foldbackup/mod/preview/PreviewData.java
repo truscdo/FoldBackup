@@ -46,6 +46,19 @@ public final class PreviewData {
     private PreviewData() {
     }
 
+    /** 单个 16x16x16 区段内的方块展平槽位数。 */
+    static final int SECTION_BLOCKS = 4096;
+
+    /** 按当前世界高度分配以空气填充前的整列方块状态数组。 */
+    static BlockState[] allocateBlocks(ServerLevel level) {
+        return new BlockState[level.getHeight() * 256];
+    }
+
+    /** 预览区块方块数组的唯一展平索引公式（sectionIndex, x, y, z -> array index）。 */
+    static int blockIndex(int sectionIndex, int x, int y, int z) {
+        return sectionIndex * SECTION_BLOCKS + y * 256 + z * 16 + x;
+    }
+
     public static Raw read(SnapshotStore store, BlobStore blobs, ChunkPos pos, Long epochSeconds, String dimension)
             throws IOException {
         var raw = PreviewSnapshotReader.read(store, blobs, pos.x, pos.z, epochSeconds, dimension);
@@ -78,7 +91,7 @@ public final class PreviewData {
             throw new IOException("快照不是完整区块");
         ListTag sections = compoundList(tag, "sections", true);
         ListTag blockEntities = compoundList(tag, "block_entities", false);
-        BlockState[] blocks = new BlockState[level.getHeight() * 256];
+        BlockState[] blocks = allocateBlocks(level);
         Arrays.fill(blocks, Blocks.AIR.defaultBlockState());
         Set<Integer> seen = new HashSet<>();
         for (Tag entry : sections) {
@@ -112,7 +125,7 @@ public final class PreviewData {
             for (int dy = 0; dy < 16; dy++)
                 for (int z = 0; z < 16; z++)
                     for (int x = 0; x < 16; x++)
-                        blocks[index * 4096 + dy * 256 + z * 16 + x] = palette.get(x, dy, z);
+                        blocks[blockIndex(index, x, dy, z)] = palette.get(x, dy, z);
         }
         Map<BlockPos, CompoundTag> bes = new HashMap<>();
         for (Tag entry : blockEntities) {
@@ -148,13 +161,13 @@ public final class PreviewData {
 
     /** 在服务器线程上采集方块数据；实体统计另行独立采集。 */
     public static State capture(ServerLevel level, LevelChunk chunk) throws IOException {
-        BlockState[] blocks = new BlockState[level.getHeight() * 256];
+        BlockState[] blocks = allocateBlocks(level);
         for (int i = 0; i < chunk.getSections().length; i++) {
             var section = chunk.getSection(i);
             for (int y = 0; y < 16; y++)
                 for (int z = 0; z < 16; z++)
                     for (int x = 0; x < 16; x++)
-                        blocks[i * 4096 + y * 256 + z * 16 + x] = section.getBlockState(x, y, z);
+                        blocks[blockIndex(i, x, y, z)] = section.getBlockState(x, y, z);
         }
         Map<BlockPos, CompoundTag> bes = new HashMap<>();
         // 读取待加载的方块实体 NBT，但不实例化方块实体对象。

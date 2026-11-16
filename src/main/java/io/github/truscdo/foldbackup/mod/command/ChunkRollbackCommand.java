@@ -5,8 +5,6 @@ import io.github.truscdo.foldbackup.mod.rollback.InMemoryChunkRollbackHandler;
 import io.github.truscdo.foldbackup.mod.rollback.RollbackOutcome;
 import com.mojang.brigadier.Command;
 import com.mojang.brigadier.CommandDispatcher;
-import com.mojang.brigadier.arguments.IntegerArgumentType;
-import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import net.minecraft.commands.CommandSourceStack;
@@ -29,61 +27,15 @@ public class ChunkRollbackCommand {
 
         public static void register(CommandDispatcher<CommandSourceStack> dispatcher, FoldBackupMod mod) {
                 // ── 分支 A：in <dimension> <x> <z> [snapshotId] ──
-                // 每个分支使用自己的构建器链——Brigadier 的 ArgumentBuilder 是可变的，
-                // 因此在分支间共享构建器会损坏命令树。
+                // 每个分支通过 ChunkCommandArgs.chunkTarget 获取全新构建器链，避免复用可变 ArgumentBuilder。
                 var withDim = Commands.literal("in")
                                 .then(Commands.argument("dimension", DimensionArgument.dimension())
-                                                .then(Commands.argument("x", IntegerArgumentType.integer())
-                                                                .then(Commands.argument("z",
-                                                                                IntegerArgumentType.integer())
-                                                                                // A1：指定快照 ID
-                                                                                .then(Commands.argument("snapshotId",
-                                                                                                StringArgumentType
-                                                                                                                .greedyString())
-                                                                                                .suggests(SnapshotIdSuggestions
-                                                                                                                .suggestAll(mod::getSnapshotStore))
-                                                                                                .executes(ctx -> rollbackChunk(
-                                                                                                                ctx,
-                                                                                                                mod,
-                                                                                                                resolveDimension(
-                                                                                                                                ctx),
-                                                                                                                IntegerArgumentType
-                                                                                                                                .getInteger(ctx, "x"),
-                                                                                                                IntegerArgumentType
-                                                                                                                                .getInteger(ctx, "z"),
-                                                                                                                StringArgumentType
-                                                                                                                                .getString(ctx, "snapshotId"))))
-                                                                                // A2：使用最新快照
-                                                                                .executes(ctx -> rollbackChunk(ctx, mod,
-                                                                                                resolveDimension(ctx),
-                                                                                                IntegerArgumentType
-                                                                                                                .getInteger(ctx, "x"),
-                                                                                                IntegerArgumentType
-                                                                                                                .getInteger(ctx, "z"),
-                                                                                                null)))));
+                                                .then(ChunkCommandArgs.chunkTarget(mod, (ctx, x, z, snapshotId) ->
+                                                                rollbackChunk(ctx, mod, resolveDimension(ctx), x, z, snapshotId))));
 
                 // ── 分支 B：<x> <z> [snapshotId]（当前维度，向后兼容） ──
-                var noDim = Commands.argument("x", IntegerArgumentType.integer())
-                                .then(Commands.argument("z", IntegerArgumentType.integer())
-                                                // B1：指定快照 ID
-                                                .then(Commands.argument("snapshotId",
-                                                                StringArgumentType.greedyString())
-                                                                .suggests(SnapshotIdSuggestions
-                                                                                .suggestAll(mod::getSnapshotStore))
-                                                                .executes(ctx -> rollbackChunk(ctx, mod,
-                                                                                ctx.getSource().getLevel(),
-                                                                                IntegerArgumentType.getInteger(ctx,
-                                                                                                "x"),
-                                                                                IntegerArgumentType.getInteger(ctx,
-                                                                                                "z"),
-                                                                                StringArgumentType.getString(ctx,
-                                                                                                "snapshotId"))))
-                                                // B2：使用最新快照
-                                                .executes(ctx -> rollbackChunk(ctx, mod,
-                                                                ctx.getSource().getLevel(),
-                                                                IntegerArgumentType.getInteger(ctx, "x"),
-                                                                IntegerArgumentType.getInteger(ctx, "z"),
-                                                                null)));
+                var noDim = ChunkCommandArgs.chunkTarget(mod, (ctx, x, z, snapshotId) ->
+                                rollbackChunk(ctx, mod, ctx.getSource().getLevel(), x, z, snapshotId));
 
                 // ── 注册 ──
                 dispatcher.register(

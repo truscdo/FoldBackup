@@ -61,7 +61,7 @@ public class IndexStore implements AutoCloseable {
     /** 初始化索引文件路径及对应的临时文件路径。 */
     public IndexStore(Path path) {
         this.path = path;
-        this.tmpPath = path.resolveSibling(path.getFileName() + ".tmp");
+        this.tmpPath = path.resolveSibling(path.getFileName() + RepositoryLayout.TMP_SUFFIX);
     }
 
     /**
@@ -179,7 +179,7 @@ public class IndexStore implements AutoCloseable {
                 index.addSnapshot(snapshot.manifest(), snapshot.entryMetadataHashes());
             }
 
-            in.end("index.db");
+            in.end(RepositoryLayout.INDEX_FILE);
             return index;
         }
     }

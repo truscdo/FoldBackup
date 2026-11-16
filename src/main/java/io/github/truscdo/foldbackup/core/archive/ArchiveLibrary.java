@@ -14,7 +14,8 @@ import java.util.Map;
 /**
  * 一次扫描得到的归档库视图：每个 tar 及其 {@code snapshot.bin}，按 Epoch 升序，full 已按 Epoch 去重。
  * <p>
- * 扫描是整次导入唯一的目录遍历与元数据读取；导入不再按 diff 反复扫描。
+ * 扫描避免全目录反复遍历与按 diff 重扫；差异归档只依赖在线快照不重开 full 归档，
+ * 但导入 full 归档本身时仍会通过 {@link ArchiveBaseline} 读取其对象索引与 {@code snapshot.bin}。
  * <p>
  * 同 Epoch 多份 full 归档：`snapshot.bin` 字节一致时按文件名排序保留第一份并给出警告，不一致时
  * 记为错误（该 Epoch 不导入）。导入顺序依赖 Epoch 升序，因此 full 必先于其 diff 处理。

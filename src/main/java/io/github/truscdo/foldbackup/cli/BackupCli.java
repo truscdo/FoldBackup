@@ -4,14 +4,12 @@ import io.github.truscdo.foldbackup.core.BackupExporter;
 import io.github.truscdo.foldbackup.core.LogUtil;
 import io.github.truscdo.foldbackup.core.console.ArchiveVerifyReporter;
 import io.github.truscdo.foldbackup.core.console.ProgressPrinter;
-import io.github.truscdo.foldbackup.core.console.RestoreStatsPrinter;
 import io.github.truscdo.foldbackup.core.console.SnapshotTablePrinter;
 import io.github.truscdo.foldbackup.core.archive.ArchiveDefaults;
 import io.github.truscdo.foldbackup.core.archive.ArchiveVerifier;
 import io.github.truscdo.foldbackup.core.export.SnapshotZipExport;
 import io.github.truscdo.foldbackup.core.rollback.ChunkRollbackCoordinator;
 import io.github.truscdo.foldbackup.core.rollback.ChunkRollbackSupport;
-import io.github.truscdo.foldbackup.core.restore.RestoreOperation;
 import io.github.truscdo.foldbackup.core.restore.SnapshotRestoreSource;
 import io.github.truscdo.foldbackup.core.store.BlobStore;
 import io.github.truscdo.foldbackup.core.store.SnapshotManifest;
@@ -189,16 +187,8 @@ public class BackupCli {
         long epoch = snapshots.resolveEpoch(snapshotId);
         SnapshotManifest manifest = snapshots.loadSnapshot(epoch);
         if (manifest == null) throw new IOException("Snapshot not found: " + snapshotId);
-        RestoreOperation.Outcome outcome;
-        try (var source = new SnapshotRestoreSource(manifest, blobs);
-                var progress = new ProgressPrinter(System.err)) {
-            System.out.println("Exporting " + snapshotId + " to " + output + " ...");
-            outcome = RestoreOperation.run(source, output,
-                    new RestoreOperation.Options(dryRun, deleteExtra, threads, ArchiveDefaults.EXPORT_LEVEL),
-                    progress.onProgress());
-        }
-        RestoreStatsPrinter.print(outcome.stats(), deleteExtra, dryRun, outcome.target(), System.out);
-        System.out.println("Done: " + outcome.target());
+        CliRestore.run(() -> new SnapshotRestoreSource(manifest, blobs),
+                snapshotId, output, dryRun, deleteExtra, threads, ArchiveDefaults.EXPORT_LEVEL);
     }
 
     private static void runDelete(Invocation invocation, List<String> args) throws IOException {

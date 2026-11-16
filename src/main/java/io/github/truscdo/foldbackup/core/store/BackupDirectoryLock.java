@@ -31,7 +31,7 @@ final class BackupDirectoryLock {
     private Object owner;
 
     private BackupDirectoryLock(Path root) {
-        path = root.resolve("index.db.lock");
+        path = root.resolve(RepositoryLayout.INDEX_LOCK_FILE);
     }
 
     static BackupDirectoryLock forRoot(Path root) throws IOException {

@@ -31,7 +31,6 @@ public class SnapshotStore {
     private static final DateTimeFormatter SNAPSHOT_ID_TIME =
             DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss", Locale.ROOT);
 
-    private static final String INDEX_FILE = "index.db";
     private static final LogUtil LOG = LogUtil.getLogger(SnapshotStore.class);
 
     private final IndexStore indexStore;
@@ -43,7 +42,7 @@ public class SnapshotStore {
     private final ThreadLocal<Integer> writeDepth = ThreadLocal.withInitial(() -> 0);
 
     public SnapshotStore(Path backupRoot) throws IOException {
-        this(backupRoot, new IndexStore(backupRoot.resolve(INDEX_FILE)));
+        this(backupRoot, new IndexStore(backupRoot.resolve(RepositoryLayout.INDEX_FILE)));
     }
 
     SnapshotStore(Path backupRoot, IndexStore indexStore) throws IOException {

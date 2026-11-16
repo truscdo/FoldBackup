@@ -1,5 +1,6 @@
 package io.github.truscdo.foldbackup.core.cleanup;
 
+import io.github.truscdo.foldbackup.core.store.RepositoryLayout;
 import io.github.truscdo.foldbackup.core.store.SnapshotManifest;
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -25,7 +26,7 @@ public record RepositoryUsage(long totalBytes, long indexBytes, long usableBytes
         long total = 0;
         long index = 0;
         try {
-            Path blobs = root.resolve("blobs");
+            Path blobs = root.resolve(RepositoryLayout.BLOBS_DIR);
             if (!Files.notExists(blobs, LinkOption.NOFOLLOW_LINKS)) {
                 if (Files.isSymbolicLink(blobs)) throw new IOException("Symbolic blob directory: " + blobs);
                 try (var paths = Files.walk(blobs)) {
@@ -45,14 +46,14 @@ public record RepositoryUsage(long totalBytes, long indexBytes, long usableBytes
                     }
                 }
             }
-            for (String name : List.of("index.db", "index.db.tmp")) {
+            for (String name : List.of(RepositoryLayout.INDEX_FILE, RepositoryLayout.INDEX_TMP_FILE)) {
                 Path path = root.resolve(name);
                 if (Files.notExists(path, LinkOption.NOFOLLOW_LINKS)) continue;
                 BasicFileAttributes attr = Files.readAttributes(path, BasicFileAttributes.class,
                         LinkOption.NOFOLLOW_LINKS);
                 if (!attr.isRegularFile()) throw new IOException("Not a regular index file: " + path);
                 total = Math.addExact(total, attr.size());
-                if (name.equals("index.db")) index = attr.size();
+                if (name.equals(RepositoryLayout.INDEX_FILE)) index = attr.size();
             }
             for (String path : expectedBlobSizes.keySet())
                 if (!foundReferencedBlobs.contains(path)) throw new IOException("Missing referenced blob: " + path);

@@ -6,6 +6,8 @@ package io.github.truscdo.foldbackup.core.format;
 public final class AnvilFormat {
 
     public static final int ANVIL_SECTOR = 4096;
+    /** 8 KiB Anvil header: 1024 location entries + 1024 timestamp entries. */
+    public static final int ANVIL_HEADER_BYTES = ANVIL_SECTOR * 2;
     public static final int COMPRESSION_TYPE_ZLIB = 2;
     public static final int EXTERNAL_FILE_COMPRESSION_TYPE = 128 + 2; // 0x82
 

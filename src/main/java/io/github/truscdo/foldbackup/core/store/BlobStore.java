@@ -117,7 +117,7 @@ public class BlobStore {
         }
         WriteSpaceBudget budget = writeBudget;
         if (budget == null) {
-            Path index = rootDir.resolve("index.db");
+            Path index = rootDir.resolve(RepositoryLayout.INDEX_FILE);
             budget = new WriteSpaceBudget(rootDir, Files.exists(index) ? Files.size(index) : 0, 0);
         }
         budget.beforeWrite(data.length);
@@ -127,7 +127,7 @@ public class BlobStore {
         Path wip = null;
         try {
             wip = Files.createTempFile(destination.getParent(),
-                    destination.getFileName().toString() + ".", ".wip");
+                    destination.getFileName().toString() + ".", RepositoryLayout.WIP_SUFFIX);
             Files.write(wip, data);
             try {
                 Files.move(wip, destination, StandardCopyOption.ATOMIC_MOVE);
@@ -223,16 +223,16 @@ public class BlobStore {
 
         private WriteSession() throws IOException {
             WriteSpaceBudget active = writeBudget;
-            Path index = rootDir.resolve("index.db");
+            Path index = rootDir.resolve(RepositoryLayout.INDEX_FILE);
             budget = active != null ? active
                     : new WriteSpaceBudget(rootDir,
                             Files.exists(index) ? Files.size(index) : 0, 0);
-            Path pending = rootDir.resolve("blobs");
+            Path pending = rootDir.resolve(RepositoryLayout.BLOBS_DIR);
             Path created = null;
             try {
                 Files.createDirectories(pending);
                 budget.beginBlob();
-                created = Files.createTempFile(pending, "stream-", ".wip");
+                created = Files.createTempFile(pending, "stream-", RepositoryLayout.WIP_SUFFIX);
                 file = java.nio.channels.FileChannel.open(created, java.nio.file.StandardOpenOption.WRITE,
                         java.nio.file.StandardOpenOption.READ);
                 temp = created;
@@ -357,7 +357,7 @@ public class BlobStore {
      */
     public Path getPath(String hash, String ext) {
         String prefix = hash.substring(0, 2);
-        return rootDir.resolve("blobs").resolve(prefix).resolve(hash + "." + ext);
+        return rootDir.resolve(RepositoryLayout.BLOBS_DIR).resolve(prefix).resolve(hash + "." + ext);
     }
 
     /**
@@ -365,7 +365,7 @@ public class BlobStore {
      */
     public String getRelativePath(String hash, String ext) {
         String prefix = hash.substring(0, 2);
-        return "blobs/" + prefix + "/" + hash + "." + ext;
+        return RepositoryLayout.BLOBS_DIR + "/" + prefix + "/" + hash + "." + ext;
     }
 
     public Path getRootDir() {

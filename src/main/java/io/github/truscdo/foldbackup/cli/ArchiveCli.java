@@ -6,8 +6,6 @@ import io.github.truscdo.foldbackup.core.archive.ArchiveDefaults;
 import io.github.truscdo.foldbackup.core.archive.ArchiveCreator;
 import io.github.truscdo.foldbackup.core.archive.ArchiveRestoreSource;
 import io.github.truscdo.foldbackup.core.console.ProgressPrinter;
-import io.github.truscdo.foldbackup.core.console.RestoreStatsPrinter;
-import io.github.truscdo.foldbackup.core.restore.RestoreOperation;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -122,16 +120,8 @@ public final class ArchiveCli {
             }
         }
         if (output == null) throw new IOException("archive export requires --output <dir>");
-        RestoreOperation.Outcome outcome;
-        try (var source = ArchiveRestoreSource.open(archiveRoot, archiveFile);
-                var progress = new ProgressPrinter(System.err)) {
-            System.out.println("Exporting " + archiveFile + " to " + output + " ...");
-            outcome = RestoreOperation.run(source, output,
-                    new RestoreOperation.Options(dryRun, deleteExtra, threads, ArchiveDefaults.RESTORE_LEVEL),
-                    progress.onProgress());
-        }
-        RestoreStatsPrinter.print(outcome.stats(), deleteExtra, dryRun, outcome.target(), System.out);
-        System.out.println("Done: " + outcome.target());
+        CliRestore.run(() -> ArchiveRestoreSource.open(archiveRoot, archiveFile),
+                archiveFile.toString(), output, dryRun, deleteExtra, threads, ArchiveDefaults.RESTORE_LEVEL);
     }
 
     private static String optionValue(List<String> args, int index, String option) throws IOException {

@@ -9,8 +9,6 @@ import io.github.truscdo.foldbackup.core.archive.ArchiveTarScanner.ArchiveTarInf
 import io.github.truscdo.foldbackup.core.archive.ArchiveVerifier;
 import io.github.truscdo.foldbackup.core.console.ArchiveVerifyReporter;
 import io.github.truscdo.foldbackup.core.console.ProgressPrinter;
-import io.github.truscdo.foldbackup.core.console.RestoreStatsPrinter;
-import io.github.truscdo.foldbackup.core.restore.RestoreOperation;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -61,64 +59,21 @@ public class ArchiveTui {
                     continue;
                 }
 
-                ExportFlow flow = exportTo(selected, output);
-                if (flow == ExportFlow.CANCEL) {
+                var flow = exportTo(selected, output);
+                if (flow == RestoreInteraction.Flow.CANCEL) {
                     System.out.println("Restore cancelled.\n");
                     return;
                 }
-                if (flow == ExportFlow.DONE) {
+                if (flow == RestoreInteraction.Flow.DONE) {
                     return;
                 }
             }
         }
     }
 
-    private enum ExportFlow { DONE, BACK_TO_PATH, CANCEL }
-
-    private ExportFlow exportTo(SelectedArchive selected, Path output) {
-        try (var source = ArchiveRestoreSource.open(archiveRoot, selected.target().tar())) {
-            RestoreOperation.Session session;
-            try (var progress = new ProgressPrinter(System.out)) {
-                session = RestoreOperation.prepare(source, output, 0, progress.onProgress());
-            } catch (IOException e) {
-                System.err.println("Restore failed: " + e.getMessage() + "\n");
-                return ExportFlow.CANCEL;
-            }
-            try (session) {
-                System.out.println();
-                RestoreStatsPrinter.print(session.stats(), null, false, session.target(), System.out);
-                System.out.println();
-                while (true) {
-                    int choice = prompt.readInt(
-                            "1 = overwrite, 2 = delete extra, 3 = cancel to main menu, 0 = back: ", 0, 3);
-                    if (choice == 3) return ExportFlow.CANCEL;
-                    // Blank input and EOF follow the existing TUI convention: any non-positive
-                    // choice goes back one level.
-                    if (choice <= 0) return ExportFlow.BACK_TO_PATH;
-
-                    boolean deleteExtra = choice == 2;
-                    while (true) {
-                        int threads = prompt.readThreadCount();
-                        if (threads == ConsolePrompt.EOF) return ExportFlow.CANCEL;
-                        if (threads == ConsolePrompt.BACK) break;
-
-                        System.out.println("Restoring...");
-                        try (var progress = new ProgressPrinter(System.out)) {
-                            var outcome = session.execute(deleteExtra, threads, ArchiveDefaults.RESTORE_LEVEL,
-                                    progress.onProgress());
-                            System.out.println("Done: " + outcome.target().toAbsolutePath().normalize()
-                                    + ", deleted extra: " + outcome.deleted() + "\n");
-                        } catch (IOException e) {
-                            System.err.println("Restore failed: " + e.getMessage() + "\n");
-                        }
-                        return ExportFlow.DONE;
-                    }
-                }
-            }
-        } catch (IOException e) {
-            System.err.println("Restore failed: " + e.getMessage() + "\n");
-            return ExportFlow.CANCEL;
-        }
+    private RestoreInteraction.Flow exportTo(SelectedArchive selected, Path output) {
+        return RestoreInteraction.run(prompt, () -> ArchiveRestoreSource.open(archiveRoot, selected.target().tar()),
+                output, ArchiveDefaults.RESTORE_LEVEL, "Restoring...", "Restore failed: ");
     }
 
     void verifyArchives() {

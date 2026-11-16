@@ -39,7 +39,7 @@ foldbackup tui
 
 ### 快照导入与归档创建
 
-- `snapshot create --world <dir> [--threads <N>]` 直接从游戏存档创建新快照。
+- `snapshot create --world <dir> [--threads <N>]` 直接从游戏存档创建新快照。离线扫描固定采用 `BackupFilter.defaults()` 的 4 条核心排除规则（`**/session.lock`、`**/backups`、`**/.backups`、`**/*.wip`）。
 - `snapshot import --all-archive` 扫描归档库中的全部归档，依据归档依赖关系恢复其中的快照并导入在线库。缺失依赖或归档损坏时需报告具体文件和原因，不能将不完整的快照标记为导入成功。
 - `archive create --snapshot <snapshot-id>` 为指定在线快照创建完整归档，输出到归档库。
 - 指定 `--base <snapshot-id>` 时，以该在线快照为基准，与目标在线快照计算差异并创建差异归档。两个快照都必须存在于在线库，`--base` 不接受归档文件路径。

@@ -17,7 +17,6 @@ import java.nio.channels.OverlappingFileLockException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
-import java.util.List;
 
 /**
  * Shared utility methods for chunk rollback — used by both
@@ -41,6 +40,15 @@ public class ChunkRollbackSupport {
         return dimensionSubPath + "poi/r." + regionX + "." + regionZ + ".mca";
     }
 
+    private record ColumnData(boolean regionPresent, @Nullable ChunkData chunk) {}
+
+    private static ColumnData readColumn(SnapshotManifest manifest, BlobStore blobs,
+            String regionFilename, int chunkX, int chunkZ) throws IOException {
+        RegionEntry entry = findRegionEntry(manifest, regionFilename);
+        if (entry == null) return new ColumnData(false, null);
+        return new ColumnData(true, readChunk(blobs, entry, chunkX, chunkZ));
+    }
+
     /**
      * Reads the POI column recorded in the snapshot. Returns {@code null} when the
      * snapshot has no POI region file or no column for this chunk; callers turn that
@@ -50,30 +58,29 @@ public class ChunkRollbackSupport {
     @Nullable
     public static ChunkData resolvePoiChunk(SnapshotManifest manifest, BlobStore blobs,
             int chunkX, int chunkZ, String dimensionSubPath) throws IOException {
-        RegionEntry entry = findRegionEntry(manifest,
-                poiRegionFilename(dimensionSubPath, chunkX >> 5, chunkZ >> 5));
-        if (entry == null) return null;
-        return readChunk(blobs, entry, chunkX, chunkZ);
+        return readColumn(manifest, blobs,
+                poiRegionFilename(dimensionSubPath, chunkX >> 5, chunkZ >> 5), chunkX, chunkZ).chunk();
     }
 
     /** Uses the already resolved manifest, so latest cannot change between the two reads. */
     public static ResolvedEntitySnapshot resolveEntities(SnapshotManifest manifest, BlobStore blobs,
             int chunkX, int chunkZ, String dimensionSubPath) throws IOException {
-        RegionEntry entry = findRegionEntry(manifest, entityRegionFilename(dimensionSubPath, chunkX >> 5, chunkZ >> 5));
-        if (entry == null) return new ResolvedEntitySnapshot(EntitySnapshotState.REGION_MISSING,
+        ColumnData column = readColumn(manifest, blobs,
+                entityRegionFilename(dimensionSubPath, chunkX >> 5, chunkZ >> 5), chunkX, chunkZ);
+        if (!column.regionPresent()) return new ResolvedEntitySnapshot(EntitySnapshotState.REGION_MISSING,
                 EntityRegionCodec.empty(chunkX, chunkZ));
-        var chunk = readChunk(blobs, entry, chunkX, chunkZ);
-        if (chunk == null) return new ResolvedEntitySnapshot(EntitySnapshotState.CHUNK_MISSING,
+        if (column.chunk() == null) return new ResolvedEntitySnapshot(EntitySnapshotState.CHUNK_MISSING,
                 EntityRegionCodec.empty(chunkX, chunkZ));
         return new ResolvedEntitySnapshot(EntitySnapshotState.PRESENT,
-                EntityRegionCodec.read(chunk.getRawChunk(), chunkX, chunkZ));
+                EntityRegionCodec.read(column.chunk().getRawChunk(), chunkX, chunkZ));
     }
 
     public static EntityRegionCodec.Recovery recoverEntities(SnapshotManifest manifest, BlobStore blobs,
             int x, int z, String dimensionSubPath) throws IOException {
-        RegionEntry entry = findRegionEntry(manifest, entityRegionFilename(dimensionSubPath, x >> 5, z >> 5));
-        var chunk = entry == null ? null : readChunk(blobs, entry, x, z);
-        return EntityRegionCodec.recover(chunk == null ? EntityRegionCodec.empty(x, z).nbt() : chunk.getRawChunk(), x, z);
+        ColumnData column = readColumn(manifest, blobs,
+                entityRegionFilename(dimensionSubPath, x >> 5, z >> 5), x, z);
+        return EntityRegionCodec.recover(
+                column.chunk() == null ? EntityRegionCodec.empty(x, z).nbt() : column.chunk().getRawChunk(), x, z);
     }
 
     /**
@@ -197,8 +204,7 @@ public class ChunkRollbackSupport {
         if (epochSeconds != null) {
             return sm.loadSnapshot(epochSeconds);
         }
-        List<SnapshotManifest> all = sm.loadAllSnapshots();
-        return all.isEmpty() ? null : all.get(0);
+        return sm.loadLatestSnapshot();
     }
 
     /**

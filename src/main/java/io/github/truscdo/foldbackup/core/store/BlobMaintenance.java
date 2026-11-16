@@ -32,6 +32,10 @@ public class BlobMaintenance {
      * Delete regular files below {@code blobs/} that are not in the active set.
      * The caller must hold the directory write session while loading the active
      * index and performing this sweep (see {@link SnapshotStore#collectGarbage()}).
+     * <p>
+     * Complements {@link #cleanupWipFiles()}: write-time GC sweeps only {@code blobs/}
+     * after commits, whereas startup cleanup sweeps {@code .wip} files across the
+     * whole repository root under the same {@link BackupDirectoryLock}.
      *
      * @return number of deleted files
      */
@@ -41,7 +45,7 @@ public class BlobMaintenance {
 
     public GcResult deleteOrphansDetailed(Set<String> activeBlobPaths) {
         Set<String> active = activeBlobPaths != null ? activeBlobPaths : Collections.emptySet();
-        Path blobsDir = rootDir.resolve("blobs");
+        Path blobsDir = rootDir.resolve(RepositoryLayout.BLOBS_DIR);
         if (!Files.isDirectory(blobsDir)) {
             return new GcResult(0, 0, 0, Files.notExists(blobsDir));
         }
@@ -80,7 +84,9 @@ public class BlobMaintenance {
     }
 
     /**
-     * 删除原子存储操作遗留的临时文件。
+     * 删除原子存储操作遗留的临时文件（Mod 打开仓库时调用，扫描整个仓库根目录）。
+     * 与写后只清 {@code blobs/} 孤儿文件的 {@link #deleteOrphansDetailed(Set)} 时段及作用域互补，
+     * 二者通过 {@link BackupDirectoryLock} 互斥。
      *
      * @throws RepositoryBusyException 仓库正被另一方占用，调用方应稍后重试
      */
@@ -105,7 +111,7 @@ public class BlobMaintenance {
         int deleted = 0;
         try (var files = Files.walk(rootDir)) {
             for (Path file : (Iterable<Path>) files.filter(Files::isRegularFile)::iterator) {
-                if (file.getFileName().toString().endsWith(".wip")) {
+                if (file.getFileName().toString().endsWith(RepositoryLayout.WIP_SUFFIX)) {
                     try {
                         if (Files.deleteIfExists(file)) {
                             deleted++;

@@ -179,7 +179,8 @@ public final class WorldRuntime {
      * @throws RepositoryBusyException 仓库正被另一方占用，可重试
      */
     private void initializeRepository() throws IOException {
-        // 仓库级副作用：只作用于本仓库，避免清理到其它存档的 .wip
+        // 仓库级副作用：只作用于本仓库，避免清理到其它存档的 .wip。
+        // 仅在 Mod 打开仓库时清全仓残余 .wip，与写后 GC（只扫 blobs/）形成互补双保险。
         new BlobMaintenance(repoRoot).cleanupWipFiles();
         BlobStore blobs = new BlobStore(repoRoot, config.getCompressionLevel());
         SnapshotStore store = new SnapshotStore(repoRoot);

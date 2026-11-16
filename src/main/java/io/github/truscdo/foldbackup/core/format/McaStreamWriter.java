@@ -16,14 +16,15 @@ public final class McaStreamWriter {
         Path temp = Files.createTempFile(parent, destination.getFileName() + ".", ".wip");
         try {
             try (FileChannel file = FileChannel.open(temp, StandardOpenOption.READ, StandardOpenOption.WRITE)) {
-                StreamIo.write(file, new byte[8192]);
-                ByteBuffer header = ByteBuffer.allocate(8192);
+                StreamIo.write(file, new byte[AnvilFormat.ANVIL_HEADER_BYTES]);
+                ByteBuffer header = ByteBuffer.allocate(AnvilFormat.ANVIL_HEADER_BYTES);
                 class Writer implements RegionStream.Consumer, AutoCloseable {
                     int index = -1; long start; Deflater deflater; DeflaterOutputStream compressed;
                     boolean active;
                     public void begin(int i, int timestamp) throws IOException {
                         if (active || i <= index || i >= 1024) throw new IOException("Invalid MCA event order");
-                        index = i; active = true; start = file.position(); header.putInt(4096 + i * 4, timestamp);
+                        index = i; active = true; start = file.position();
+                        header.putInt(AnvilFormat.ANVIL_SECTOR + i * 4, timestamp);
                     }
                     public void data(byte[] bytes, int off, int len) throws IOException {
                         if (!active) throw new IOException("Missing MCA chunk begin");
@@ -41,8 +42,8 @@ public final class McaStreamWriter {
                         if (compressed == null) return;
                         compressed.finish(); deflater.end(); deflater = null; compressed = null;
                         long end = file.position(), bytes = end - start;
-                        long sectors = (bytes + 4095) / 4096;
-                        if (start / 4096 > 0xffffffL) throw new IOException("MCA sector offset overflow");
+                        long sectors = (bytes + AnvilFormat.ANVIL_SECTOR - 1) / AnvilFormat.ANVIL_SECTOR;
+                        if (start / AnvilFormat.ANVIL_SECTOR > 0xffffffL) throw new IOException("MCA sector offset overflow");
                         if (sectors > 255) {
                             Path mcc = parent.resolve(AnvilFormat.externalChunkFileName(rx, rz, index));
                             Path wip = Files.createTempFile(parent, mcc.getFileName() + ".", ".wip");
@@ -60,16 +61,16 @@ public final class McaStreamWriter {
                                 Files.move(wip, mcc, StandardCopyOption.REPLACE_EXISTING);
                             } finally { Files.deleteIfExists(wip); }
                             file.truncate(start); file.position(start);
-                            ByteBuffer placeholder = ByteBuffer.allocate(4096);
+                            ByteBuffer placeholder = ByteBuffer.allocate(AnvilFormat.ANVIL_SECTOR);
                             placeholder.putInt(1).put((byte) AnvilFormat.EXTERNAL_FILE_COMPRESSION_TYPE);
                             StreamIo.write(file, placeholder.array()); sectors = 1;
                         } else {
                             file.position(start);
                             StreamIo.write(file, ByteBuffer.allocate(5).putInt((int) bytes - 4)
                                     .put((byte) AnvilFormat.COMPRESSION_TYPE_ZLIB).array());
-                            file.position(end); StreamIo.write(file, new byte[(int) (sectors * 4096 - bytes)]);
+                            file.position(end); StreamIo.write(file, new byte[(int) (sectors * AnvilFormat.ANVIL_SECTOR - bytes)]);
                         }
-                        header.putInt(index * 4, (int) ((start / 4096) << 8) | (int) sectors);
+                        header.putInt(index * 4, (int) ((start / AnvilFormat.ANVIL_SECTOR) << 8) | (int) sectors);
                     }
                     public void close() { if (deflater != null) deflater.end(); }
                 }

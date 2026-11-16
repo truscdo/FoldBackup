@@ -15,18 +15,18 @@ public final class McaStream {
         try (FileChannel channel = FileChannel.open(path, StandardOpenOption.READ)) {
             long size = channel.size();
             if (size == 0) return;
-            if (size < 8192) throw new IOException("Truncated Anvil header: " + path);
-            ByteBuffer header = ByteBuffer.wrap(StreamIo.read(channel, 8192));
+            if (size < AnvilFormat.ANVIL_HEADER_BYTES) throw new IOException("Truncated Anvil header: " + path);
+            ByteBuffer header = ByteBuffer.wrap(StreamIo.read(channel, AnvilFormat.ANVIL_HEADER_BYTES));
             int[] coords = AnvilFormat.parseRegionCoords(path.getFileName().toString());
             byte[] buffer = new byte[65536];
             for (int index = 0; index < 1024; index++) {
                 StreamIo.checkCancelled();
-                consumer.begin(index, header.getInt(4096 + index * 4));
+                consumer.begin(index, header.getInt(AnvilFormat.ANVIL_SECTOR + index * 4));
                 int location = header.getInt(index * 4);
                 int start = location >>> 8, sectors = location & 255;
                 consumer.present(start > 0 && sectors > 0);
-                long position = start * 4096L;
-                long available = Math.min(size, (start + (long) sectors) * 4096) - position;
+                long position = start * (long) AnvilFormat.ANVIL_SECTOR;
+                long available = Math.min(size, (start + (long) sectors) * AnvilFormat.ANVIL_SECTOR) - position;
                 if (start > 0 && sectors > 0 && available >= 5) {
                     channel.position(position);
                     ByteBuffer record = ByteBuffer.wrap(StreamIo.read(channel, 5));

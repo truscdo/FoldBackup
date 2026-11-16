@@ -89,7 +89,7 @@ public final class PreviewManager {
             message(player, failure.translationKey, failure.args);
             return 0;
         }
-        if (sessions.containsKey(player.getUUID()) || pending.containsKey(player.getUUID()))
+        if (isActive(player.getUUID()))
             endPreview(player, "foldbackup.preview.switching");
         UUID token = UUID.randomUUID();
         pending.put(player.getUUID(), token);
@@ -193,11 +193,15 @@ public final class PreviewManager {
             for (int y = 0; y < 16; y++)
                 for (int z = 0; z < 16; z++)
                     for (int x = 0; x < 16; x++)
-                        states.set(x, y, z, target.blocks()[index * 4096 + y * 256 + z * 16 + x]);
+                        states.set(x, y, z, target.blocks()[PreviewData.blockIndex(index, x, y, z)]);
             var section = new LevelChunkSection(states, s.chunk.getSection(index).getBiomes());
             s.view.send(new ClientboundSectionBlocksUpdatePacket(
                     SectionPos.of(s.chunk.getPos(), s.level.getSectionYFromSectionIndex(index)), all, section));
         }
+    }
+
+    private boolean isActive(UUID playerId) {
+        return sessions.containsKey(playerId) || pending.containsKey(playerId);
     }
 
     private void endPreview(ServerPlayer player, String reasonKey, Object... args) {
@@ -206,8 +210,7 @@ public final class PreviewManager {
     }
 
     public int exit(ServerPlayer player) {
-        boolean active = pending.containsKey(player.getUUID()) || sessions.containsKey(player.getUUID());
-        if (!active) {
+        if (!isActive(player.getUUID())) {
             message(player, "foldbackup.preview.not_active");
             return 0;
         }
@@ -305,8 +308,7 @@ public final class PreviewManager {
 
     @SubscribeEvent
     public void logout(PlayerEvent.PlayerLoggedOutEvent event) {
-        if (event.getEntity() instanceof ServerPlayer player
-                && (sessions.containsKey(player.getUUID()) || pending.containsKey(player.getUUID())))
+        if (event.getEntity() instanceof ServerPlayer player && isActive(player.getUUID()))
             endPreview(player, "foldbackup.preview.player_left");
     }
 

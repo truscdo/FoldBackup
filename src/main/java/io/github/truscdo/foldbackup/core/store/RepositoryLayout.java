@@ -16,6 +16,14 @@ public final class RepositoryLayout {
     /** 无法从存档路径推出目录名时使用的名称。 */
     public static final String FALLBACK_WORLD_NAME = "world";
 
+    /** 仓库内部文件名与子目录常量（由 store 与 cleanup 共用）。 */
+    public static final String INDEX_FILE = "index.db";
+    public static final String TMP_SUFFIX = ".tmp";
+    public static final String INDEX_TMP_FILE = INDEX_FILE + TMP_SUFFIX;
+    public static final String INDEX_LOCK_FILE = INDEX_FILE + ".lock";
+    public static final String BLOBS_DIR = "blobs";
+    public static final String WIP_SUFFIX = ".wip";
+
     private RepositoryLayout() {
     }
 

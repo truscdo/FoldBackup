@@ -272,6 +272,11 @@ final class ArchiveRestorePlan implements AutoCloseable {
                 completionListener, task);
     }
 
+    /**
+     * P7 归档恢复/导入路径的前置目标冲突校验：同时覆盖区域坐标冲突与父子路径冲突。
+     * 下游 {@link io.github.truscdo.foldbackup.core.restore.RestoreChecker} 仍保留路径去重
+     * 索引，因为 P3 快照恢复不经过本计划类。
+     */
     private void validateTargets() throws IOException {
         var targets = new WorldRestoreTargets();
         for (Region region : regions) {

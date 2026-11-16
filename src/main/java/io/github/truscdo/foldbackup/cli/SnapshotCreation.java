@@ -14,7 +14,6 @@ import io.github.truscdo.foldbackup.core.task.TaskRegistry;
 import io.github.truscdo.foldbackup.core.task.TaskType;
 
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 
 /** Shared offline snapshot creation for CLI and TUI. */
@@ -27,7 +26,6 @@ public final class SnapshotCreation {
             throws IOException {
         if (threads < 0) throw new IOException("Threads must be non-negative");
         world = world.toAbsolutePath().normalize();
-        if (!Files.isDirectory(world)) throw new IOException("World directory not found: " + world);
         try (WorldSaveLock ignored = WorldSaveLock.acquireRoot(world)) {
             var snapshots = new SnapshotStore(root);
             var blobs = new BlobStore(root, COMPRESSION_LEVEL);

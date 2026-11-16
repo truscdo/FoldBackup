@@ -41,8 +41,7 @@ public final class EntityRegionCodec {
         Tag position = fields.get("Position");
         if (position != null && (position.type() != 11 || !Arrays.equals((int[]) position.value(), new int[]{x, z})))
             throw new IOException("Entity chunk Position differs from target");
-        Tag version = fields.get("DataVersion");
-        if (version != null && version.type() != 3) throw new IOException("Invalid entity DataVersion");
+        int dataVersion = parseDataVersion(fields);
         List<Tag> roots = compounds(fields.get("Entities"), "Entities");
         List<Set<UUID>> identities = new ArrayList<>();
         Map<UUID, Integer> counts = new HashMap<>();
@@ -71,7 +70,7 @@ public final class EntityRegionCodec {
                 issues.add("Skipped entity tree " + identities.get(i) + ": " + e.getMessage());
             }
         }
-        var template = new EntityChunkSnapshot(raw, List.of(), 0, version == null ? -1 : (int) version.value());
+        var template = new EntityChunkSnapshot(raw, List.of(), 0, dataVersion);
         return new Recovery(withEntities(template, kept), Set.copyOf(skipped), List.copyOf(issues), skippedTrees, unknown[0]);
     }
 
@@ -123,9 +122,14 @@ public final class EntityRegionCodec {
             }
         }
         fields.put("Entities", new Tag(9, new TagList(10, kept)));
+        int dataVersion = parseDataVersion(fields);
+        return new EntityChunkSnapshot(write(root), entities, skipped[0], dataVersion);
+    }
+
+    private static int parseDataVersion(Map<String, Tag> fields) throws IOException {
         Tag version = fields.get("DataVersion");
         if (version != null && version.type() != 3) throw new IOException("Invalid entity DataVersion");
-        return new EntityChunkSnapshot(write(root), entities, skipped[0], version == null ? -1 : (int) version.value());
+        return version == null ? -1 : (int) version.value();
     }
 
     public static EntityChunkSnapshot empty(int x, int z) throws IOException {

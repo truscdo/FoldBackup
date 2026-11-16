@@ -132,6 +132,15 @@ public class ArchiveImporter {
         }
     }
 
+    @FunctionalInterface
+    private interface PlanInputsOpener {
+        PlanInputs open(ArchiveSnapshot meta) throws IOException;
+    }
+
+    private record PlanInputs(Baseline baseline, TarIndex diff) implements AutoCloseable {
+        @Override public void close() throws IOException { baseline.close(); }
+    }
+
     /**
      * Import one full archive. The archive itself is the baseline, and its objects are
      * copied into the blob store unless the blob already exists.
@@ -140,13 +149,8 @@ public class ArchiveImporter {
      */
     private String importFull(ArchiveLibrary.Entry entry, SnapshotStore snapshots, BlobStore blobs,
             ProgressListener listener) throws IOException {
-        ArchiveSnapshot meta = entry.meta();
-        var progress = new ProgressTracker(listener);
-        if (alreadyImported(entry, snapshots, progress)) return null;
-        try (var base = new ArchiveBaseline(entry.tar());
-                var plan = ArchiveRestorePlan.open(base, meta, null)) {
-            return importPlan(plan, meta, false, snapshots, blobs, progress);
-        }
+        return importOne(entry, snapshots, blobs, listener, false,
+                meta -> new PlanInputs(new ArchiveBaseline(entry.tar()), null));
     }
 
     /**
@@ -158,19 +162,27 @@ public class ArchiveImporter {
      */
     private String importDiff(ArchiveLibrary.Entry entry, SnapshotStore snapshots, BlobStore blobs,
             ProgressListener listener) throws IOException {
+        return importOne(entry, snapshots, blobs, listener, true, meta -> {
+            SnapshotManifest baseline = snapshots.loadSnapshot(meta.baseEpoch);
+            if (baseline == null) {
+                String expected = ArchiveCreator.fullTarName(SnapshotStore.generateSnapshotId(meta.baseEpoch));
+                throw new IOException("required baseline snapshot is not available in the online store: "
+                        + SnapshotStore.generateSnapshotId(meta.baseEpoch) + " (import " + expected + " first)");
+            }
+            TarIndex diff = TarIndex.read(entry.tar());
+            return new PlanInputs(new SnapshotBaseline(baseline, blobs), diff);
+        });
+    }
+
+    /** 共用导入守卫与恢复执行骨架：惰性构建基线以避免已跳过归档的额外 I/O。 */
+    private String importOne(ArchiveLibrary.Entry entry, SnapshotStore snapshots, BlobStore blobs,
+            ProgressListener listener, boolean merged, PlanInputsOpener opener) throws IOException {
         ArchiveSnapshot meta = entry.meta();
         var progress = new ProgressTracker(listener);
         if (alreadyImported(entry, snapshots, progress)) return null;
-        SnapshotManifest baseline = snapshots.loadSnapshot(meta.baseEpoch);
-        if (baseline == null) {
-            String expected = ArchiveCreator.fullTarName(SnapshotStore.generateSnapshotId(meta.baseEpoch));
-            throw new IOException("required baseline snapshot is not available in the online store: "
-                    + SnapshotStore.generateSnapshotId(meta.baseEpoch) + " (import " + expected + " first)");
-        }
-        TarIndex diff = TarIndex.read(entry.tar());
-        try (var base = new SnapshotBaseline(baseline, blobs);
-                var plan = ArchiveRestorePlan.open(base, meta, diff)) {
-            return importPlan(plan, meta, true, snapshots, blobs, progress);
+        try (var inputs = opener.open(meta);
+                var plan = ArchiveRestorePlan.open(inputs.baseline(), meta, inputs.diff())) {
+            return importPlan(plan, meta, merged, snapshots, blobs, progress);
         }
     }
 
