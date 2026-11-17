@@ -1,13 +1,13 @@
 package io.github.truscdo.foldbackup.core.archive;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -17,8 +17,9 @@ import java.util.Map;
  * 扫描避免全目录反复遍历与按 diff 重扫；差异归档只依赖在线快照不重开 full 归档，
  * 但导入 full 归档本身时仍会通过 {@link ArchiveBaseline} 读取其对象索引与 {@code snapshot.bin}。
  * <p>
- * 同 Epoch 多份 full 归档：`snapshot.bin` 字节一致时按文件名排序保留第一份并给出警告，不一致时
- * 记为错误（该 Epoch 不导入）。导入顺序依赖 Epoch 升序，因此 full 必先于其 diff 处理。
+ * 同 Epoch 多份 full 归档：{@code snapshot.bin} 字节一致时按文件名排序保留第一份并给出警告；
+ * 不一致时记为错误并列出该 Epoch 全部冲突文件，整个 Epoch（含依赖它的 diff）不导入。
+ * 导入顺序依赖 Epoch 升序，因此 full 必先于其 diff 处理。
  */
 final class ArchiveLibrary {
 
@@ -43,32 +44,62 @@ final class ArchiveLibrary {
         List<String> warnings = new ArrayList<>();
         List<Path> tars = tarFiles(root);
 
-        Map<Long, Entry> fulls = new HashMap<>();
-        Map<Long, byte[]> fullMetadata = new HashMap<>();
-        List<Entry> entries = new ArrayList<>();
+        Map<Long, List<ScannedEntry>> fullGroups = new LinkedHashMap<>();
+        List<Entry> nonFullEntries = new ArrayList<>();
         for (Path tar : tars) {
             String fileName = tar.getFileName().toString();
             Scanned scanned = readArchive(tar, fileName, errors);
             if (scanned == null) continue;
-            ArchiveSnapshot meta = scanned.meta();
-            Entry entry = new Entry(tar, meta);
-            if (!meta.isFull()) {
-                entries.add(entry);
-                continue;
-            }
-            Entry kept = fulls.get(meta.epoch);
-            if (kept == null) {
-                fulls.put(meta.epoch, entry);
-                fullMetadata.put(meta.epoch, scanned.bytes());
-            } else if (Arrays.equals(fullMetadata.get(meta.epoch), scanned.bytes())) {
-                warnings.add("duplicate full archive for epoch " + meta.epoch + ": keeping "
-                        + kept.fileName() + ", ignoring " + fileName);
+            Entry entry = new Entry(tar, scanned.meta());
+            if (scanned.meta().isFull()) {
+                fullGroups.computeIfAbsent(scanned.meta().epoch, ignored -> new ArrayList<>())
+                        .add(new ScannedEntry(entry, scanned.bytes()));
             } else {
-                error(errors, fileName, "duplicate full archive for epoch " + meta.epoch
-                        + " differs from " + kept.fileName());
+                nonFullEntries.add(entry);
             }
         }
-        entries.addAll(fulls.values());
+
+        List<Entry> entries = new ArrayList<>();
+        Map<Long, List<String>> conflictedFulls = new HashMap<>();
+        for (var groupEntry : fullGroups.entrySet()) {
+            long epoch = groupEntry.getKey();
+            List<ScannedEntry> group = groupEntry.getValue();
+            ScannedEntry first = group.getFirst();
+            boolean allEqual = true;
+            for (int i = 1; i < group.size(); i++) {
+                if (!Arrays.equals(first.bytes(), group.get(i).bytes())) {
+                    allEqual = false;
+                    break;
+                }
+            }
+            if (allEqual) {
+                entries.add(first.entry());
+                for (int i = 1; i < group.size(); i++) {
+                    warnings.add(ArchiveFormatUtil.duplicateFullWarning(
+                            epoch, first.entry().fileName(), group.get(i).entry().fileName()));
+                }
+            } else {
+                List<String> names = group.stream().map(item -> item.entry().fileName()).toList();
+                conflictedFulls.put(epoch, names);
+                errors.add(ArchiveFormatUtil.conflictingFullMessage(epoch, names) + " (skipping epoch)");
+            }
+        }
+
+        for (Entry entry : nonFullEntries) {
+            ArchiveSnapshot meta = entry.meta();
+            if (meta.isDiff() && conflictedFulls.containsKey(meta.baseEpoch)) {
+                List<String> names = conflictedFulls.get(meta.baseEpoch);
+                error(errors, entry.fileName(), "baseline epoch " + meta.baseEpoch
+                        + " skipped due to conflicting full archives: " + String.join(", ", names));
+            } else if (conflictedFulls.containsKey(meta.epoch)) {
+                List<String> names = conflictedFulls.get(meta.epoch);
+                error(errors, entry.fileName(), "epoch " + meta.epoch
+                        + " skipped due to conflicting full archives: " + String.join(", ", names));
+            } else {
+                entries.add(entry);
+            }
+        }
+
         entries.sort(Comparator.comparingLong((Entry entry) -> entry.meta().epoch)
                 .thenComparing(Entry::fileName));
         return new ArchiveLibrary(entries, warnings, errors);
@@ -93,7 +124,7 @@ final class ArchiveLibrary {
     private static Scanned readArchive(Path tar, String fileName, List<String> errors) throws IOException {
         byte[] bytes;
         try {
-            bytes = readSnapshotBytes(tar);
+            bytes = ArchiveFormatUtil.readSnapshotBytes(tar);
         } catch (IOException | RuntimeException e) {
             error(errors, fileName, e.getMessage());
             return null;
@@ -124,7 +155,10 @@ final class ArchiveLibrary {
     private record Scanned(byte[] bytes, ArchiveSnapshot meta) {
     }
 
-    /** Epoch 升序的待导入归档；同一 Epoch 的 full 已去重。 */
+    private record ScannedEntry(Entry entry, byte[] bytes) {
+    }
+
+    /** Epoch 升序的待导入归档；同一 Epoch 的 full 已去重，冲突 Epoch 已移除。 */
     List<Entry> entries() {
         return entries;
     }
@@ -137,16 +171,5 @@ final class ArchiveLibrary {
     /** 扫描阶段就已失败、无法导入的归档。 */
     List<String> errors() {
         return errors;
-    }
-
-    private static byte[] readSnapshotBytes(Path tar) throws IOException {
-        try (InputStream input = Files.newInputStream(tar); TarReader reader = new TarReader(input)) {
-            TarReader.Entry entry;
-            while ((entry = reader.nextEntry()) != null) {
-                byte[] data = reader.readEntryData();
-                if (entry.name.equals("snapshot.bin")) return data;
-            }
-        }
-        return null;
     }
 }

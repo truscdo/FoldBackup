@@ -120,6 +120,42 @@ public class SnapshotManifest {
         private long totalUncompressedBytes;
         private long newBlobBytes;
 
+        /** 汇总全量条目数量与字节，并将增量统计（changed/new）设为 {@code 0}。 */
+        public static Summary summarize(List<RegionEntry> regions, List<FileEntry> files) {
+            return summarize(regions, files, 0, 0, 0L);
+        }
+
+        /** 汇总条目数量、字节及增量统计；增量字段必须全为非负值。 */
+        public static Summary summarize(List<RegionEntry> regions, List<FileEntry> files,
+                int regionsChanged, int extraFilesChanged, long newBlobBytes) {
+            if (regionsChanged < 0 || extraFilesChanged < 0 || newBlobBytes < 0) {
+                throw new IllegalArgumentException("Delta statistics must be non-negative");
+            }
+            long compressed = 0;
+            long uncompressed = 0;
+            if (regions != null) {
+                for (RegionEntry r : regions) {
+                    compressed += r.getSizeCompressed();
+                    uncompressed += r.getSizeUncompressed();
+                }
+            }
+            if (files != null) {
+                for (FileEntry f : files) {
+                    compressed += f.getSizeCompressed();
+                    uncompressed += f.getSizeUncompressed();
+                }
+            }
+            Summary summary = new Summary();
+            summary.setRegionsTotal(regions == null ? 0 : regions.size());
+            summary.setRegionsChanged(regionsChanged);
+            summary.setExtraFilesTotal(files == null ? 0 : files.size());
+            summary.setExtraFilesChanged(extraFilesChanged);
+            summary.setTotalCompressedBytes(compressed);
+            summary.setTotalUncompressedBytes(uncompressed);
+            summary.setNewBlobBytes(newBlobBytes);
+            return summary;
+        }
+
         public int getRegionsTotal() { return regionsTotal; }
         public void setRegionsTotal(int v) { regionsTotal = v; }
 

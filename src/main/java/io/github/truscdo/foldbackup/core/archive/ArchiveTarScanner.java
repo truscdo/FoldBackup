@@ -1,9 +1,12 @@
 package io.github.truscdo.foldbackup.core.archive;
 
+import io.github.truscdo.foldbackup.core.LogUtil;
+
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 
@@ -14,6 +17,8 @@ import java.util.List;
  * 扫描结果按归档元数据中的 Epoch 秒倒序。
  */
 public final class ArchiveTarScanner {
+
+    private static final LogUtil LOG = LogUtil.getLogger(ArchiveTarScanner.class);
 
     private ArchiveTarScanner() {
     }
@@ -66,10 +71,50 @@ public final class ArchiveTarScanner {
         return fulls;
     }
 
-    /** Find the unique full archive whose metadata has the requested epoch. */
+    /**
+     * Find the full archive whose metadata has the requested epoch.
+     * <p>
+     * When multiple full archives share the same epoch: identical {@code snapshot.bin}
+     * contents keep the first by ascending filename with a warning; conflicting contents
+     * throw an {@link IOException} listing every conflicting file.
+     */
     public static Path fullAtEpoch(List<ArchiveTarInfo> tars, long epochSeconds) throws IOException {
-        return uniqueTar(tars.stream().filter(info -> info.meta() != null && info.meta().isFull()
-                && info.meta().epoch == epochSeconds).toList(), "full", epochSeconds);
+        List<ArchiveTarInfo> matches = tars.stream()
+                .filter(info -> info.meta() != null && info.meta().isFull()
+                        && info.meta().epoch == epochSeconds)
+                .sorted(Comparator.comparing(ArchiveTarInfo::fileName))
+                .toList();
+        if (matches.isEmpty()) throw new IOException("No full archive for epoch: " + epochSeconds);
+        if (matches.size() == 1) return matches.getFirst().tar();
+
+        List<String> fileNames = matches.stream().map(ArchiveTarInfo::fileName).toList();
+        byte[] baseline = readFullSnapshotBytes(matches.getFirst(), epochSeconds, fileNames);
+        for (int i = 1; i < matches.size(); i++) {
+            byte[] candidate = readFullSnapshotBytes(matches.get(i), epochSeconds, fileNames);
+            if (!Arrays.equals(baseline, candidate)) {
+                throw new IOException(ArchiveFormatUtil.conflictingFullMessage(epochSeconds, fileNames));
+            }
+        }
+        ArchiveTarInfo kept = matches.getFirst();
+        for (int i = 1; i < matches.size(); i++) {
+            LOG.warn("{}", ArchiveFormatUtil.duplicateFullWarning(
+                    epochSeconds, kept.fileName(), matches.get(i).fileName()));
+        }
+        return kept.tar();
+    }
+
+    private static byte[] readFullSnapshotBytes(ArchiveTarInfo info, long epochSeconds, List<String> fileNames)
+            throws IOException {
+        byte[] bytes;
+        try {
+            bytes = ArchiveFormatUtil.readSnapshotBytes(info.tar());
+        } catch (IOException e) {
+            throw new IOException(ArchiveFormatUtil.conflictingFullMessage(epochSeconds, fileNames), e);
+        }
+        if (bytes == null) {
+            throw new IOException(ArchiveFormatUtil.conflictingFullMessage(epochSeconds, fileNames));
+        }
+        return bytes;
     }
 
     /** Find a diff archive by target epoch and use the requested base when available. */

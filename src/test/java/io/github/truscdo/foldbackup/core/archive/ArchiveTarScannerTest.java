@@ -110,7 +110,29 @@ class ArchiveTarScannerTest {
         List<ArchiveTarScanner.ArchiveTarInfo> tars = ArchiveTarScanner.scan(archive);
         assertEquals(fullTar, ArchiveTarScanner.fullAtEpoch(tars, 1724311200L));
         assertEquals(diffTar, ArchiveTarScanner.diffAtEpoch(tars, 1724311200L, 1724313600L));
+    }
 
+    @Test
+    void fullAtEpochDeduplicatesIdenticalAndRejectsConflicting() throws IOException {
+        Path archive = Files.createDirectories(tempDir.resolve("dup-archive"));
+        ArchiveSnapshot meta = full(1724311200L, "S-20260825_120000");
+        Path first = archive.resolve("a-full.tar");
+        Path second = archive.resolve("b-full.tar");
+        writeTar(first, meta);
+        writeTar(second, meta);
+
+        List<ArchiveTarScanner.ArchiveTarInfo> identicalTars = ArchiveTarScanner.scan(archive);
+        assertEquals(first, ArchiveTarScanner.fullAtEpoch(identicalTars, 1724311200L),
+                "identical duplicates must pick the first by ascending filename");
+
+        ArchiveSnapshot different = full(1724311200L, "S-20260825_120000");
+        different.world = "other-world";
+        writeTar(second, different);
+        List<ArchiveTarScanner.ArchiveTarInfo> conflictingTars = ArchiveTarScanner.scan(archive);
+        IOException failure = assertThrows(IOException.class,
+                () -> ArchiveTarScanner.fullAtEpoch(conflictingTars, 1724311200L));
+        assertTrue(failure.getMessage().contains("a-full.tar"), failure.getMessage());
+        assertTrue(failure.getMessage().contains("b-full.tar"), failure.getMessage());
     }
 
 }

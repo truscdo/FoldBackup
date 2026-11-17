@@ -119,4 +119,46 @@ class ArchiveRestoreSourceTest {
         assertEquals(0, second.stats().changedRegions());
         assertEquals(0, second.stats().changedFiles());
     }
+
+    @Test
+    void diffBaselineHandlesIdenticalDuplicateFullsAndRejectsConflicts() throws Exception {
+        Path world = world();
+        Path store = temp.resolve("store");
+        Path archives = temp.resolve("archives");
+        SnapshotManifest base = SnapshotCreation.create(world, store, 1, event -> { });
+        Path full = new ArchiveCreator(new SnapshotStore(store), new BlobStore(store, 6), 6)
+                .createFull(base.getEpochSeconds(), archives);
+
+        Thread.sleep(1100);
+        mutate(world);
+        SnapshotManifest target = SnapshotCreation.create(world, store, 1, event -> { });
+        Path diff = new ArchiveCreator(new SnapshotStore(store), new BlobStore(store, 6), 6)
+                .createDiff(base.getEpochSeconds(), target.getEpochSeconds(), archives);
+
+        Path copyFull = archives.resolve("z-copy-full.tar");
+        Files.copy(full, copyFull);
+        Path output = temp.resolve("out");
+        var outcome = restore(archives, diff, output, false);
+        assertEquals("level-v2", Files.readString(output.resolve("level.dat")));
+        assertEquals(1, outcome.stats().changedRegions());
+
+        var entries = new java.util.LinkedHashMap<String, byte[]>();
+        try (var reader = new io.github.truscdo.foldbackup.core.archive.TarReader(Files.newInputStream(copyFull))) {
+            io.github.truscdo.foldbackup.core.archive.TarReader.Entry e;
+            while ((e = reader.nextEntry()) != null) entries.put(e.name, reader.readEntryData());
+        }
+        var meta = io.github.truscdo.foldbackup.core.archive.ArchiveSnapshotCodec.decode(entries.get("snapshot.bin"));
+        meta.world = "other-world";
+        entries.put("snapshot.bin", io.github.truscdo.foldbackup.core.archive.ArchiveSnapshotCodec.encode(meta));
+        try (var writer = new io.github.truscdo.foldbackup.core.archive.TarWriter(Files.newOutputStream(copyFull))) {
+            for (var e : entries.entrySet()) writer.putEntry(e.getKey(), e.getValue());
+        }
+
+        IOException failure = assertThrows(IOException.class,
+                () -> restore(archives, diff, temp.resolve("out-conflict"), false));
+        assertTrue(failure.getMessage().contains("baseline archive"), failure.getMessage());
+        assertTrue(failure.getMessage().contains("is ambiguous"), failure.getMessage());
+        assertTrue(failure.getMessage().contains(full.getFileName().toString()), failure.getMessage());
+        assertTrue(failure.getMessage().contains("z-copy-full.tar"), failure.getMessage());
+    }
 }

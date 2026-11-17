@@ -327,8 +327,9 @@ public class IndexStore implements AutoCloseable {
     private static void validateSummary(SnapshotManifest.Summary s, String field) throws IOException {
         if (s.getRegionsTotal() < 0 || s.getRegionsChanged() < 0 || s.getExtraFilesTotal() < 0
                 || s.getExtraFilesChanged() < 0 || s.getTotalCompressedBytes() < 0
-                || s.getTotalUncompressedBytes() < 0 || s.getNewBlobBytes() < 0)
+                || s.getTotalUncompressedBytes() < 0 || s.getNewBlobBytes() < 0) {
             throw new IOException(field + ".summary: negative count or size");
+        }
     }
 
     private static void validate(MetadataIndex index) throws IOException {

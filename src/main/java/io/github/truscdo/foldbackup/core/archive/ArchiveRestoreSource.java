@@ -42,6 +42,9 @@ public final class ArchiveRestoreSource implements RestoreSource {
                 fullTar = ArchiveTarScanner.fullAtEpoch(ArchiveTarScanner.scan(archiveRoot), meta.baseEpoch);
             } catch (IOException e) {
                 String expected = ArchiveCreator.fullTarName(SnapshotStore.generateSnapshotId(meta.baseEpoch));
+                if (ArchiveFormatUtil.isConflictingFullError(e)) {
+                    throw new IOException("Required baseline archive " + expected + " is ambiguous: " + e.getMessage(), e);
+                }
                 throw new IOException("Required baseline archive " + expected + " is missing", e);
             }
             diffTar = archiveFile;

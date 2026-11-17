@@ -163,6 +163,41 @@ class ArchiveTuiTest {
         assertTrue(text.contains("Done: "), text);
     }
 
+    @Test
+    void selectingDiffWithDuplicateFullsAllowsIdenticalAndRejectsConflicts() throws Exception {
+        writeTar("a-full.tar", full(100, "S-20260914_120000"));
+        writeTar("b-full.tar", full(100, "S-20260914_120000"));
+        writeTar("diff.tar", diff(200, 100, "S-20260914_130000"));
+
+        var okOut = new ByteArrayOutputStream();
+        PrintStream previous = System.out;
+        try {
+            System.setOut(new PrintStream(okOut, true));
+            new ArchiveTui(archive, archive, new ConsolePrompt(new StringReader("1\n"),
+                    new PrintStream(okOut, true))).verifyArchives();
+        } finally {
+            System.setOut(previous);
+        }
+        assertTrue(okOut.toString().contains("OK — no errors"), okOut.toString());
+
+        ArchiveSnapshot conflict = full(100, "S-20260914_120000");
+        conflict.world = "other-world";
+        writeTar("b-full.tar", conflict);
+
+        var badOut = new ByteArrayOutputStream();
+        try {
+            System.setOut(new PrintStream(badOut, true));
+            new ArchiveTui(archive, archive, new ConsolePrompt(new StringReader("1\n"),
+                    new PrintStream(badOut, true))).verifyArchives();
+        } finally {
+            System.setOut(previous);
+        }
+        String text = badOut.toString();
+        assertTrue(text.contains("a-full.tar"), text);
+        assertTrue(text.contains("b-full.tar"), text);
+        assertFalse(text.contains("OK — no errors"), text);
+    }
+
     private void writeTar(String name, ArchiveSnapshot metadata) throws Exception {
         try (var output = Files.newOutputStream(archive.resolve(name));
                 var writer = new TarWriter(output)) {

@@ -170,17 +170,23 @@ public class ArchiveTui {
             return new SelectedArchive(target, target);
         }
 
-        ArchiveTarInfo full = tars.stream()
-                .filter(t -> t.meta() != null && t.meta().isFull()
-                        && t.meta().epoch == target.meta().baseEpoch)
-                .findFirst()
-                .orElse(null);
-        if (full == null) {
-            System.out.println("No corresponding full archive found for diff "
-                    + target.meta().sourceSnapshotId + ". Put the full archive in "
-                    + archiveRoot + " and retry.\n");
+        Path fullPath;
+        try {
+            fullPath = ArchiveTarScanner.fullAtEpoch(tars, target.meta().baseEpoch);
+        } catch (IOException e) {
+            if (ArchiveFormatUtil.isConflictingFullError(e)) {
+                System.out.println(e.getMessage() + "\n");
+            } else {
+                System.out.println("No corresponding full archive found for diff "
+                        + target.meta().sourceSnapshotId + ". Put the full archive in "
+                        + archiveRoot + " and retry.\n");
+            }
             return null;
         }
+        ArchiveTarInfo full = tars.stream()
+                .filter(t -> t.tar().equals(fullPath))
+                .findFirst()
+                .orElseThrow();
         return new SelectedArchive(full, target);
     }
 }

@@ -142,13 +142,76 @@ class ArchiveImporterTest {
     }
 
     @Test void duplicateFullArchivesWithDifferentMetadataAreRejected() throws Exception {
-        Path archive = diffArchive();
+        Path archive = diffArchive(), store = temp.resolve("store");
         Path copy = archive.resolve("copy-full.tar");
         Files.copy(archive.resolve(ArchiveCreator.fullTarName(BASE)), copy);
         rewriteSnapshot(copy, meta -> meta.world = "other-world");
         var failure = assertThrows(IOException.class,
-                () -> new ArchiveImporter(archive, temp.resolve("store"), 4).importAll());
-        assertTrue(failure.getMessage().contains("differs from"), failure.getMessage());
+                () -> new ArchiveImporter(archive, store, 4).importAll());
+        String msg = failure.getMessage();
+        assertTrue(msg.contains("0 snapshot(s) imported"), msg);
+        assertTrue(msg.contains(ArchiveCreator.fullTarName(BASE)), msg);
+        assertTrue(msg.contains("copy-full.tar"), msg);
+        assertTrue(msg.contains(ArchiveCreator.diffTarName(BASE, TARGET)), msg);
+        SnapshotStore snapshots = new SnapshotStore(store);
+        assertNull(snapshots.loadSnapshot(BASE_EPOCH), "conflicting full epoch must not be imported");
+        assertNull(snapshots.loadSnapshot(TARGET_EPOCH), "diff depending on conflicting epoch must not be imported");
+    }
+
+    @Test void conflictingFullEpochListsAllFilesSkipsDependentDiffAndImportsOtherEpochs() throws Exception {
+        Path archive = diffArchive(), store = temp.resolve("store");
+        Path baseFull = archive.resolve(ArchiveCreator.fullTarName(BASE));
+        Files.copy(baseFull, archive.resolve("a-identical-full.tar"));
+        Path conflicting = archive.resolve("z-conflicting-full.tar");
+        Files.copy(baseFull, conflicting);
+        rewriteSnapshot(conflicting, meta -> meta.world = "other-world");
+
+        // An independent clean epoch in the same archive root must still import.
+        long otherEpoch = 3_000L;
+        String otherId = SnapshotStore.generateSnapshotId(otherEpoch);
+        Region otherRegion = region(new byte[]{3});
+        String otherHash = hash(otherRegion);
+        var otherMeta = new ArchiveSnapshot();
+        otherMeta.type = "full";
+        otherMeta.sourceSnapshotId = otherId;
+        otherMeta.epoch = otherEpoch;
+        otherMeta.world = "world";
+        otherMeta.regionCount = 1;
+        otherMeta.regions.add(new ArchiveSnapshot.RegionInfo("region/r.0.0.mca", 8192, otherHash, SourceMetadata.empty()));
+        writeArchive(archive.resolve(ArchiveCreator.fullTarName(otherId)), ArchiveSnapshotCodec.encode(otherMeta),
+                Map.of(ArchiveCreator.regionObjectPath(otherHash),
+                        LrhTestSupport.writeRegionLinearBytes(otherRegion, 3)));
+
+        var failure = assertThrows(IOException.class,
+                () -> new ArchiveImporter(archive, store, 4).importAll());
+        String msg = failure.getMessage();
+        assertTrue(msg.contains("1 snapshot(s) imported"), msg);
+        assertTrue(msg.contains("a-identical-full.tar"), msg);
+        assertTrue(msg.contains(ArchiveCreator.fullTarName(BASE)), msg);
+        assertTrue(msg.contains("z-conflicting-full.tar"), msg);
+        assertTrue(msg.contains(ArchiveCreator.diffTarName(BASE, TARGET)), msg);
+
+        SnapshotStore snapshots = new SnapshotStore(store);
+        assertNull(snapshots.loadSnapshot(BASE_EPOCH), "conflicting epoch must be omitted");
+        assertNull(snapshots.loadSnapshot(TARGET_EPOCH), "dependent diff must be omitted");
+        assertNotNull(snapshots.loadSnapshot(otherEpoch), "unrelated clean epoch still imports");
+    }
+
+    @Test void importedSnapshotsSummarizeTotalsAndZeroDeltaStatsAcrossPersistence() throws Exception {
+        Path archive = diffArchive(), store = temp.resolve("store");
+        assertEquals(2, new ArchiveImporter(archive, store, 4).importAll());
+        SnapshotStore reloaded = new SnapshotStore(store);
+        for (long epoch : List.of(BASE_EPOCH, TARGET_EPOCH)) {
+            SnapshotManifest.Summary summary = reloaded.loadSnapshot(epoch).getSummary();
+            assertNotNull(summary);
+            assertEquals(1, summary.getRegionsTotal());
+            assertEquals(0, summary.getExtraFilesTotal());
+            assertTrue(summary.getTotalCompressedBytes() > 0);
+            assertEquals(8192, summary.getTotalUncompressedBytes());
+            assertEquals(0, summary.getRegionsChanged());
+            assertEquals(0, summary.getExtraFilesChanged());
+            assertEquals(0L, summary.getNewBlobBytes());
+        }
     }
 
     @Test void diffWithoutFullArchiveAndWithoutBaselineIsRejected() throws Exception {

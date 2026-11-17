@@ -410,26 +410,7 @@ public class ArchiveImporter {
         }
         manifest.setRegions(regions);
         manifest.setExtraFiles(files);
-        manifest.setSummary(buildSummary(regions, files));
+        manifest.setSummary(SnapshotManifest.Summary.summarize(regions, files));
         return manifest;
-    }
-
-    private static SnapshotManifest.Summary buildSummary(List<RegionEntry> regions, List<FileEntry> files) {
-        SnapshotManifest.Summary summary = new SnapshotManifest.Summary();
-        summary.setRegionsTotal(regions.size());
-        summary.setExtraFilesTotal(files.size());
-        long comp = 0;
-        long uncomp = 0;
-        for (RegionEntry re : regions) {
-            comp += re.getSizeCompressed();
-            uncomp += re.getSizeUncompressed();
-        }
-        for (FileEntry fe : files) {
-            comp += fe.getSizeCompressed();
-            uncomp += fe.getSizeUncompressed();
-        }
-        summary.setTotalCompressedBytes(comp);
-        summary.setTotalUncompressedBytes(uncomp);
-        return summary;
     }
 }

@@ -147,6 +147,39 @@ class IndexStoreValidationTest {
         bad = valid.clone();
         ByteBuffer.wrap(bad).putInt(bad.length - 36 - 40, -1);
         assertTrue(rejects(bad).getMessage().contains("summary"));
+        bad = valid.clone();
+        ByteBuffer.wrap(bad).putInt(bad.length - 36 - 36, -1);
+        assertTrue(rejects(bad).getMessage().contains("summary"));
+    }
+
+    @Test void summarizedImportedSummaryRoundTripsThroughIndexStoreAndRejectsNegativeDeltas() throws Exception {
+        assertThrows(IllegalArgumentException.class, () ->
+                SnapshotManifest.Summary.summarize(List.of(), List.of(), -1, 0, 0L));
+
+        SnapshotManifest imported = new SnapshotManifest("S-20260907_130005", 5, "world");
+        FileEntry entry = new FileEntry("file", "a".repeat(32), "blobs/live", 10, 20);
+        imported.addExtraFile(entry);
+        imported.setSummary(SnapshotManifest.Summary.summarize(List.of(), List.of(entry)));
+        EntryMetadata meta = new EntryMetadata(EntryMetadata.Type.FILE, entry.getFilename(),
+                entry.getSourceHash(), entry.getBlobPath(),
+                entry.getSizeCompressed(), entry.getSizeUncompressed(), entry.getSourceMetadata());
+        MetadataIndex index = new MetadataIndex();
+        index.addMetadata(meta);
+        index.addSnapshot(imported, List.of(meta.getMetadataHash()));
+
+        try (IndexStore disk = new IndexStore(root.resolve("index.db"))) {
+            disk.save(index);
+        }
+        try (IndexStore disk = new IndexStore(root.resolve("index.db"))) {
+            SnapshotManifest reloaded = disk.load().loadSnapshot(5);
+            assertNotNull(reloaded);
+            assertEquals(1, reloaded.getSummary().getExtraFilesTotal());
+            assertEquals(10, reloaded.getSummary().getTotalCompressedBytes());
+            assertEquals(20, reloaded.getSummary().getTotalUncompressedBytes());
+            assertEquals(0, reloaded.getSummary().getRegionsChanged());
+            assertEquals(0, reloaded.getSummary().getExtraFilesChanged());
+            assertEquals(0L, reloaded.getSummary().getNewBlobBytes());
+        }
     }
 
     @Test void validationRejectsDuplicateIdsAndMissingReferencesBeforeOpeningTemp() throws Exception {

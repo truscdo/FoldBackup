@@ -6,6 +6,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.text.SimpleDateFormat;
 import java.util.Date;
+import java.util.List;
 
 /**
  * 归档共享解析/格式化工具。
@@ -29,20 +30,45 @@ public final class ArchiveFormatUtil {
      * @return 元数据；tar 缺失 / 无 snapshot.bin / 解析失败时返回 {@code null}
      */
     public static ArchiveSnapshot readSnapshot(Path tar) {
+        try {
+            byte[] data = readSnapshotBytes(tar);
+            return data == null ? null : ArchiveSnapshotCodec.decode(data);
+        } catch (IOException ignored) {
+            // fall through
+        }
+        return null;
+    }
+
+    /** 读取 tar 内 {@code snapshot.bin} 的原始字节；缺失时返回 {@code null}。 */
+    static byte[] readSnapshotBytes(Path tar) throws IOException {
         try (InputStream fis = Files.newInputStream(tar);
                 TarReader reader = new TarReader(fis)) {
             TarReader.Entry e;
             while ((e = reader.nextEntry()) != null) {
                 if (e.name.equals("snapshot.bin")) {
-                    byte[] data = reader.readEntryData();
-                    return ArchiveSnapshotCodec.decode(data);
+                    return reader.readEntryData();
                 }
                 reader.readEntryData();
             }
-        } catch (IOException ignored) {
-            // fall through
         }
         return null;
+    }
+
+    private static final String CONFLICTING_FULL_PREFIX = "Multiple conflicting full archives for epoch ";
+
+    static String duplicateFullWarning(long epochSeconds, String keptFile, String ignoredFile) {
+        return "duplicate full archive for epoch " + epochSeconds + ": keeping "
+                + keptFile + ", ignoring " + ignoredFile;
+    }
+
+    static String conflictingFullMessage(long epochSeconds, List<String> fileNames) {
+        return CONFLICTING_FULL_PREFIX + epochSeconds + ": " + String.join(", ", fileNames);
+    }
+
+    /** 判断异常是否由同 Epoch 多份完整归档内容冲突触发。 */
+    public static boolean isConflictingFullError(IOException error) {
+        return error != null && error.getMessage() != null
+                && error.getMessage().startsWith(CONFLICTING_FULL_PREFIX);
     }
 
     /** 格式化 epoch 秒为本地时区 {@code yyyy-MM-dd HH:mm:ss}。 */

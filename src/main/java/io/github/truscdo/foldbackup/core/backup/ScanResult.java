@@ -48,29 +48,17 @@ public class ScanResult {
     }
 
     void finalizeResult() {
-        for (RegionEntry r : regions) {
-            totalCompressedBytes += r.getSizeCompressed();
-            totalUncompressedBytes += r.getSizeUncompressed();
-        }
-        for (FileEntry f : files) {
-            totalCompressedBytes += f.getSizeCompressed();
-            totalUncompressedBytes += f.getSizeUncompressed();
-        }
+        SnapshotManifest.Summary summary = toSummary();
+        totalCompressedBytes = summary.getTotalCompressedBytes();
+        totalUncompressedBytes = summary.getTotalUncompressedBytes();
     }
 
     /**
      * Build a {@link SnapshotManifest.Summary} from this scan result.
      */
     public SnapshotManifest.Summary toSummary() {
-        SnapshotManifest.Summary summary = new SnapshotManifest.Summary();
-        summary.setRegionsTotal(getRegionCount());
-        summary.setRegionsChanged(changedRegions);
-        summary.setExtraFilesTotal(getFileCount());
-        summary.setExtraFilesChanged(changedFiles);
-        summary.setTotalCompressedBytes(totalCompressedBytes);
-        summary.setTotalUncompressedBytes(totalUncompressedBytes);
-        summary.setNewBlobBytes(newBytes);
-        return summary;
+        return SnapshotManifest.Summary.summarize(
+                regions, files, changedRegions, changedFiles, newBytes);
     }
 
     /**
