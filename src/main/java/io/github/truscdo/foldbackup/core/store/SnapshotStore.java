@@ -188,20 +188,20 @@ public class SnapshotStore {
 
         // 3. Add snapshot and apply retention to the staged copy
         next.addSnapshot(manifest, entryHashes);
+        // 清理崩溃遗留的 index.db.tmp，避免被 RepositoryUsage 计入 plannedBytes 导致保留策略静默过删。
+        long discardedTempBytes = indexStore.discardTemporary();
+        if (discardedTempBytes > 0) {
+            LOG.info("Discarded stale temporary index ({} bytes) before retention planning", discardedTempBytes);
+        }
         SnapshotCleanupPlanner.Plan plan = planCleanup(next, retentionPolicy);
         if (plan != null && plan.snapshotEpochs().contains(manifest.getEpochSeconds()))
             throw new IOException("Backup not committed: new snapshot cannot fit retention limits: "
                     + manifest.getSnapshotId());
-        if (plan != null) for (long epoch : plan.snapshotEpochs()) next.removeSnapshot(epoch);
 
-        // 4. Atomically persist to disk
-        commit(next);
-        try {
-            BlobMaintenance.GcResult gc = collectGarbageDetailedLocked();
-            verifyCleanup(retentionPolicy, plan, gc);
-        } catch (IOException | RuntimeException e) {
-            throw new CommittedCleanupException(manifest.getEpochSeconds(), manifest.getSnapshotId(), e);
-        }
+        // 4. Atomically persist to disk and collect unreferenced blobs
+        List<Long> expiredEpochs = plan != null ? plan.snapshotEpochs() : List.of();
+        removeAndCommit(next, expiredEpochs, manifest,
+                plan != null ? gc -> verifyCleanup(retentionPolicy, plan, gc) : null);
     }
 
     /** 明确区分快照已提交但回收未完成，调用者不可将其视为未生成备份立即重试。 */
@@ -249,25 +249,47 @@ public class SnapshotStore {
                 plan.deletions(), plan.reclaimedBytes(), gc.reclaimedBytes(), usage.totalBytes(),
                 usage.usableBytes(), snapshots.size(), oldest, newest, gc);
         if (policy.capacityDeficit(usage.totalBytes()) > 0 || policy.freeSpaceDeficit(usage.usableBytes()) > 0
-                || !gc.scanComplete() || gc.failedFiles() > 0)
+                || !gc.isClean())
             throw new IOException("Cleanup incomplete: capacity deficit=" + policy.capacityDeficit(usage.totalBytes())
                     + ", free-space deficit=" + policy.freeSpaceDeficit(usage.usableBytes()) + ", gc=" + gc);
     }
 
-    /** 从索引删除一个快照，并回收不再引用的 metadata 与 blob。 */
-    public void deleteSnapshot(long epochSeconds) throws IOException {
-        deleteSnapshots(List.of(epochSeconds));
+    @FunctionalInterface
+    private interface PostCommitCheck {
+        void check(BlobMaintenance.GcResult gc) throws IOException;
     }
 
-    /** 批量删除快照并执行一次 metadata 与 blob 垃圾回收。 */
-    public void deleteSnapshots(Collection<Long> snapshotEpochs) throws IOException {
-        try (WriteSession ignored = beginWrite()) {
-            MetadataIndex next = metadataIndex.copy();
-            for (long epoch : snapshotEpochs) {
-                next.removeSnapshot(epoch);
+    /** 提交已暂存的快照删除并运行孤儿 blob GC；提交本身失败直接抛 IOException，已提交后的清理失败按需包装。 */
+    private BlobMaintenance.GcResult removeAndCommit(MetadataIndex next, Collection<Long> epochsToRemove,
+            SnapshotManifest committedManifest, PostCommitCheck postCommit) throws IOException {
+        for (long epoch : epochsToRemove) {
+            next.removeSnapshot(epoch);
+        }
+        commit(next);
+        try {
+            BlobMaintenance.GcResult gc = collectGarbageDetailedLocked();
+            if (postCommit != null) {
+                postCommit.check(gc);
             }
-            commit(next);
-            collectGarbageLocked();
+            return gc;
+        } catch (IOException | RuntimeException e) {
+            if (committedManifest != null) {
+                throw new CommittedCleanupException(
+                        committedManifest.getEpochSeconds(), committedManifest.getSnapshotId(), e);
+            }
+            throw e;
+        }
+    }
+
+    /** 从索引删除一个快照，并回收不再引用的 metadata 与 blob；返回 GC 结果以暴露未清净状态。 */
+    public BlobMaintenance.GcResult deleteSnapshot(long epochSeconds) throws IOException {
+        return deleteSnapshots(List.of(epochSeconds));
+    }
+
+    /** 批量删除快照并执行一次 metadata 与 blob 垃圾回收；返回 GC 结果以暴露未清净状态。 */
+    public BlobMaintenance.GcResult deleteSnapshots(Collection<Long> snapshotEpochs) throws IOException {
+        try (WriteSession ignored = beginWrite()) {
+            return removeAndCommit(metadataIndex.copy(), snapshotEpochs, null, null);
         }
     }
 
@@ -300,7 +322,9 @@ public class SnapshotStore {
 
     private BlobMaintenance.GcResult collectGarbageDetailedLocked() {
         BlobMaintenance.GcResult result = blobMaintenance.deleteOrphansDetailed(metadataIndex.collectAllBlobPaths());
-        if (result.deletedFiles() > 0 || result.failedFiles() > 0 || !result.scanComplete())
+        if (!result.isClean())
+            LOG.warn("Blob GC incomplete: {}", result);
+        else if (result.deletedFiles() > 0)
             LOG.info("Blob GC: {}", result);
         return result;
     }

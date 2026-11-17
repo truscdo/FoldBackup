@@ -11,6 +11,7 @@ import io.github.truscdo.foldbackup.core.export.SnapshotZipExport;
 import io.github.truscdo.foldbackup.core.rollback.ChunkRollbackCoordinator;
 import io.github.truscdo.foldbackup.core.rollback.ChunkRollbackSupport;
 import io.github.truscdo.foldbackup.core.restore.SnapshotRestoreSource;
+import io.github.truscdo.foldbackup.core.store.BlobMaintenance;
 import io.github.truscdo.foldbackup.core.store.BlobStore;
 import io.github.truscdo.foldbackup.core.store.SnapshotManifest;
 import io.github.truscdo.foldbackup.core.store.SnapshotStore;
@@ -210,8 +211,12 @@ public class BackupCli {
             System.out.println("Delete cancelled.");
             return;
         }
-        snapshots.deleteSnapshot(epoch);
+        BlobMaintenance.GcResult gc = snapshots.deleteSnapshot(epoch);
         System.out.println("Snapshot deleted: " + snapshotId);
+        if (!gc.isClean()) {
+            System.err.println("Warning: snapshot deleted, but cleanup of unused backup files was incomplete (failed="
+                    + gc.failedFiles() + ", scanComplete=" + gc.scanComplete() + ").");
+        }
     }
 
     private static void runRollback(Invocation invocation, List<String> args) throws IOException {

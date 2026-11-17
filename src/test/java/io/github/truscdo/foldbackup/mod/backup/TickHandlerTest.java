@@ -8,6 +8,7 @@ import io.github.truscdo.foldbackup.core.task.TaskRegistry;
 import io.github.truscdo.foldbackup.core.task.TaskStatus;
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
@@ -119,6 +120,52 @@ class TickHandlerTest {
 
             release.release();
             mainQueue.take().run();
+        }
+    }
+
+    @Test void failedScheduledBackupResetsAccrualAndWaitsFullInterval() throws Exception {
+        var scheduler = new BackupScheduler(() -> 1, () -> 0);
+        var world = new WorldAccessorTest.World();
+        var tasks = new TaskRegistry();
+        var runs = new AtomicInteger();
+        var firstDone = new CountDownLatch(1);
+        var secondDone = new CountDownLatch(1);
+        var coordinator = new BackupCoordinator(null, null, null, null) {
+            @Override public SnapshotManifest runBackup(TaskStatus status, Consumer<BackupStep> listener) throws IOException {
+                if (runs.incrementAndGet() == 1) {
+                    throw new IOException("transient scan error");
+                }
+                return null;
+            }
+        };
+
+        try (var worker = Executors.newSingleThreadExecutor()) {
+            var executor = new BackupExecutor(Runnable::run, (key, args) -> {}, world, coordinator,
+                    scheduler, worker, tasks, () -> 0L) {
+                @Override CompletableFuture<BackupResult> triggerBackup(boolean force, Runnable onAccepted) {
+                    var f = super.triggerBackup(force, onAccepted);
+                    f.whenComplete((r, e) -> {
+                        if (firstDone.getCount() > 0) firstDone.countDown();
+                        else secondDone.countDown();
+                    });
+                    return f;
+                }
+            };
+
+            long now = System.currentTimeMillis();
+            advanceTicks(scheduler, executor, true, 1200, now);
+            assertTrue(firstDone.await(5, TimeUnit.SECONDS));
+            assertEquals(1, runs.get());
+            assertEquals(0, scheduler.getAccumulatedOnlineMinutes());
+
+            // 失败后下一个 200 tick 检查点（无论是否在线）不得立即重试，须重新攒满完整 interval
+            advanceTicks(scheduler, executor, false, 200, now + 10_000L);
+            advanceTicks(scheduler, executor, true, 200, now + 20_000L);
+            assertEquals(1, runs.get());
+
+            advanceTicks(scheduler, executor, true, 1000, now + 70_000L);
+            assertTrue(secondDone.await(5, TimeUnit.SECONDS));
+            assertEquals(2, runs.get());
         }
     }
 }

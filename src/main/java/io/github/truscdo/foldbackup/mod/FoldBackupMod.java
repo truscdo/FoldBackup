@@ -1,6 +1,7 @@
 package io.github.truscdo.foldbackup.mod;
 
 import io.github.truscdo.foldbackup.core.LogUtil;
+import io.github.truscdo.foldbackup.core.store.BlobMaintenance;
 import io.github.truscdo.foldbackup.core.store.BlobStore;
 import io.github.truscdo.foldbackup.core.store.SnapshotStore;
 import io.github.truscdo.foldbackup.core.task.TaskRegistry;
@@ -187,9 +188,9 @@ public class FoldBackupMod {
      * 在备份执行器线程上异步删除快照。
      * 进度通过 {@link TaskRegistry} 追踪。
      *
-     * @return 删除和 GC 完成时返回的 future
+     * @return 删除和 GC 完成时返回的 future，携带本次 GC 结果
      */
-    public CompletableFuture<Void> deleteSnapshotAsync(long epochSeconds) {
+    public CompletableFuture<BlobMaintenance.GcResult> deleteSnapshotAsync(long epochSeconds) {
         WorldRuntime current = runtime;
         if (current == null) {
             return CompletableFuture.failedFuture(new IllegalStateException("Backend not initialized"));

@@ -53,13 +53,15 @@ class BackupExecutorTest {
             }
         };
         try (var worker = Executors.newSingleThreadExecutor()) {
+            var scheduler = new BackupScheduler(null);
             var executor = new BackupExecutor(Runnable::run,
                     (key, args) -> warnings.add(args.length == 0 ? key : key + ":" + args[0]),
-                    world, coordinator, new BackupScheduler(null), worker, tasks);
+                    world, coordinator, scheduler, worker, tasks);
             assertEquals(BackupResult.FAILED, executor.triggerBackup(true).get(2, TimeUnit.SECONDS));
             world.assertRestored();
             assertFalse(executor.isBackupRunning());
             assertFalse(tasks.hasActiveTask());
+            assertTrue(scheduler.getLastBackupTime() > 0, "Committed snapshot must still record completion time");
             assertEquals(List.of("foldbackup.progress.cleanup_failed:snapshot-42"), warnings,
                     "A committed snapshot with a failed cleanup must not be reported as a plain failure");
         }
@@ -339,5 +341,32 @@ class BackupExecutorTest {
         }
         if (interrupted)
             Thread.currentThread().interrupt();
+    }
+
+    @Test void ordinaryAsyncAndBlockingFailuresUpdateSchedulerBackoff() throws Exception {
+        for (boolean blocking : new boolean[] {false, true}) {
+            var world = new WorldAccessorTest.World();
+            var scheduler = new BackupScheduler(() -> 1, () -> 0);
+            for (int i = 0; i < 6; i++) {
+                for (int t = 0; t < 200; t++) scheduler.shouldTrigger(true);
+            }
+            assertEquals(1, scheduler.getAccumulatedOnlineMinutes());
+            var coordinator = new BackupCoordinator(null, null, null, null) {
+                @Override public SnapshotManifest runBackup(TaskStatus status, Consumer<BackupStep> listener) throws IOException {
+                    throw new IOException("disk full");
+                }
+            };
+            try (var worker = Executors.newSingleThreadExecutor()) {
+                var executor = new BackupExecutor(Runnable::run, (key, args) -> {}, world, coordinator,
+                        scheduler, worker, new TaskRegistry());
+                BackupResult result = blocking
+                        ? executor.triggerBackupBlocking(true)
+                        : executor.triggerBackup(true).get(2, TimeUnit.SECONDS);
+                assertEquals(BackupResult.FAILED, result);
+                assertTrue(scheduler.getLastBackupTime() > 0);
+                assertEquals(0, scheduler.getAccumulatedOnlineMinutes());
+                assertFalse(scheduler.shouldTrigger(false));
+            }
+        }
     }
 }

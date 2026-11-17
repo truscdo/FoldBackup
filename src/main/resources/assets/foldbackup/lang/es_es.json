@@ -2,6 +2,7 @@
   "foldbackup.command.invalid_snapshot_id": "§c[FoldBackup] El formato del ID de la instantánea no es válido.",
   "foldbackup.command.delete.started": "§6[FoldBackup] Eliminando la instantánea: §f%s§6...",
   "foldbackup.command.delete.failed": "§c[FoldBackup] No se pudo eliminar la instantánea %s. Consulta los registros del servidor.",
+  "foldbackup.command.delete.cleanup_incomplete": "§e[FoldBackup] Instantánea §f%s §eeliminada, pero no se pudieron limpiar algunos archivos de respaldo sin uso. Consulta los registros del servidor.",
   "foldbackup.command.delete.success": "§a[FoldBackup] Instantánea eliminada: §f%s",
   "foldbackup.command.backup.already_running": "§c[FoldBackup] Ya hay una copia de seguridad en curso.",
   "foldbackup.command.backup.start_forced": "§6[FoldBackup] Iniciando una copia de seguridad forzada...",

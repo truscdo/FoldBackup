@@ -269,7 +269,7 @@ public class BackupExecutor {
         }
     }
 
-    /** 收尾：恢复保存、登记任务结果并完成 future；正常情况在服务器线程上执行，主线程拒绝任务时可能在调用线程上。 */
+    /** 收尾：恢复保存、登记任务结果、更新调度计时并完成 future；正常情况在服务器线程上执行，主线程拒绝任务时可能在调用线程上。 */
     private void finishBackup(Run run, BackupResult ok, Throwable ex) {
         if (!run.finished.compareAndSet(false, true)) {
             LOG.warn("Ignoring the completion of a backup run that was already aborted");
@@ -277,17 +277,14 @@ public class BackupExecutor {
         }
         run.pause.end();
         BackupResult outcome = BackupResult.FAILED;
+        Throwable failureCause = unwrapCompletion(ex);
         try {
             worldAccessor.enableSaving();
-            if (ex != null) {
-                Throwable cause = ex instanceof CompletionException && ex.getCause() != null ? ex.getCause() : ex;
-                if (cause instanceof SnapshotStore.CommittedCleanupException)
-                    scheduler.markBackupComplete();
-                LOG.error("Backup failed", cause);
-                taskRegistry.fail(run.status, "Backup failed: " + cause.getMessage());
-                notifyPlayersOfBackupFailure(cause);
+            if (failureCause != null) {
+                LOG.error("Backup failed", failureCause);
+                taskRegistry.fail(run.status, "Backup failed: " + failureCause.getMessage());
+                notifyPlayersOfBackupFailure(failureCause);
             } else if (BackupResult.SUCCESS.equals(ok)) {
-                scheduler.markBackupComplete();
                 LOG.info("[{}] {}", run.status.taskId(), BackupStepFormat.format(run.status.stepProgress()));
                 taskRegistry.complete(run.status);
                 outcome = BackupResult.SUCCESS;
@@ -300,8 +297,26 @@ public class BackupExecutor {
             taskRegistry.fail(run.status, "Failed to restore world saving: " + e.getMessage());
             notifyPlayersOfBackupFailure();
         } finally {
-            currentRun.compareAndSet(run, null);
-            run.future.complete(outcome);
+            try {
+                updateSchedulerAfterRun(outcome, failureCause);
+            } finally {
+                currentRun.compareAndSet(run, null);
+                run.future.complete(outcome);
+            }
+        }
+    }
+
+    private static Throwable unwrapCompletion(Throwable ex) {
+        return ex instanceof CompletionException && ex.getCause() != null ? ex.getCause() : ex;
+    }
+
+    private void updateSchedulerAfterRun(BackupResult outcome, Throwable failureCause) {
+        if (scheduler == null)
+            return;
+        if (outcome == BackupResult.SUCCESS || failureCause instanceof SnapshotStore.CommittedCleanupException) {
+            scheduler.markBackupComplete();
+        } else {
+            scheduler.markAttemptFailed();
         }
     }
 

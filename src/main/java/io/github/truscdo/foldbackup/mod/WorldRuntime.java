@@ -296,7 +296,7 @@ public final class WorldRuntime {
     /**
      * 在备份执行器线程上异步删除快照；与仓库读写串行化。
      */
-    public CompletableFuture<Void> deleteSnapshotAsync(long epochSeconds) {
+    public CompletableFuture<BlobMaintenance.GcResult> deleteSnapshotAsync(long epochSeconds) {
         TaskStatus status = taskRegistry.startTask(TaskType.DELETE)
                 .setRunning()
                 .setMessage("Deleting snapshot at epoch " + epochSeconds + "...");
@@ -306,10 +306,16 @@ public final class WorldRuntime {
             taskRegistry.fail(status, "Backend not initialized");
             return CompletableFuture.failedFuture(new IllegalStateException("Backend not initialized"));
         }
-        return CompletableFuture.runAsync(() -> {
+        return CompletableFuture.supplyAsync(() -> {
             try {
-                store.deleteSnapshot(epochSeconds);
-                taskRegistry.complete(status);
+                BlobMaintenance.GcResult gc = store.deleteSnapshot(epochSeconds);
+                if (gc.isClean()) {
+                    taskRegistry.complete(status);
+                } else {
+                    taskRegistry.fail(status, "Snapshot deleted, but cleanup of unused backup files was incomplete (failed="
+                            + gc.failedFiles() + ", scanComplete=" + gc.scanComplete() + ")");
+                }
+                return gc;
             } catch (IOException e) {
                 taskRegistry.fail(status, "Delete failed: " + e.getMessage());
                 throw new CompletionException(e);

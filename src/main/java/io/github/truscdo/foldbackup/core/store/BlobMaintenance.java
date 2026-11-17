@@ -18,7 +18,12 @@ import java.util.Set;
  * index; callers provide the set of active relative blob paths.</p>
  */
 public class BlobMaintenance {
-    public record GcResult(int deletedFiles, long reclaimedBytes, int failedFiles, boolean scanComplete) {}
+    public record GcResult(int deletedFiles, long reclaimedBytes, int failedFiles, boolean scanComplete) {
+        /** 扫描完整且无删除失败时返回 {@code true}。 */
+        public boolean isClean() {
+            return scanComplete && failedFiles == 0;
+        }
+    }
 
     private static final LogUtil LOG = LogUtil.getLogger(BlobMaintenance.class);
 

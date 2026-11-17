@@ -73,13 +73,17 @@ public class FoldBackupCommand {
                 source.sendSuccess(() -> CommandFeedback.text(source, mod, "foldbackup.command.delete.started", id),
                                 true);
                 mod.deleteSnapshotAsync(epochSeconds)
-                                .whenComplete((ignored, exception) -> mod.getServer().execute(() -> {
+                                .whenComplete((gc, exception) -> mod.getServer().execute(() -> {
                                         if (exception != null) {
                                                 Throwable cause = exception.getCause() == null ? exception
                                                                 : exception.getCause();
                                                 FoldBackupMod.LOG.error("Failed to delete snapshot {}", id, cause);
                                                 CommandFeedback.failure(source, mod, "foldbackup.command.delete.failed",
                                                                 id);
+                                        } else if (gc != null && !gc.isClean()) {
+                                                source.sendSuccess(() -> CommandFeedback.text(source, mod,
+                                                                "foldbackup.command.delete.cleanup_incomplete", id),
+                                                                true);
                                         } else {
                                                 source.sendSuccess(() -> CommandFeedback.text(source, mod,
                                                                 "foldbackup.command.delete.success", id), true);

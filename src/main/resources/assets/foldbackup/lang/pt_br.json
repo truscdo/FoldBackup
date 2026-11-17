@@ -2,6 +2,7 @@
   "foldbackup.command.invalid_snapshot_id": "§c[FoldBackup] O formato do ID do snapshot é inválido.",
   "foldbackup.command.delete.started": "§6[FoldBackup] Excluindo snapshot: §f%s§6...",
   "foldbackup.command.delete.failed": "§c[FoldBackup] Falha ao excluir o snapshot %s. Consulte o log do servidor.",
+  "foldbackup.command.delete.cleanup_incomplete": "§e[FoldBackup] Snapshot §f%s §eexcluído, mas alguns arquivos de backup sem uso não puderam ser limpos. Consulte o log do servidor.",
   "foldbackup.command.delete.success": "§a[FoldBackup] Snapshot excluído: §f%s",
   "foldbackup.command.backup.already_running": "§c[FoldBackup] Já existe um backup em andamento.",
   "foldbackup.command.backup.start_forced": "§6[FoldBackup] Iniciando backup forçado...",

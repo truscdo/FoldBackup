@@ -2,6 +2,7 @@ package io.github.truscdo.foldbackup.tui;
 
 import io.github.truscdo.foldbackup.cli.SnapshotCreation;
 import io.github.truscdo.foldbackup.core.BackupExporter;
+import io.github.truscdo.foldbackup.core.store.BlobMaintenance;
 import io.github.truscdo.foldbackup.core.store.BlobStore;
 import io.github.truscdo.foldbackup.core.store.SnapshotManifest;
 import io.github.truscdo.foldbackup.core.store.SnapshotStore;
@@ -352,8 +353,13 @@ public class BackupTui {
 
             System.out.println("Deleting...");
             try {
-                store.snapshotManager().deleteSnapshot(selected.epochSeconds);
-                System.out.println("Snapshot deleted: " + selected.id + "\n");
+                BlobMaintenance.GcResult gc = store.snapshotManager().deleteSnapshot(selected.epochSeconds);
+                System.out.println("Snapshot deleted: " + selected.id);
+                if (!gc.isClean()) {
+                    System.out.println("Warning: cleanup of unused backup files was incomplete (failed="
+                            + gc.failedFiles() + ", scanComplete=" + gc.scanComplete() + ").");
+                }
+                System.out.println();
             } catch (IOException e) {
                 System.err.println("Delete failed: " + e.getMessage() + "\n");
             }

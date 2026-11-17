@@ -229,4 +229,55 @@ class CapacityCleanupTest {
         store.saveSnapshot(sn);
         assertEquals(Files.size(root.resolve("index.db")), IndexStore.serializedSize(store.getIndex()));
     }
+
+    @Test void staleTempIndexIsDiscardedBeforeRetentionAndDoesNotOverDeleteSnapshots() throws Exception {
+        var store = new SnapshotStore(root);
+        String oldBlob = blob("old", 4000);
+        store.saveSnapshot(snapshot(OLD, 1, oldBlob));
+        String midBlob = blob("mid", 4000);
+        store.saveSnapshot(snapshot(MIDDLE, 2, midBlob));
+        Files.write(root.resolve("index.db.tmp"), new byte[20_000]);
+
+        String freshBlob = blob("new", 512);
+        store.saveSnapshot(snapshot(NEW, 3, freshBlob), new RetentionPolicy().setMaxSizeBytes(10_000));
+
+        assertFalse(Files.exists(root.resolve("index.db.tmp")));
+        assertEquals(List.of(NEW, MIDDLE, OLD), store.listSnapshots());
+        assertTrue(Files.exists(root.resolve(oldBlob)));
+        assertTrue(Files.exists(root.resolve(midBlob)));
+        assertTrue(Files.exists(root.resolve(freshBlob)));
+    }
+
+    @Test void deleteSnapshotReportsIncompleteGcWhilePersistingIndexDeletion() throws Exception {
+        class FailingGc extends BlobMaintenance {
+            boolean fail = true;
+            FailingGc() { super(root); }
+            @Override protected boolean deleteOrphan(Path path) throws IOException {
+                if (fail) throw new IOException("injected deletion failure");
+                return super.deleteOrphan(path);
+            }
+        }
+        var gc = new FailingGc();
+        var store = new SnapshotStore(root, new IndexStore(root.resolve("index.db")), gc);
+        String oldBlob = blob("old", 4096);
+        store.saveSnapshot(snapshot(OLD, 1, oldBlob));
+        String liveBlob = blob("live", 128);
+        store.saveSnapshot(snapshot(NEW, 2, liveBlob));
+
+        var result = store.deleteSnapshot(1L);
+        assertFalse(result.isClean());
+        assertTrue(result.scanComplete());
+        assertEquals(1, result.failedFiles());
+        assertEquals(0, result.deletedFiles());
+        assertEquals(List.of(NEW), new SnapshotStore(root).listSnapshots());
+        assertTrue(Files.exists(root.resolve(oldBlob)));
+
+        gc.fail = false;
+        var retried = store.collectGarbageDetailed();
+        assertTrue(retried.isClean());
+        assertEquals(1, retried.deletedFiles());
+        assertEquals(4096, retried.reclaimedBytes());
+        assertFalse(Files.exists(root.resolve(oldBlob)));
+        assertTrue(Files.exists(root.resolve(liveBlob)));
+    }
 }
