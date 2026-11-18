@@ -1,5 +1,6 @@
 package io.github.truscdo.foldbackup.it;
 
+import io.github.truscdo.foldbackup.core.store.SnapshotStore;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.TestInstance;
@@ -166,8 +167,7 @@ public abstract class IntegrationTestBase {
         // 从列表输出中解析第一个快照 ID。
         // 快照 ID 格式：S-yyyyMMdd_HHmmss
         // 行中可能包含 Minecraft 颜色代码（§），需要剥离。
-        var snapshotPattern = java.util.regex.Pattern.compile("S-\\d{8}_\\d{6}");
-        var matcher = snapshotPattern.matcher(list);
+        var matcher = SnapshotStore.SNAPSHOT_ID_PATTERN.matcher(list);
         if (matcher.find()) {
             String id = matcher.group();
             System.out.println("  Found snapshot: " + id);

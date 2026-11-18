@@ -27,7 +27,8 @@ import java.util.regex.Pattern;
  */
 public class SnapshotStore {
 
-    private static final Pattern SNAPSHOT_ID = Pattern.compile("S-\\d{8}_\\d{6}");
+    /** 快照 ID 的权威格式正则：{@code S-yyyyMMdd_HHmmss}。 */
+    public static final Pattern SNAPSHOT_ID_PATTERN = Pattern.compile("S-\\d{8}_\\d{6}");
     private static final DateTimeFormatter SNAPSHOT_ID_TIME =
             DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss", Locale.ROOT);
 
@@ -111,7 +112,7 @@ public class SnapshotStore {
 
     /** 判断快照 ID 是否符合规定的格式。 */
     public static boolean isValidSnapshotId(String id) {
-        return id != null && SNAPSHOT_ID.matcher(id).matches();
+        return id != null && SNAPSHOT_ID_PATTERN.matcher(id).matches();
     }
 
     /** Thrown when an epoch resolved in the index has no corresponding loaded manifest. */

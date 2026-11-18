@@ -61,7 +61,7 @@ public class FoldBackupCommand {
         private static int deleteSnapshot(CommandContext<CommandSourceStack> ctx, FoldBackupMod mod, String id) {
                 CommandSourceStack source = ctx.getSource();
                 SnapshotStore store = BackendGuard.requireSnapshotStore(source, mod);
-                if (store == null || !BackendGuard.requireValidSnapshotId(source, mod, id)) {
+                if (store == null) {
                         return 0;
                 }
                 Long epochSeconds = BackendGuard.resolveEpoch(source, mod, store, id);
@@ -230,46 +230,48 @@ public class FoldBackupCommand {
         private static int showInfo(CommandContext<CommandSourceStack> ctx, FoldBackupMod mod, String id) {
                 CommandSourceStack source = ctx.getSource();
                 SnapshotStore store = BackendGuard.requireSnapshotStore(source, mod);
-                if (store == null || !BackendGuard.requireValidSnapshotId(source, mod, id)) {
+                if (store == null) {
+                        return 0;
+                }
+                SnapshotManifest snapshot = loadSnapshotForInfo(
+                                store, id, BackendGuard.reporterFor(source, mod));
+                if (snapshot == null) {
                         return 0;
                 }
 
-                try {
-                        Long epochSeconds = store.resolveEpoch(id);
-                        SnapshotManifest snapshot;
-                        try {
-                                snapshot = store.requireSnapshot(epochSeconds, id);
-                        } catch (SnapshotStore.MissingSnapshotManifestException missing) {
-                                CommandFeedback.failure(source, mod, "foldbackup.command.info.not_found", id);
-                                return 0;
-                        }
-
-                        SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
-                        String date = dateFormat.format(Date.from(Instant.ofEpochSecond(snapshot.getEpochSeconds())));
-                        source.sendSuccess(() -> CommandFeedback.text(source, mod, "foldbackup.command.info.title",
-                                        snapshot.getSnapshotId()), false);
-                        source.sendSuccess(() -> CommandFeedback.text(source, mod, "foldbackup.command.info.time",
-                                        date), false);
-                        if (snapshot.getSummary() != null) {
-                                var summary = snapshot.getSummary();
-                                source.sendSuccess(() -> CommandFeedback.text(source, mod,
-                                                "foldbackup.command.info.regions",
-                                                summary.getRegionsTotal(), summary.getRegionsChanged()), false);
-                                source.sendSuccess(() -> CommandFeedback.text(source, mod,
-                                                "foldbackup.command.info.files",
-                                                summary.getExtraFilesTotal(), summary.getExtraFilesChanged()), false);
-                                source.sendSuccess(() -> CommandFeedback.text(source, mod,
-                                                "foldbackup.command.info.size",
-                                                summary.getTotalCompressedBytes() / (1024 * 1024),
-                                                summary.getTotalUncompressedBytes() / (1024 * 1024)), false);
-                                source.sendSuccess(() -> CommandFeedback.text(source, mod,
-                                                "foldbackup.command.info.new_data",
-                                                summary.getNewBlobBytes() / (1024 * 1024)), false);
-                        }
-                } catch (Exception exception) {
-                        FoldBackupMod.LOG.error("Failed to read snapshot info for {}", id, exception);
-                        CommandFeedback.failure(source, mod, "foldbackup.command.info.failed", id);
+                SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+                String date = dateFormat.format(Date.from(Instant.ofEpochSecond(snapshot.getEpochSeconds())));
+                source.sendSuccess(() -> CommandFeedback.text(source, mod, "foldbackup.command.info.title",
+                                snapshot.getSnapshotId()), false);
+                source.sendSuccess(() -> CommandFeedback.text(source, mod, "foldbackup.command.info.time",
+                                date), false);
+                if (snapshot.getSummary() != null) {
+                        var summary = snapshot.getSummary();
+                        source.sendSuccess(() -> CommandFeedback.text(source, mod,
+                                        "foldbackup.command.info.regions",
+                                        summary.getRegionsTotal(), summary.getRegionsChanged()), false);
+                        source.sendSuccess(() -> CommandFeedback.text(source, mod,
+                                        "foldbackup.command.info.files",
+                                        summary.getExtraFilesTotal(), summary.getExtraFilesChanged()), false);
+                        source.sendSuccess(() -> CommandFeedback.text(source, mod,
+                                        "foldbackup.command.info.size",
+                                        summary.getTotalCompressedBytes() / (1024 * 1024),
+                                        summary.getTotalUncompressedBytes() / (1024 * 1024)), false);
+                        source.sendSuccess(() -> CommandFeedback.text(source, mod,
+                                        "foldbackup.command.info.new_data",
+                                        summary.getNewBlobBytes() / (1024 * 1024)), false);
                 }
                 return Command.SINGLE_SUCCESS;
+        }
+
+        static SnapshotManifest loadSnapshotForInfo(
+                        SnapshotStore store, String id, BackendGuard.FailureReporter reporter) {
+                try {
+                        return BackendGuard.requireSnapshot(store, id, reporter);
+                } catch (Exception exception) {
+                        FoldBackupMod.LOG.error("Failed to read snapshot info for {}", id, exception);
+                        reporter.report("foldbackup.command.info.failed", id);
+                        return null;
+                }
         }
 }

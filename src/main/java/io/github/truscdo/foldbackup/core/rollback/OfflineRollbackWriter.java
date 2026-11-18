@@ -194,7 +194,10 @@ final class OfflineRollbackWriter implements AutoCloseable {
                     else Files.deleteIfExists(target);
                 } catch (IOException recovery) { failure.addSuppressed(recovery); preserve = true; }
             }
-            throw new IOException("Offline rollback failed; written files=" + changed
+            String reason = failure.getMessage() == null || failure.getMessage().isBlank()
+                    ? failure.getClass().getSimpleName()
+                    : failure.getClass().getSimpleName() + ": " + failure.getMessage();
+            throw new IOException("Offline rollback failed (" + reason + "); written files=" + changed
                     + (preserve ? "; recovery incomplete, retained files at " + stage : "; previous files restored"), failure);
         } finally {
             if (!preserve) {
