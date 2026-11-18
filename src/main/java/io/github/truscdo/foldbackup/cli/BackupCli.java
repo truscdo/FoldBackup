@@ -36,16 +36,20 @@ public class BackupCli {
     public static void runBootstrapped(String[] args) {
         LogUtil.setPlatform(LogUtil.Platform.CLI);
         try {
-            Invocation invocation = Invocation.parse(args);
-            if (invocation.command().isEmpty()) {
-                printUsage();
-                return;
-            }
-            dispatch(invocation);
+            execute(args);
         } catch (Exception e) {
             System.err.println("Error: " + e.getMessage());
             System.exit(1);
         }
+    }
+
+    static void execute(String... args) throws IOException {
+        Invocation invocation = Invocation.parse(args);
+        if (invocation.command().isEmpty()) {
+            printUsage();
+            return;
+        }
+        dispatch(invocation);
     }
 
     private static void dispatch(Invocation invocation) throws IOException {

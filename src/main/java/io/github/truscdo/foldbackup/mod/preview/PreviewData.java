@@ -15,6 +15,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.*;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.LevelHeightAccessor;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
@@ -50,7 +51,7 @@ public final class PreviewData {
     static final int SECTION_BLOCKS = 4096;
 
     /** 按当前世界高度分配以空气填充前的整列方块状态数组。 */
-    static BlockState[] allocateBlocks(ServerLevel level) {
+    static BlockState[] allocateBlocks(LevelHeightAccessor level) {
         return new BlockState[level.getHeight() * 256];
     }
 
@@ -80,7 +81,7 @@ public final class PreviewData {
         }
     }
 
-    public static State decode(Raw raw, ServerLevel level, ChunkPos pos) throws IOException {
+    public static State decode(Raw raw, LevelHeightAccessor level, ChunkPos pos) throws IOException {
         CompoundTag tag = raw.blocks;
         if (!tag.contains("xPos", Tag.TAG_INT) || !tag.contains("zPos", Tag.TAG_INT)
                 || tag.getInt("xPos") != pos.x || tag.getInt("zPos") != pos.z)

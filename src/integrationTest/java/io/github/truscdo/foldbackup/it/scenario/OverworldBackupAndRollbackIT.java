@@ -281,4 +281,84 @@ public class OverworldBackupAndRollbackIT extends IntegrationTestBase {
 
                 System.out.println("=== TEST PASSED ===");
         }
+
+        @Test
+        @DisplayName("Snapshot info, default latest chunk rollback, unloaded rejection, and async delete")
+        void testSnapshotInfoDeleteAndDefaultRollback() throws Exception {
+                final BlockPos INFO_POS = BlockPos.fromChunk(3, 0, 8, 64, 8);
+
+                System.out.println("--- Step 1: Force-load chunk [3, 0] and place gold_block ---");
+                rcon.sendCommand("/forceload add 48 0");
+                Thread.sleep(500);
+                world.setBlock(INFO_POS, "minecraft:gold_block");
+                String goldCheck = world.checkBlock(INFO_POS, "minecraft:gold_block");
+                assertTrue(goldCheck.isEmpty() || goldCheck.toLowerCase().contains("pass"),
+                                "gold_block should be placed. Got: " + goldCheck);
+
+                rcon.sendCommand("/save-all");
+                Thread.sleep(1000);
+                String snapshotId = doBackup();
+
+                System.out.println("--- Step 2: Verify /foldbackup info ---");
+                String info = rcon.sendCommand("/foldbackup info " + snapshotId);
+                assertTrue(info.contains(snapshotId), "info should include snapshotId: " + info);
+                assertTrue(info.contains("Regions:"), "info should include Regions: " + info);
+                assertTrue(info.contains("Extra files:"), "info should include Extra files: " + info);
+                assertTrue(info.contains("Size:"), "info should include Size: " + info);
+
+                String notFound = rcon.sendCommand("/foldbackup info S-19990101_000000");
+                assertTrue(notFound.contains("Snapshot not found"), "missing snapshot error expected: " + notFound);
+
+                String invalid = rcon.sendCommand("/foldbackup info invalid-id");
+                assertTrue(invalid.contains("Invalid snapshot ID"), "invalid ID error expected: " + invalid);
+
+                System.out.println("--- Step 3: Default latest rollback & unloaded chunk rejection ---");
+                world.setBlock(INFO_POS, "minecraft:diamond_block");
+                String diamondCheck = world.checkBlock(INFO_POS, "minecraft:diamond_block");
+                assertTrue(diamondCheck.isEmpty() || diamondCheck.toLowerCase().contains("pass"),
+                                "diamond_block should be placed. Got: " + diamondCheck);
+
+                String defaultRollback = rcon.sendCommand("/foldbackup rollback chunk 3 0");
+                assertTrue(defaultRollback.contains("restored") && defaultRollback.contains(snapshotId),
+                                "default rollback should restore from latest snapshot " + snapshotId + ": "
+                                                + defaultRollback);
+
+                String restoredCheck = world.checkBlock(INFO_POS, "minecraft:gold_block");
+                assertTrue(restoredCheck.isEmpty() || restoredCheck.toLowerCase().contains("pass"),
+                                "gold_block should be restored by default rollback. Got: " + restoredCheck);
+
+                String unloadedRollback = rcon.sendCommand("/foldbackup rollback chunk 999 999");
+                assertTrue(unloadedRollback.contains("not loaded"),
+                                "unloaded chunk rollback must be rejected: " + unloadedRollback);
+
+                System.out.println("--- Step 4: Verify /foldbackup delete async lifecycle ---");
+                String toDelete = doBackup();
+                assertFalse(toDelete.equals(snapshotId), "second backup should create a distinct snapshot");
+                assertTrue(rcon.sendCommand("/foldbackup list").contains(toDelete));
+
+                String deleteResponse = rcon.sendCommand("/foldbackup delete " + toDelete);
+                assertTrue(deleteResponse.contains("Deleting snapshot"),
+                                "delete should acknowledge start: " + deleteResponse);
+
+                long deadline = System.currentTimeMillis() + 15_000L;
+                boolean deleted = false;
+                String lastStatus = "";
+                String lastList = "";
+                while (System.currentTimeMillis() < deadline) {
+                        lastStatus = rcon.sendCommand("/foldbackup status");
+                        lastList = rcon.sendCommand("/foldbackup list");
+                        if (lastStatus.contains("Idle") && lastStatus.toLowerCase().contains("completed")
+                                        && !lastList.contains(toDelete)) {
+                                deleted = true;
+                                break;
+                        }
+                        Thread.sleep(500);
+                }
+                assertTrue(deleted, "Snapshot " + toDelete + " was not deleted within timeout. status=" + lastStatus
+                                + ", list=" + lastList);
+                assertTrue(lastList.contains(snapshotId), "Original snapshot should remain after deleting " + toDelete
+                                + ": " + lastList);
+
+                System.out.println("=== TEST PASSED ===");
+        }
 }
