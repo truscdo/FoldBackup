@@ -17,8 +17,32 @@ import java.util.Objects;
 public final class LrhdLayoutSource {
     private LrhdLayoutSource() {}
 
+    @FunctionalInterface
+    interface Opener {
+        InputStream open() throws IOException;
+    }
+
+    record Opened(InputStream stream, Opener opener) {}
+
     /** Opens the whole region at {@code (archive, offset, size)} in logical standard order. */
     public static InputStream open(Path archive, long offset, long size) throws IOException {
+        return openDetected(archive, offset, size).stream();
+    }
+
+    /** Opens a TAR entry, returning a logical standard-order stream. */
+    static InputStream open(TarIndex.Entry entry) throws IOException {
+        return open(entry.archive(), entry.offset(), entry.size());
+    }
+
+    static Opened openDetected(TarIndex.Entry entry) throws IOException {
+        return openDetected(entry.archive(), entry.offset(), entry.size());
+    }
+
+    /**
+     * Validates both layouts once on the initial open and returns a reopen handle pinned to
+     * the detected layout so subsequent passes skip redundant layout probing.
+     */
+    static Opened openDetected(Path archive, long offset, long size) throws IOException {
         FileChannel channel = FileChannel.open(archive, StandardOpenOption.READ);
         try {
             if (size < LrhdFormat.HEADER_SIZE + LrhdFormat.FOOTER_SIZE)
@@ -28,17 +52,34 @@ public final class LrhdLayoutSource {
             // An empty frame and index make both layouts byte-identical; treat that as standard.
             if (encoding != null && encoding[0] == 0 && encoding[1] == 0) encoding = null;
             if (standard == (encoding != null)) throw new IOException("Invalid or ambiguous LRHD layout");
-            if (standard) return identity(channel, offset, size);
-            return new ReorderedInput(channel, offset, size, encoding[0], encoding[1]);
+            if (standard) {
+                return new Opened(identity(channel, offset, size), () -> openStandard(archive, offset, size));
+            }
+            long indexLength = encoding[0];
+            long frameLength = encoding[1];
+            return new Opened(
+                    new ReorderedInput(channel, offset, size, indexLength, frameLength),
+                    () -> openEncoding(archive, offset, size, indexLength, frameLength));
         } catch (IOException | RuntimeException | Error e) {
             channel.close();
             throw e;
         }
     }
 
-    /** Opens a TAR entry, returning a logical standard-order stream. */
-    static InputStream open(TarIndex.Entry entry) throws IOException {
-        return open(entry.archive(), entry.offset(), entry.size());
+    private static InputStream openStandard(Path archive, long offset, long size) throws IOException {
+        FileChannel channel = FileChannel.open(archive, StandardOpenOption.READ);
+        try {
+            return identity(channel, offset, size);
+        } catch (IOException | RuntimeException | Error e) {
+            channel.close();
+            throw e;
+        }
+    }
+
+    private static InputStream openEncoding(Path archive, long offset, long size,
+            long indexLength, long frameLength) throws IOException {
+        FileChannel channel = FileChannel.open(archive, StandardOpenOption.READ);
+        return new ReorderedInput(channel, offset, size, indexLength, frameLength);
     }
 
     private static boolean validateStandard(FileChannel channel, long offset, long size) throws IOException {

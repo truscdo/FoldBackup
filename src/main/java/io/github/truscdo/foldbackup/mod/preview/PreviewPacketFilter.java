@@ -1,5 +1,6 @@
 package io.github.truscdo.foldbackup.mod.preview;
 
+import io.github.truscdo.foldbackup.core.format.ChunkCoordinates;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelOutboundHandlerAdapter;
@@ -96,6 +97,7 @@ final class PreviewPacketFilter extends ChannelOutboundHandlerAdapter {
     }
 
     private boolean contains(BlockPos pos) {
-        return (pos.getX() >> 4) == target.x && (pos.getZ() >> 4) == target.z;
+        return ChunkCoordinates.blockToChunk(pos.getX()) == target.x
+                && ChunkCoordinates.blockToChunk(pos.getZ()) == target.z;
     }
 }

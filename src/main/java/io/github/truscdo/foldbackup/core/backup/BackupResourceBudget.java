@@ -16,7 +16,7 @@ public final class BackupResourceBudget {
     private static final long MEBIBYTE = 1L << 20;
     private static final long AUTO_MEMORY_PERCENT = 20;
     private static final long AUTO_HEADROOM_PERCENT = 50;
-    private static final long MAX_BUFFER_BYTES = 64L << 20;
+    public static final long MAX_BUFFER_BYTES = 64L << 20;
 
     /** 官方推导值的余量：×1.3。官方公式不含 bt 族未公开的额外内存、JNI 侧对象与 GC 提交延迟。 */
     private static final long COMPRESS_MARGIN_NUMERATOR = 13;
@@ -108,6 +108,13 @@ public final class BackupResourceBudget {
             int availableProcessors, int requestedThreads) {
         int cpus = Math.max(1, availableProcessors);
         return quota(count, budgetBytes, reserveBytes, perWorkerBytes, cpus, cpus, requestedThreads);
+    }
+
+    /** 使用当前 JVM 可见处理器数的离线区域配额。 */
+    public static RegionQuota regionQuota(int count, long budgetBytes, long reserveBytes, long perWorkerBytes,
+            int requestedThreads) {
+        return regionQuota(count, budgetBytes, reserveBytes, perWorkerBytes,
+                Runtime.getRuntime().availableProcessors(), requestedThreads);
     }
 
     /**

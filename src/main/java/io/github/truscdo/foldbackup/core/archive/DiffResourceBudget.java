@@ -44,9 +44,9 @@ final class DiffResourceBudget {
      */
     static Limits pipeline(int requested, int level, long budget) {
         // 在途 chunk 缓冲恒为 1 份：目录工序同一时刻只持有一个变化区块；×2 仅为余量。
-        long chunkBytes = Math.max(1, Math.min(64L << 20, budget / 16));
+        long chunkBytes = Math.max(1, Math.min(BackupResourceBudget.MAX_BUFFER_BYTES, budget / 16));
         var quota = BackupResourceBudget.regionQuota(Integer.MAX_VALUE, budget, 2 * chunkBytes,
-                mtTaskBytes(level), Runtime.getRuntime().availableProcessors(), requested);
+                mtTaskBytes(level), requested);
         return new Limits(quota.workers(), chunkBytes);
     }
 

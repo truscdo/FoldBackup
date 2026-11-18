@@ -112,33 +112,7 @@ public class ArchiveCreator {
         Path tarPath = outputDir.resolve(tarName);
 
         // Build snapshot.bin metadata
-        ArchiveSnapshot meta = new ArchiveSnapshot();
-        meta.type = "full";
-        meta.sourceSnapshotId = sn.getSnapshotId();
-        meta.epoch = epochSeconds;
-        meta.world = sn.getWorldName();
-        meta.minecraftVersion = sn.getMinecraftVersion();
-        meta.worldVersion = sn.getWorldVersion();
-        if (sn.getTags() != null) {
-            meta.tags = sn.getTags();
-        }
-        meta.regionCount = sn.getRegions() != null ? sn.getRegions().size() : 0;
-        meta.chunkCount = 0;
-        if (sn.getExtraFiles() != null) for (FileEntry file : sn.getExtraFiles())
-            meta.files.add(new ArchiveSnapshot.FileInfo(file.getFilename(), file.getSizeUncompressed(),
-                    file.getSourceHash(), file.getSourceMetadata()));
-        progress.stage("Reading metadata", meta.regionCount);
-        if (sn.getRegions() != null) {
-            for (RegionEntry re : sn.getRegions()) {
-                progress.current(re.getFilename());
-                meta.regions.add(new ArchiveSnapshot.RegionInfo(re.getFilename(), re.getSizeUncompressed(),
-                        re.getContentHash(), re.getSourceMetadata()));
-                // Lightweight preheader read — chunk_count (i32 BE at offset 19)
-                byte[] prefix = blobStore.readPrefix(re.getBlobPath(), 23);
-                meta.chunkCount += readChunkCountFromLrh(prefix);
-                progress.done(re.getFilename());
-            }
-        }
+        ArchiveSnapshot meta = buildSnapshotMeta("full", sn, epochSeconds, 0L, progress);
 
         // One LRH object per distinct content identity; snapshot.bin maps every path to it.
         // The parallel work unit is a unique object, so the worker clamp must use this count
@@ -149,50 +123,37 @@ public class ArchiveCreator {
         var plan = planRegions(uniqueRegions, ArchiveDefaults.exportMemoryBudget(), compressionLevel, threads);
 
         // 原子提交：写 .tmp → 完成后 rename；失败删除 .tmp，不留半成品
-        Path tmpPath = tarPath.resolveSibling(tarPath.getFileName() + ".tmp");
-        refuseExistingArchive(tarPath, tmpPath);
-        try {
-            try (var channel = java.nio.channels.FileChannel.open(tmpPath, java.nio.file.StandardOpenOption.CREATE_NEW,
-                    java.nio.file.StandardOpenOption.WRITE);
-                    TarWriter tar = new TarWriter(channel)) {
-                // snapshot.bin first
-                tar.putEntry("snapshot.bin", ArchiveSnapshotCodec.encode(meta));
+        return writeArchiveAtomically(tarPath, tarName, progress, tmpPath -> writeTar(tmpPath, tar -> {
+            // snapshot.bin first
+            tar.putEntry("snapshot.bin", ArchiveSnapshotCodec.encode(meta));
 
-                progress.stage(recompress ? "Recompressing regions" : "Copying regions", uniqueRegions.size());
-                if (!uniqueRegions.isEmpty()) {
-                    if (recompress && plan.quota().workers() > 1) {
-                        exportRegionsParallel(tar, uniqueRegions, plan.quota(), plan.bufferBytes(),
-                                compressionLevel, progress);
-                    } else if (recompress) {
-                        for (RegionEntry re : uniqueRegions) {
-                            writeRegionObject(re, progress, object -> tar.putEntry(object,
-                                    out -> LrhFormat.recompress(
-                                            blobStore.getRootDir().resolve(re.getBlobPath()), out, compressionLevel)));
-                        }
-                    } else {
-                        for (RegionEntry re : uniqueRegions) {
-                            writeRegionObject(re, progress,
-                                    object -> copyBlobEntry(tar, object, re.getBlobPath()));
-                        }
+            progress.stage(recompress ? "Recompressing regions" : "Copying regions", uniqueRegions.size());
+            if (!uniqueRegions.isEmpty()) {
+                if (recompress && plan.quota().workers() > 1) {
+                    exportRegionsParallel(tar, uniqueRegions, plan.quota(), plan.bufferBytes(),
+                            compressionLevel, progress);
+                } else if (recompress) {
+                    for (RegionEntry re : uniqueRegions) {
+                        writeRegionObject(re, progress, object -> tar.putEntry(object,
+                                out -> LrhFormat.recompress(
+                                        blobStore.getRootDir().resolve(re.getBlobPath()), out, compressionLevel)));
+                    }
+                } else {
+                    for (RegionEntry re : uniqueRegions) {
+                        writeRegionObject(re, progress,
+                                object -> copyBlobEntry(tar, object, re.getBlobPath()));
                     }
                 }
-
-                // Store each distinct compressed file payload once.
-                progress.stage("Copying files", sn.getExtraFiles() == null ? 0 : sn.getExtraFiles().size());
-                if (sn.getExtraFiles() != null) {
-                    writeFileObjects(tar, sn.getExtraFiles(), true, progress);
-                }
-                progress.stage("Finalizing archive", 1);
-                progress.current(tarName);
             }
-            Files.move(tmpPath, tarPath);
-            progress.done(tarName);
-        } catch (IOException | RuntimeException | Error e) {
-            try { Files.deleteIfExists(tmpPath); }
-            catch (IOException cleanup) { e.addSuppressed(cleanup); }
-            throw e;
-        }
-        return tarPath;
+
+            // Store each distinct compressed file payload once.
+            progress.stage("Copying files", sn.getExtraFiles() == null ? 0 : sn.getExtraFiles().size());
+            if (sn.getExtraFiles() != null) {
+                writeFileObjects(tar, sn.getExtraFiles(), true, progress);
+            }
+            progress.stage("Finalizing archive", 1);
+            progress.current(tarName);
+        }));
     }
 
     // ── Differential archive creation ──
@@ -246,46 +207,16 @@ public class ArchiveCreator {
         Path tarPath = outputDir.resolve(tarName);
 
         // Build snapshot.bin metadata
-        ArchiveSnapshot meta = new ArchiveSnapshot();
-        meta.type = "diff";
-        meta.sourceSnapshotId = diff.getSnapshotId();
-        meta.epoch = diffEpochSeconds;
-        meta.baseEpoch = baseEpochSeconds;
-        meta.world = diff.getWorldName();
-        meta.minecraftVersion = diff.getMinecraftVersion();
-        meta.worldVersion = diff.getWorldVersion();
-        if (diff.getTags() != null) {
-            meta.tags = diff.getTags();
-        }
-        meta.regionCount = diff.getRegions() != null ? diff.getRegions().size() : 0;
-        meta.chunkCount = 0;
-        if (diff.getExtraFiles() != null) for (FileEntry file : diff.getExtraFiles())
-            meta.files.add(new ArchiveSnapshot.FileInfo(file.getFilename(), file.getSizeUncompressed(),
-                    file.getSourceHash(), file.getSourceMetadata()));
-        progress.stage("Reading metadata", meta.regionCount);
-        if (diff.getRegions() != null) {
-            for (RegionEntry re : diff.getRegions()) {
-                progress.current(re.getFilename());
-                meta.regions.add(new ArchiveSnapshot.RegionInfo(re.getFilename(), re.getSizeUncompressed(),
-                        re.getContentHash(), re.getSourceMetadata()));
-                byte[] prefix = blobStore.readPrefix(re.getBlobPath(), 23);
-                meta.chunkCount += readChunkCountFromLrh(prefix);
-                progress.done(re.getFilename());
-            }
-        }
+        ArchiveSnapshot meta = buildSnapshotMeta("diff", diff, diffEpochSeconds, baseEpochSeconds, progress);
 
         // 原子提交：写 .tmp → 完成后 rename；失败删除 .tmp
-        Path tmpPath = tarPath.resolveSibling(tarPath.getFileName() + ".tmp");
-        refuseExistingArchive(tarPath, tmpPath);
-        try {
+        return writeArchiveAtomically(tarPath, tarName, progress, tmpPath -> {
             try (var scratch = new ArchiveTemporaryDirectory();
                     var result = new StreamingDiff(blobStore, scratch.path)) {
                 result.compare(base, diff, progress);
                 progress.stage("Writing archive", 1 + result.diffRegionCount()
                         + (result.filesBin == null ? 0 : 1) + result.fileObjects.size());
-                try (var channel = java.nio.channels.FileChannel.open(tmpPath, java.nio.file.StandardOpenOption.CREATE_NEW,
-                        java.nio.file.StandardOpenOption.WRITE);
-                        TarWriter tar = new TarWriter(channel)) {
+                writeTar(tmpPath, tar -> {
                     progress.current("snapshot.bin");
                     tar.putEntry("snapshot.bin", ArchiveSnapshotCodec.encode(meta));
                     progress.done("snapshot.bin");
@@ -304,8 +235,62 @@ public class ArchiveCreator {
                     writeFileObjects(tar, result.fileObjects, false, progress);
                     progress.stage("Finalizing archive", 1);
                     progress.current(tarName);
-                }
+                });
             }
+        });
+    }
+
+    // ── helpers ──
+
+    @FunctionalInterface
+    private interface TempArchiveProducer {
+        void write(Path tmpPath) throws IOException;
+    }
+
+    @FunctionalInterface
+    private interface TarBodyWriter {
+        void write(TarWriter tar) throws IOException;
+    }
+
+    private ArchiveSnapshot buildSnapshotMeta(String type, SnapshotManifest sn, long epochSeconds,
+            long baseEpochSeconds, ProgressTracker progress) throws IOException {
+        ArchiveSnapshot meta = new ArchiveSnapshot();
+        meta.type = type;
+        meta.sourceSnapshotId = sn.getSnapshotId();
+        meta.epoch = epochSeconds;
+        meta.baseEpoch = baseEpochSeconds;
+        meta.world = sn.getWorldName();
+        meta.minecraftVersion = sn.getMinecraftVersion();
+        meta.worldVersion = sn.getWorldVersion();
+        if (sn.getTags() != null) {
+            meta.tags = sn.getTags();
+        }
+        meta.regionCount = sn.getRegions() != null ? sn.getRegions().size() : 0;
+        meta.chunkCount = 0;
+        if (sn.getExtraFiles() != null) for (FileEntry file : sn.getExtraFiles())
+            meta.files.add(new ArchiveSnapshot.FileInfo(file.getFilename(), file.getSizeUncompressed(),
+                    file.getSourceHash(), file.getSourceMetadata()));
+        progress.stage("Reading metadata", meta.regionCount);
+        if (sn.getRegions() != null) {
+            for (RegionEntry re : sn.getRegions()) {
+                progress.current(re.getFilename());
+                meta.regions.add(new ArchiveSnapshot.RegionInfo(re.getFilename(), re.getSizeUncompressed(),
+                        re.getContentHash(), re.getSourceMetadata()));
+                // Lightweight preheader read — chunk_count (i32 BE at offset 19)
+                byte[] prefix = blobStore.readPrefix(re.getBlobPath(), 23);
+                meta.chunkCount += readChunkCountFromLrh(prefix);
+                progress.done(re.getFilename());
+            }
+        }
+        return meta;
+    }
+
+    private static Path writeArchiveAtomically(Path tarPath, String tarName, ProgressTracker progress,
+            TempArchiveProducer producer) throws IOException {
+        Path tmpPath = tarPath.resolveSibling(tarPath.getFileName() + ".tmp");
+        refuseExistingArchive(tarPath, tmpPath);
+        try {
+            producer.write(tmpPath);
             Files.move(tmpPath, tarPath);
             progress.done(tarName);
         } catch (IOException | RuntimeException | Error e) {
@@ -316,7 +301,13 @@ public class ArchiveCreator {
         return tarPath;
     }
 
-    // ── helpers ──
+    private static void writeTar(Path tmpPath, TarBodyWriter writer) throws IOException {
+        try (var channel = java.nio.channels.FileChannel.open(tmpPath, java.nio.file.StandardOpenOption.CREATE_NEW,
+                java.nio.file.StandardOpenOption.WRITE);
+                TarWriter tar = new TarWriter(channel)) {
+            writer.write(tar);
+        }
+    }
 
     private static void refuseExistingArchive(Path tarPath, Path tmpPath) throws IOException {
         if (Files.exists(tarPath, LinkOption.NOFOLLOW_LINKS))
@@ -370,8 +361,7 @@ public class ArchiveCreator {
         int sourceFrameLevel = ArchiveTasks.maxSourceFrameLevel(
                 regions.stream().map(re -> blobStore.getRootDir().resolve(re.getBlobPath())).toList());
         var quota = BackupResourceBudget.regionQuota(regions.size(), budgetBytes, bufferBytes,
-                BackupResourceBudget.compressAndDecodeTaskBytes(level, sourceFrameLevel),
-                Runtime.getRuntime().availableProcessors(), threads);
+                BackupResourceBudget.compressAndDecodeTaskBytes(level, sourceFrameLevel), threads);
         return new RegionPlan(quota, bufferBytes);
     }
 

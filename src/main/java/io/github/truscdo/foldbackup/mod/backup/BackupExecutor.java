@@ -195,16 +195,19 @@ public class BackupExecutor {
             // 也避免每刻在 tick 路径上读配置。放在暂停之前读，
             // 读失败时世界保存状态还没有被改动。
             run.stallMillis = savePauseTimeoutMillis.getAsLong();
-            // 先强制刷盘，再禁用保存：noSave=true 的 level 会被
-            // saveAllChunks 跳过，顺序反了会让强制保存变成空操作。
-            worldAccessor.saveAll(true);
-            worldAccessor.disableSaving();
+            prepareWorldForBackup();
             run.pause.begin(System.currentTimeMillis());
             CompletableFuture.supplyAsync(() -> runBackupOnWorker(run), backupExecutor)
                     .whenComplete((ok, ex) -> mainThread.execute(() -> finishBackup(run, ok, ex)));
         } catch (Exception e) {
             finishBackup(run, BackupResult.FAILED, e);
         }
+    }
+
+    /** 先强制刷盘再禁用保存：noSave=true 的维度会被 saveAllChunks 跳过，顺序不可颠倒。 */
+    private void prepareWorldForBackup() {
+        worldAccessor.saveAll(true);
+        worldAccessor.disableSaving();
     }
 
     /** 备份线程：执行扫描与提交，进度回送给 {@link #onStep}。 */
@@ -342,9 +345,7 @@ public class BackupExecutor {
         if (run == null)
             return BackupResult.ALREADY_RUNNING;
         try {
-            // 同上：先刷盘，再禁用保存。
-            worldAccessor.saveAll(true);
-            worldAccessor.disableSaving();
+            prepareWorldForBackup();
             coordinator.runBackup(run.status, step -> onBlockingStep(step));
             finishBackup(run, BackupResult.SUCCESS, null);
         } catch (Exception e) {
@@ -380,24 +381,24 @@ public class BackupExecutor {
     }
 
     private void abortStalled(Run run, long nowMillis) {
-        if (!run.finished.compareAndSet(false, true))
-            return;
         long stalledSeconds = Math.max(0L, nowMillis - run.pause.lastActivityMillis()) / 1000L;
-        LOG.error("Backup made no progress for {}s while world saving was suspended; "
-                + "restoring saving and aborting the run (last step: {})",
-                stalledSeconds, run.lastStep == null ? "none" : run.lastStep.phase());
-        // 先恢复保存，再处理任务与线程状态：数据安全优先于状态一致性。
-        releaseRun(run, "Backup stalled: no progress for " + stalledSeconds + "s",
-                "after aborting a stalled backup");
-        try {
-            playerWarning.send("foldbackup.backup.stalled", stalledSeconds);
-        } catch (RuntimeException e) {
-            LOG.warn("Unable to warn players about the stalled backup", e);
-        }
-        stopWorker(run);
-        if (scheduler != null)
-            scheduler.markAttemptFailed();
-        run.future.complete(BackupResult.FAILED);
+        abortRun(run,
+                () -> LOG.error("Backup made no progress for {}s while world saving was suspended; "
+                        + "restoring saving and aborting the run (last step: {})",
+                        stalledSeconds, run.lastStep == null ? "none" : run.lastStep.phase()),
+                "Backup stalled: no progress for " + stalledSeconds + "s",
+                "after aborting a stalled backup",
+                () -> {
+                    try {
+                        playerWarning.send("foldbackup.backup.stalled", stalledSeconds);
+                    } catch (RuntimeException e) {
+                        LOG.warn("Unable to warn players about the stalled backup", e);
+                    }
+                },
+                () -> {
+                    if (scheduler != null)
+                        scheduler.markAttemptFailed();
+                });
     }
 
     /**
@@ -410,11 +411,26 @@ public class BackupExecutor {
         Run run = currentRun.get();
         if (run == null)
             return;
+        abortRun(run,
+                () -> LOG.info("Cancelling the running backup because the world runtime is shutting down"),
+                "Backup cancelled: world runtime shutting down",
+                "while shutting down the world runtime",
+                null,
+                null);
+    }
+
+    private void abortRun(Run run, Runnable logAbort, String statusMessage, String releaseContext,
+            Runnable beforeStopWorker, Runnable afterStopWorker) {
         if (!run.finished.compareAndSet(false, true))
             return;
-        LOG.info("Cancelling the running backup because the world runtime is shutting down");
-        releaseRun(run, "Backup cancelled: world runtime shutting down", "while shutting down the world runtime");
+        logAbort.run();
+        // 先恢复保存，再处理任务与线程状态：数据安全优先于状态一致性。
+        releaseRun(run, statusMessage, releaseContext);
+        if (beforeStopWorker != null)
+            beforeStopWorker.run();
         stopWorker(run);
+        if (afterStopWorker != null)
+            afterStopWorker.run();
         run.future.complete(BackupResult.FAILED);
     }
 

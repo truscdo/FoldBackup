@@ -1,8 +1,8 @@
 package io.github.truscdo.foldbackup.mod.command;
 
+import io.github.truscdo.foldbackup.core.BackupExporter;
 import io.github.truscdo.foldbackup.core.FormatUtil;
 import io.github.truscdo.foldbackup.core.store.SnapshotManifest;
-import io.github.truscdo.foldbackup.core.store.SnapshotReclamationEstimator;
 import io.github.truscdo.foldbackup.core.store.SnapshotStore;
 import io.github.truscdo.foldbackup.core.task.TaskStatus;
 import io.github.truscdo.foldbackup.core.task.TaskType;
@@ -21,9 +21,7 @@ import net.minecraft.server.level.ServerPlayer;
 import java.text.SimpleDateFormat;
 import java.time.Instant;
 import java.util.Date;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 /** {@code /foldbackup} command for backup management. */
 public class FoldBackupCommand {
@@ -154,49 +152,27 @@ public class FoldBackupCommand {
                         return 0;
                 }
                 try {
-                        List<SnapshotManifest> snapshots = store.loadAllSnapshots();
+                        List<BackupExporter.SnapshotInfo> snapshots = new BackupExporter(store)
+                                        .listSnapshotsWithCumulativeSpace();
                         if (snapshots.isEmpty()) {
                                 source.sendSuccess(() -> CommandFeedback.text(source, mod,
                                                 "foldbackup.command.list.empty"), false);
                                 return 0;
                         }
 
-                        Map<Long, Long> cumulativeSpaceByEpoch = new HashMap<>();
-                        for (SnapshotReclamationEstimator.DeletionEstimate estimate : SnapshotReclamationEstimator
-                                        .evaluateDeletionChain(snapshots)) {
-                                cumulativeSpaceByEpoch.put(estimate.epochSeconds(),
-                                                estimate.cumulativeReclaimedBytes());
-                        }
-
                         source.sendSuccess(() -> CommandFeedback.text(source, mod, "foldbackup.command.list.title",
                                         snapshots.size()), false);
                         source.sendSuccess(() -> CommandFeedback.text(source, mod, "foldbackup.command.list.header"),
                                         false);
-                        SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
-                        for (SnapshotManifest snapshot : snapshots) {
-                                String date = dateFormat
-                                                .format(Date.from(Instant.ofEpochSecond(snapshot.getEpochSeconds())));
-                                String regions = "-";
-                                String files = "-";
-                                String compressed = "-";
-                                String uncompressed = "-";
-                                String cumulativeSpace = FormatUtil.formatSize(
-                                                cumulativeSpaceByEpoch.getOrDefault(snapshot.getEpochSeconds(), 0L));
-                                if (snapshot.getSummary() != null) {
-                                        var summary = snapshot.getSummary();
-                                        regions = String.valueOf(summary.getRegionsTotal());
-                                        files = String.valueOf(summary.getExtraFilesTotal());
-                                        compressed = FormatUtil.formatSize(summary.getTotalCompressedBytes());
-                                        uncompressed = FormatUtil.formatSize(summary.getTotalUncompressedBytes());
-                                }
-                                String rowRegions = regions;
-                                String rowFiles = files;
-                                String rowCompressed = compressed;
-                                String rowUncompressed = uncompressed;
-                                String rowCumulativeSpace = cumulativeSpace;
+                        for (BackupExporter.SnapshotInfo snapshot : snapshots) {
+                                String rowRegions = String.valueOf(snapshot.regions);
+                                String rowFiles = String.valueOf(snapshot.files);
+                                String rowCompressed = FormatUtil.formatSize(snapshot.compressedBytes);
+                                String rowUncompressed = FormatUtil.formatSize(snapshot.uncompressedBytes);
+                                String rowCumulativeSpace = FormatUtil.formatSize(snapshot.cumulativeSpaceBytes);
                                 source.sendSuccess(() -> CommandFeedback.text(source, mod,
                                                 "foldbackup.command.list.row",
-                                                snapshot.getSnapshotId(), date, rowRegions, rowFiles,
+                                                snapshot.id, snapshot.date, rowRegions, rowFiles,
                                                 rowCompressed, rowUncompressed, rowCumulativeSpace), false);
                         }
                 } catch (Exception exception) {
@@ -260,8 +236,10 @@ public class FoldBackupCommand {
 
                 try {
                         Long epochSeconds = store.resolveEpoch(id);
-                        SnapshotManifest snapshot = store.loadSnapshot(epochSeconds);
-                        if (snapshot == null) {
+                        SnapshotManifest snapshot;
+                        try {
+                                snapshot = store.requireSnapshot(epochSeconds, id);
+                        } catch (SnapshotStore.MissingSnapshotManifestException missing) {
                                 CommandFeedback.failure(source, mod, "foldbackup.command.info.not_found", id);
                                 return 0;
                         }

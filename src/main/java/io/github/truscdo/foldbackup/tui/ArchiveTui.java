@@ -36,44 +36,14 @@ public class ArchiveTui {
             }
 
             String targetId = selected.target().meta().sourceSnapshotId;
-
-            // 0 returns to selecting the archive.
-            while (true) {
-                System.out.println();
-                Path defaultOutput = ArchiveDefaults.worldExport(targetId);
-                String pathStr = prompt.readLine("World files directory (Enter for default: "
-                        + defaultOutput + ", 0 = back): ");
-                if (pathStr == null) {
-                    return;
-                }
-                pathStr = pathStr.trim();
-                if ("0".equals(pathStr)) {
-                    break;
-                }
-
-                Path output;
-                try {
-                    output = pathStr.isEmpty() ? defaultOutput : Path.of(pathStr);
-                } catch (java.nio.file.InvalidPathException e) {
-                    System.out.println("Invalid output path: " + e.getMessage() + "\n");
-                    continue;
-                }
-
-                var flow = exportTo(selected, output);
-                if (flow == RestoreInteraction.Flow.CANCEL) {
-                    System.out.println("Restore cancelled.\n");
-                    return;
-                }
-                if (flow == RestoreInteraction.Flow.DONE) {
-                    return;
-                }
+            Path defaultOutput = ArchiveDefaults.worldExport(targetId);
+            var flow = RestoreInteraction.runFromPathPrompt(prompt, "World files directory", defaultOutput,
+                    () -> ArchiveRestoreSource.open(archiveRoot, selected.target().tar()),
+                    ArchiveDefaults.RESTORE_LEVEL, "Restoring...", "Restore cancelled.", "Restore failed: ");
+            if (flow != RestoreInteraction.Flow.BACK_TO_PATH) {
+                return;
             }
         }
-    }
-
-    private RestoreInteraction.Flow exportTo(SelectedArchive selected, Path output) {
-        return RestoreInteraction.run(prompt, () -> ArchiveRestoreSource.open(archiveRoot, selected.target().tar()),
-                output, ArchiveDefaults.RESTORE_LEVEL, "Restoring...", "Restore failed: ");
     }
 
     void verifyArchives() {

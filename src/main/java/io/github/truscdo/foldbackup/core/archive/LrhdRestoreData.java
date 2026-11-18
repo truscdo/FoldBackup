@@ -18,21 +18,20 @@ final class LrhdRestoreData implements AutoCloseable {
 
     final List<LrhdFormat.RegionIndex> regions;
     private final LrhdFormat.Index index;
-    private final Opener opener;
+    private final LrhdLayoutSource.Opener opener;
     private InputStream input;
     private LrhdFormat.DataReader data;
     private int nextRegion;
 
-    @FunctionalInterface private interface Opener { InputStream open() throws IOException; }
-
-    private LrhdRestoreData(LrhdFormat.Index index, Opener opener) {
+    private LrhdRestoreData(LrhdFormat.Index index, LrhdLayoutSource.Opener opener) {
         this.index = index; this.opener = opener;
         regions = index.regions();
     }
 
     static LrhdRestoreData read(TarIndex.Entry entry) throws IOException {
-        try (var in = LrhdLayoutSource.open(entry)) {
-            return new LrhdRestoreData(LrhdFormat.readIndex(in, entry.size()), () -> LrhdLayoutSource.open(entry));
+        var detected = LrhdLayoutSource.openDetected(entry);
+        try (var in = detected.stream()) {
+            return new LrhdRestoreData(LrhdFormat.readIndex(in, entry.size()), detected.opener());
         }
     }
 
@@ -86,7 +85,7 @@ final class LrhdRestoreData implements AutoCloseable {
                 throw new IOException("Missing or mismatched staged LRHD region: " + rx + "," + rz);
             var selected = new LrhdFormat.ChunkIndex[1024];
             for (var chunk : staged.index().chunks)
-                selected[(chunk.cz & 31) * 32 + (chunk.cx & 31)] = chunk;
+                selected[ChunkCoordinates.slotIndex(chunk.cx, chunk.cz)] = chunk;
             try (InputStream payload = staged.payload() == null ? null
                     : IoBudget.call(() -> Files.newInputStream(staged.payload()))) {
                 base.read(new RegionStream.Consumer() {

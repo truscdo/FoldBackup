@@ -32,8 +32,8 @@ public final class AnvilFormat {
 
     /** Returns the external chunk file name for a region slot in grid order. */
     public static String externalChunkFileName(int regionX, int regionZ, int slot) {
-        int chunkX = regionX * 32 + slot % 32;
-        int chunkZ = regionZ * 32 + slot / 32;
+        int chunkX = ChunkCoordinates.chunkX(regionX, slot);
+        int chunkZ = ChunkCoordinates.chunkZ(regionZ, slot);
         return "c." + chunkX + "." + chunkZ + ".mcc";
     }
 }

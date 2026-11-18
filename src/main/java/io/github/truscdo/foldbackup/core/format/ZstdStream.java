@@ -10,14 +10,10 @@ public final class ZstdStream {
     public record Summary(String hash, long length) {}
     public static Summary write(InputStream input, OutputStream output, int level) throws IOException {
         var hash = new StreamingHash.Hash128();
-        byte[] buffer = new byte[65536];
-        long length = 0;
+        long length;
         OutputStream nonClosing = StreamIo.nonClosingOutput(output);
         try (var zstd = new ZstdOutputStream(nonClosing, level)) {
-            for (int n; (n = input.read(buffer)) != -1;) {
-                StreamIo.checkCancelled(); hash.update(buffer, 0, n); zstd.write(buffer, 0, n);
-                length = Math.addExact(length, n);
-            }
+            length = StreamingHash.copy(input, zstd, hash);
         }
         return new Summary(hash.fileHex(), length);
     }

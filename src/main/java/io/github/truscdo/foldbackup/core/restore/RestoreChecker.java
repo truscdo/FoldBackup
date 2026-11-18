@@ -259,20 +259,20 @@ public final class RestoreChecker {
         Map<String, List<String>> filesByDirectory = new HashMap<>();
         for (Path file : targetFiles) {
             String path = relative(root, file);
-            filesByDirectory.computeIfAbsent(parentOf(path), key -> new ArrayList<>()).add(path);
+            filesByDirectory.computeIfAbsent(PathTreeUtils.parentOf(path), key -> new ArrayList<>()).add(path);
         }
 
         Set<String> blocked = new HashSet<>();
-        for (Path other : otherEntries) blocked.add(parentOf(relative(root, other)));
+        for (Path other : otherEntries) blocked.add(PathTreeUtils.parentOf(relative(root, other)));
 
         Map<String, List<String>> childrenByDirectory = new HashMap<>();
         List<String> directories = new ArrayList<>(targetDirectories.size());
         for (Path directory : targetDirectories) {
             String path = relative(root, directory);
             directories.add(path);
-            childrenByDirectory.computeIfAbsent(parentOf(path), key -> new ArrayList<>()).add(path);
+            childrenByDirectory.computeIfAbsent(PathTreeUtils.parentOf(path), key -> new ArrayList<>()).add(path);
         }
-        directories.sort((left, right) -> Integer.compare(depth(right), depth(left)));
+        directories.sort((left, right) -> Integer.compare(PathTreeUtils.depth(right), PathTreeUtils.depth(left)));
 
         Map<String, Boolean> emptyAfter = new HashMap<>();
         for (String directory : directories) {
@@ -301,18 +301,5 @@ public final class RestoreChecker {
             if (Boolean.TRUE.equals(emptyAfter.get(directory))) emptied.add(directory);
         }
         return emptied;
-    }
-
-    private static int depth(String path) {
-        if (path.isEmpty()) return 0;
-        int depth = 1;
-        for (int i = 0; i < path.length(); i++) if (path.charAt(i) == '/') depth++;
-        return depth;
-    }
-
-    private static String parentOf(String directory) {
-        if (directory.isEmpty()) return null;
-        int slash = directory.lastIndexOf('/');
-        return slash < 0 ? "" : directory.substring(0, slash);
     }
 }

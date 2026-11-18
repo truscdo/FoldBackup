@@ -70,7 +70,7 @@ public final class LrhdFormat {
         public String hash = "";
         public boolean deleted;
 
-        public int slotIndex() { return (cz & 31) * 32 + (cx & 31); }
+        public int slotIndex() { return ChunkCoordinates.slotIndex(cx, cz); }
     }
 
     public static int compareRegions(int rx, int rz, int otherX, int otherZ) {
@@ -96,7 +96,7 @@ public final class LrhdFormat {
 
     static int chunkX(int rx, int slot) throws IOException {
         try {
-            return Math.addExact(Math.multiplyExact(rx, 32), slot % 32);
+            return ChunkCoordinates.chunkXExact(rx, slot);
         } catch (ArithmeticException e) {
             throw new IOException("LRHD chunk X coordinate overflow", e);
         }
@@ -104,7 +104,7 @@ public final class LrhdFormat {
 
     static int chunkZ(int rz, int slot) throws IOException {
         try {
-            return Math.addExact(Math.multiplyExact(rz, 32), slot / 32);
+            return ChunkCoordinates.chunkZExact(rz, slot);
         } catch (ArithmeticException e) {
             throw new IOException("LRHD chunk Z coordinate overflow", e);
         }
@@ -356,7 +356,8 @@ public final class LrhdFormat {
                     int slot = chunk.slotIndex();
                     if (slot <= previousSlot || slot >= 1024)
                         throw new IOException("LRHD chunk plan is not strictly sorted");
-                    if ((chunk.cx >> 5) != region.rx || (chunk.cz >> 5) != region.rz)
+                    if (ChunkCoordinates.chunkToRegion(chunk.cx) != region.rx
+                            || ChunkCoordinates.chunkToRegion(chunk.cz) != region.rz)
                         throw new IOException("LRHD chunk plan coordinate mismatch");
                     validateTimestamp(chunk.ts);
                     if (chunk.deleted) {

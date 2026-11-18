@@ -1,5 +1,6 @@
 package io.github.truscdo.foldbackup.core.restore;
 
+import io.github.truscdo.foldbackup.core.FileIo;
 import io.github.truscdo.foldbackup.core.HashUtil;
 import io.github.truscdo.foldbackup.core.ProgressListener;
 import io.github.truscdo.foldbackup.core.ProgressTracker;
@@ -12,14 +13,9 @@ import io.github.truscdo.foldbackup.core.store.SourceMetadata;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.nio.file.AccessDeniedException;
-import java.nio.file.DirectoryNotEmptyException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.FileTime;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -68,19 +64,14 @@ public final class RestoreWriter {
                 "." + destination.getFileName() + ".", ".foldbackup");
         try {
             var hash = new StreamingHash.Hash128();
-            long total = 0;
-            byte[] buffer = new byte[65536];
+            long total;
             try (InputStream input = source.openFile(entry); OutputStream output = Files.newOutputStream(temp)) {
-                for (int n; (n = input.read(buffer)) != -1; ) {
-                    output.write(buffer, 0, n);
-                    hash.update(buffer, 0, n);
-                    total += n;
-                }
+                total = StreamingHash.copy(input, output, hash);
             }
             if (total != entry.sizeUncompressed() || !entry.contentHash().equals(hash.fileHex()))
                 throw new IOException("Restored file identity mismatch: " + entry.path());
             applyRecordedTime(temp, entry);
-            move(temp, destination);
+            FileIo.moveReplacing(temp, destination);
         } finally {
             Files.deleteIfExists(temp);
         }
@@ -97,14 +88,14 @@ public final class RestoreWriter {
             McaStreamWriter.write(staged, entry.regionX(), entry.regionZ(), recordedTime(entry), compressionLevel,
                     verified(entry.path(), entry.contentHash(), source));
 
-            move(staged, destination);
+            FileIo.moveReplacing(staged, destination);
             Set<String> produced = listMcc(staging);
-            for (String name : produced) move(staging.resolve(name), directory.resolve(name));
+            for (String name : produced) FileIo.moveReplacing(staging.resolve(name), directory.resolve(name));
             for (Path mcc : McaHasher.findMccFilesForRegion(directory, entry.regionX(), entry.regionZ())) {
                 if (!produced.contains(mcc.getFileName().toString())) Files.deleteIfExists(mcc);
             }
         } finally {
-            deleteTree(staging);
+            FileIo.deleteTree(staging);
         }
     }
 
@@ -162,50 +153,6 @@ public final class RestoreWriter {
                 Files.setLastModifiedTime(file, FileTime.fromMillis(recorded.modifiedMillis()));
                 return;
             }
-        }
-    }
-
-    private static void move(Path source, Path destination) throws IOException {
-        try {
-            Files.move(source, destination, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-        } catch (java.nio.file.AtomicMoveNotSupportedException e) {
-            Files.move(source, destination, StandardCopyOption.REPLACE_EXISTING);
-        }
-    }
-
-    private static void deleteTree(Path root) throws IOException {
-        if (!Files.exists(root)) return;
-        List<Path> paths = new ArrayList<>();
-        try (var walk = Files.walk(root)) {
-            walk.forEach(paths::add);
-        } // Close enumeration handles before deleting on Windows.
-        paths.sort(java.util.Comparator.reverseOrder());
-        for (Path path : paths) delete(path);
-    }
-
-    /**
-     * Windows can briefly report a directory emptied by a move as not empty, or deny access while a
-     * scan still holds it. Bounded retries keep that transient state from failing a restore whose
-     * content has already landed; cleanup still runs to completion when the thread is interrupted.
-     */
-    private static void delete(Path path) throws IOException {
-        boolean interrupted = Thread.interrupted();
-        try {
-            for (int attempt = 0; ; attempt++) {
-                try {
-                    Files.deleteIfExists(path);
-                    return;
-                } catch (DirectoryNotEmptyException | AccessDeniedException e) {
-                    if (attempt == 19) throw e;
-                    try {
-                        Thread.sleep(25);
-                    } catch (InterruptedException cancellation) {
-                        interrupted = true;
-                    }
-                }
-            }
-        } finally {
-            if (interrupted) Thread.currentThread().interrupt();
         }
     }
 }

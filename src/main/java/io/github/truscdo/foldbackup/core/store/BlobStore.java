@@ -110,16 +110,35 @@ public class BlobStore {
         }
     }
 
+    private WriteSpaceBudget activeOrFallbackBudget() throws IOException {
+        WriteSpaceBudget active = writeBudget;
+        if (active != null) return active;
+        Path index = rootDir.resolve(RepositoryLayout.INDEX_FILE);
+        return new WriteSpaceBudget(rootDir, Files.exists(index) ? Files.size(index) : 0, 0);
+    }
+
+    private static boolean moveIntoPlace(Path source, Path destination) throws IOException {
+        try {
+            Files.move(source, destination, StandardCopyOption.ATOMIC_MOVE);
+            return true;
+        } catch (IOException race) {
+            // On Windows, an atomic move to an existing target can be
+            // reported as AccessDeniedException instead of
+            // FileAlreadyExistsException. Only treat it as a race when
+            // the target is actually present; preserve real IO errors.
+            if (!Files.exists(destination)) {
+                throw race;
+            }
+            return false;
+        }
+    }
+
     private void writeAtomicChecked(Path destination, byte[] data) throws IOException {
         Files.createDirectories(destination.getParent());
         if (Files.exists(destination)) {
             return;
         }
-        WriteSpaceBudget budget = writeBudget;
-        if (budget == null) {
-            Path index = rootDir.resolve(RepositoryLayout.INDEX_FILE);
-            budget = new WriteSpaceBudget(rootDir, Files.exists(index) ? Files.size(index) : 0, 0);
-        }
+        WriteSpaceBudget budget = activeOrFallbackBudget();
         budget.beforeWrite(data.length);
 
         // A unique temporary file prevents concurrent producers of the same
@@ -129,17 +148,7 @@ public class BlobStore {
             wip = Files.createTempFile(destination.getParent(),
                     destination.getFileName().toString() + ".", RepositoryLayout.WIP_SUFFIX);
             Files.write(wip, data);
-            try {
-                Files.move(wip, destination, StandardCopyOption.ATOMIC_MOVE);
-            } catch (IOException e) {
-                // On Windows, an atomic move to an existing target can be
-                // reported as AccessDeniedException instead of
-                // FileAlreadyExistsException. Only treat it as a race when
-                // the target is actually present; preserve real IO errors.
-                if (!Files.exists(destination)) {
-                    throw e;
-                }
-            }
+            moveIntoPlace(wip, destination);
             budget.check();
         } catch (IOException e) {
             budget.fail(e);
@@ -222,11 +231,7 @@ public class BlobStore {
         private final java.nio.channels.SeekableByteChannel channel;
 
         private WriteSession() throws IOException {
-            WriteSpaceBudget active = writeBudget;
-            Path index = rootDir.resolve(RepositoryLayout.INDEX_FILE);
-            budget = active != null ? active
-                    : new WriteSpaceBudget(rootDir,
-                            Files.exists(index) ? Files.size(index) : 0, 0);
+            budget = activeOrFallbackBudget();
             Path pending = rootDir.resolve(RepositoryLayout.BLOBS_DIR);
             Path created = null;
             try {
@@ -306,16 +311,7 @@ public class BlobStore {
                 synchronized (BlobStore.this) {
                     budget.check();
                     Files.createDirectories(destination.getParent());
-                    boolean created = !Files.exists(destination);
-                    if (created) {
-                        try {
-                            Files.move(temp, destination, StandardCopyOption.ATOMIC_MOVE);
-                        } catch (IOException race) {
-                            if (!Files.exists(destination))
-                                throw race;
-                            created = false;
-                        }
-                    }
+                    boolean created = !Files.exists(destination) && moveIntoPlace(temp, destination);
                     return new Commit(getRelativePath(hash, extension), Files.size(destination), created);
                 }
             } catch (IOException e) {

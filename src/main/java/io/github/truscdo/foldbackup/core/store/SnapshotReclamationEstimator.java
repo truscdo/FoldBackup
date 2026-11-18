@@ -19,6 +19,11 @@ public final class SnapshotReclamationEstimator {
      * or whether its current filesystem size still matches the manifest.
      */
     public static List<DeletionEstimate> evaluateDeletionChain(List<SnapshotManifest> snapshots) {
+        return evaluate(snapshots, collectBlobSizes(snapshots));
+    }
+
+    /** Builds the distinct {@code blobPath -> sizeCompressed} map across all snapshots, rejecting invalid entries. */
+    public static Map<String, Long> collectBlobSizes(List<SnapshotManifest> snapshots) {
         Map<String, Long> sizes = new HashMap<>();
         for (SnapshotManifest snapshot : snapshots) {
             if (snapshot.getRegions() != null) {
@@ -30,7 +35,7 @@ public final class SnapshotReclamationEstimator {
                     addManifestSize(sizes, entry.getBlobPath(), entry.getSizeCompressed());
             }
         }
-        return evaluate(snapshots, sizes);
+        return sizes;
     }
 
     private static List<DeletionEstimate> evaluate(List<SnapshotManifest> snapshots,

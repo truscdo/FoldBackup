@@ -37,17 +37,11 @@ public final class RestorePlan {
         Set<String> all = new HashSet<>(directories);
         List<String> top = new ArrayList<>();
         for (String directory : directories) {
-            String parent = parentOf(directory);
-            while (parent != null && !parent.isEmpty() && !all.contains(parent)) parent = parentOf(parent);
+            String parent = PathTreeUtils.parentOf(directory);
+            while (parent != null && !parent.isEmpty() && !all.contains(parent)) parent = PathTreeUtils.parentOf(parent);
             if (parent == null || parent.isEmpty()) top.add(directory);
         }
         return top;
-    }
-
-    private static String parentOf(String directory) {
-        if (directory.isEmpty()) return null;
-        int slash = directory.lastIndexOf('/');
-        return slash < 0 ? "" : directory.substring(0, slash);
     }
 
     private static Map<String, Integer> suffixCounts(Set<String> paths) {

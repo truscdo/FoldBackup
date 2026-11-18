@@ -37,4 +37,10 @@ final class ArchiveObjects {
     static SourceMetadata metadata(SourceMetadata value) {
         return value == null ? SourceMetadata.empty() : value;
     }
+
+    static void verifyMergedRegionHash(ArchiveRestorePlan.Region region, String actualHash) throws IOException {
+        if (!region.contentHash().equals(actualHash)) {
+            throw new IOException("Merged Region identity mismatch: " + region.path());
+        }
+    }
 }

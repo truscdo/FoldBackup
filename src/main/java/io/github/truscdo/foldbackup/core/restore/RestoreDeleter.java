@@ -9,7 +9,6 @@ import java.nio.file.DirectoryNotEmptyException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -45,9 +44,7 @@ public final class RestoreDeleter {
             progress.done(path);
         }
 
-        List<String> directories = new ArrayList<>(plan.removedDirectories());
-        directories.sort(Comparator.comparingInt(RestoreDeleter::depth).reversed());
-        for (String directory : directories) {
+        for (String directory : plan.removedDirectories()) {
             try {
                 Files.deleteIfExists(root.resolve(directory));
             } catch (DirectoryNotEmptyException ignored) {
@@ -64,11 +61,5 @@ public final class RestoreDeleter {
             throw new IOException("Failed to delete " + failures.size() + " path(s): " + paths,
                     failures.get(0).error());
         }
-    }
-
-    private static int depth(String path) {
-        int depth = 1;
-        for (int i = 0; i < path.length(); i++) if (path.charAt(i) == '/') depth++;
-        return depth;
     }
 }

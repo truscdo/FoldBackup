@@ -218,27 +218,18 @@ public class BackupTui {
 
                 // 0 here returns to the ZIP choice.
                 while (true) {
-                    System.out.println();
                     Path defaultOutput = zip
                             ? ArchiveDefaults.worldExportZip(selected.id)
                             : ArchiveDefaults.worldExport(selected.id);
-                    String pathStr = prompt.readLine((zip ? "Output zip path" : "Output directory")
-                            + " (Enter for default: " + defaultOutput + ", 0 = back): ");
-                    if (pathStr == null) {
+                    RestoreInteraction.OutputPath choice = RestoreInteraction.promptOutputPath(
+                            prompt, zip ? "Output zip path" : "Output directory", defaultOutput);
+                    if (choice.isEof()) {
                         return;
                     }
-                    pathStr = pathStr.trim();
-                    if ("0".equals(pathStr)) {
+                    if (choice.isBack()) {
                         break;
                     }
-
-                    Path outputPath;
-                    try {
-                        outputPath = pathStr.isEmpty() ? defaultOutput : Path.of(pathStr);
-                    } catch (java.nio.file.InvalidPathException e) {
-                        System.out.println("Invalid output path: " + e.getMessage() + "\n");
-                        continue;
-                    }
+                    Path outputPath = choice.path();
 
                     if (!zip) {
                         var flow = exportDirectory(store, selected, outputPath);

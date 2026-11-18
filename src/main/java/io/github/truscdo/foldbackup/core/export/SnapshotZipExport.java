@@ -1,5 +1,6 @@
 package io.github.truscdo.foldbackup.core.export;
 
+import io.github.truscdo.foldbackup.core.FileIo;
 import io.github.truscdo.foldbackup.core.ProgressListener;
 import io.github.truscdo.foldbackup.core.ProgressTracker;
 import io.github.truscdo.foldbackup.core.archive.ArchiveDefaults;
@@ -11,12 +12,9 @@ import io.github.truscdo.foldbackup.core.store.SnapshotStore;
 
 import java.io.IOException;
 import java.io.OutputStream;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.zip.ZipEntry;
@@ -75,9 +73,7 @@ public final class SnapshotZipExport {
         Path stage = Files.createTempDirectory(parent, "." + target.getFileName() + ".foldbackup-");
         Path stagedZip = stage.resolveSibling(stage.getFileName() + ZIP_SUFFIX);
         try {
-            long epoch = snapshots.resolveEpoch(snapshotId);
-            SnapshotManifest manifest = snapshots.loadSnapshot(epoch);
-            if (manifest == null) throw new IOException("Snapshot not found: " + snapshotId);
+            SnapshotManifest manifest = snapshots.requireSnapshot(snapshotId);
 
             // 暂存目录为空，覆盖流程的检查阶段不读取任何 blob，删除阶段不执行；也不取得世界锁。
             try (var source = new SnapshotRestoreSource(manifest, blobs)) {
@@ -86,11 +82,11 @@ public final class SnapshotZipExport {
                         listener);
             }
             pack(stage, stagedZip, listener);
-            moveReplacing(stagedZip, target);
+            FileIo.moveReplacing(stagedZip, target);
             return target;
         } finally {
-            deleteQuietly(stagedZip);
-            deleteTreeQuietly(stage);
+            FileIo.deleteQuietly(stagedZip);
+            FileIo.deleteTree(stage, true, false, FileIo.DeletePolicy.QUIET);
         }
     }
 
@@ -115,32 +111,5 @@ public final class SnapshotZipExport {
                 progress.done(name);
             }
         }
-    }
-
-    private static void moveReplacing(Path source, Path destination) throws IOException {
-        try {
-            Files.move(source, destination, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-        } catch (AtomicMoveNotSupportedException e) {
-            Files.move(source, destination, StandardCopyOption.REPLACE_EXISTING);
-        }
-    }
-
-    private static void deleteQuietly(Path path) {
-        try {
-            Files.deleteIfExists(path);
-        } catch (IOException ignored) {
-            // 残留的暂存文件不影响已完成的导出结果。
-        }
-    }
-
-    private static void deleteTreeQuietly(Path root) {
-        if (!Files.exists(root, LinkOption.NOFOLLOW_LINKS)) return;
-        List<Path> paths;
-        try (var walk = Files.walk(root)) {
-            paths = walk.sorted(Comparator.reverseOrder()).toList();
-        } catch (IOException e) {
-            return;
-        }
-        for (Path path : paths) deleteQuietly(path);
     }
 }

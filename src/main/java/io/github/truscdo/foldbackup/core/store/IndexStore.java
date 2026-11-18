@@ -1,6 +1,7 @@
 package io.github.truscdo.foldbackup.core.store;
 
 
+import io.github.truscdo.foldbackup.core.cleanup.WriteSpaceBudget;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.channels.Channels;
@@ -57,6 +58,14 @@ public class IndexStore implements AutoCloseable {
 
     private final Path path;
     private final Path tmpPath;
+    private final ThreadLocal<PrevalidatedSize> prevalidated = new ThreadLocal<>();
+
+    private record PrevalidatedSize(MetadataIndex index, long size) {}
+
+    @FunctionalInterface
+    interface Scope extends AutoCloseable {
+        @Override void close();
+    }
 
     /** 初始化索引文件路径及对应的临时文件路径。 */
     public IndexStore(Path path) {
@@ -184,20 +193,32 @@ public class IndexStore implements AutoCloseable {
         }
     }
 
+    Scope prevalidated(MetadataIndex index, long size) {
+        if (size < 0) return () -> {};
+        PrevalidatedSize previous = prevalidated.get();
+        prevalidated.set(new PrevalidatedSize(index, size));
+        return () -> {
+            if (previous == null) prevalidated.remove();
+            else prevalidated.set(previous);
+        };
+    }
+
     /**
      * 将完整的内存索引写入磁盘，并通过临时文件与原子重命名提交。
      */
     public void save(MetadataIndex index) throws IOException {
+        PrevalidatedSize hint = prevalidated.get();
+        long precomputedSize = hint != null && hint.index() == index ? hint.size() : -1L;
         index = index.copy();
-        validate(index);
-        long required = Math.addExact(serializedSize(index), 1024L * 1024);
+        long size = precomputedSize >= 0 ? precomputedSize : validatedSerializedSize(index);
+        long required = Math.addExact(size, WriteSpaceBudget.SAFETY_BYTES);
         if (Files.getFileStore(path.getParent()).getUsableSpace() < required)
             throw new IOException("Insufficient space for atomic index commit (requires " + required + " bytes)");
         // Validate before touching even the temporary file. Never fall back to non-atomic move.
         try (FileChannel channel = FileChannel.open(tmpPath, StandardOpenOption.WRITE,
                 StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
              DataOutputStream out = new DataOutputStream(new BufferedOutputStream(Channels.newOutputStream(channel)))) {
-            writeIndex(index, out);
+            writeIndex(index, out, false);
             out.flush();
             forceTemporary(channel);
         }
@@ -207,6 +228,14 @@ public class IndexStore implements AutoCloseable {
 
     /** 使用同一序列化逻辑计算原子提交临时文件所需字节，不分配完整索引缓冲。 */
     public static long serializedSize(MetadataIndex index) throws IOException {
+        return measureSize(index, false);
+    }
+
+    static long validatedSerializedSize(MetadataIndex index) throws IOException {
+        return measureSize(index, true);
+    }
+
+    private static long measureSize(MetadataIndex index, boolean validate) throws IOException {
         class Counter extends OutputStream {
             long count;
             @Override public void write(int value) { count = Math.addExact(count, 1); }
@@ -216,7 +245,7 @@ public class IndexStore implements AutoCloseable {
         }
         Counter counter = new Counter();
         try (var out = new DataOutputStream(counter)) {
-            writeIndex(index, out);
+            writeIndex(index, out, validate);
         }
         return counter.count;
     }
@@ -231,7 +260,7 @@ public class IndexStore implements AutoCloseable {
         return attrs.size();
     }
 
-    private static void writeIndex(MetadataIndex index, DataOutputStream out) throws IOException {
+    private static void writeIndex(MetadataIndex index, DataOutputStream out, boolean validate) throws IOException {
 
             // ── 文件头 ──
             out.write(new byte[]{'M', 'C', 'B', 'I'});
@@ -241,7 +270,12 @@ public class IndexStore implements AutoCloseable {
             List<EntryMetadata> allMeta = index.getAllMetadata();
             out.writeInt(allMeta.size());
             for (EntryMetadata meta : allMeta) {
-                byte[] data = meta.toBytes();
+                byte[] data;
+                try {
+                    data = meta.toBytes();
+                } catch (IllegalArgumentException e) {
+                    throw new IOException(validate ? "metadata: " + e.getMessage() : e.getMessage(), e);
+                }
                 out.writeInt(data.length);
                 out.write(data);
             }
@@ -249,43 +283,62 @@ public class IndexStore implements AutoCloseable {
             // ── 快照区段 ──
             List<SnapshotManifest> snapshots = index.getSnapshots();
             out.writeInt(snapshots.size());
+            Set<String> ids = validate ? new HashSet<>() : null;
+            Set<Long> epochs = validate ? new HashSet<>() : null;
             for (SnapshotManifest sn : snapshots) {
-                writeUTF(out, sn.getSnapshotId());
-                // Epoch seconds are stored in the existing time field position.
-                out.writeLong(sn.getEpochSeconds());
-                writeUTF(out, sn.getWorldName() != null ? sn.getWorldName() : "");
-                writeUTF(out, sn.getMinecraftVersion() != null ? sn.getMinecraftVersion() : "");
-                out.writeLong(sn.getWorldVersion());
-
-                List<String> tags = sn.getTags();
-                out.writeShort(tags != null ? tags.size() : 0);
-                if (tags != null) {
-                    for (String tag : tags) {
-                        writeUTF(out, tag);
-                    }
+                String field = "snapshot[" + sn.getSnapshotId() + "]";
+                if (validate) {
+                    if (!SnapshotStore.isValidSnapshotId(sn.getSnapshotId()) || !ids.add(sn.getSnapshotId()))
+                        throw new IOException(field + ".snapshotId: invalid or duplicate");
+                    if (!epochs.add(sn.getEpochSeconds()))
+                        throw new IOException(field + ".timeSeconds: duplicate epoch " + sn.getEpochSeconds());
                 }
+                try {
+                    writeUTF(out, sn.getSnapshotId(), "snapshotId");
+                    // Epoch seconds are stored in the existing time field position.
+                    out.writeLong(sn.getEpochSeconds());
+                    writeUTF(out, sn.getWorldName() != null ? sn.getWorldName() : "", "worldName");
+                    writeUTF(out, sn.getMinecraftVersion() != null ? sn.getMinecraftVersion() : "", "mcVersion");
+                    out.writeLong(sn.getWorldVersion());
 
-                // ── 摘要 ──
-                SnapshotManifest.Summary s = sn.getSummary();
-                if (s == null) {
-                    s = new SnapshotManifest.Summary();
-                }
-                out.writeInt(s.getRegionsTotal());
-                out.writeInt(s.getRegionsChanged());
-                out.writeInt(s.getExtraFilesTotal());
-                out.writeInt(s.getExtraFilesChanged());
-                out.writeLong(s.getTotalCompressedBytes());
-                out.writeLong(s.getTotalUncompressedBytes());
-                out.writeLong(s.getNewBlobBytes());
-
-                List<String> hashes = index.getEntryHashes(sn.getEpochSeconds());
-                out.writeInt(hashes.size());
-                for (String h : hashes) {
-                    byte[] hb = h.getBytes(StandardCharsets.US_ASCII);
-                    if (hb.length != 32) {
-                        throw new IOException("metadataHash must be 32 ASCII chars: " + h);
+                    List<String> tags = sn.getTags();
+                    if (tags != null && tags.size() > 65535) {
+                        throw new IOException(field + ".tags_count: exceeds 65535");
                     }
-                    out.write(hb);
+                    out.writeShort(tags != null ? tags.size() : 0);
+                    if (tags != null) {
+                        for (int i = 0; i < tags.size(); i++) {
+                            writeUTF(out, tags.get(i), "tags[" + i + "]");
+                        }
+                    }
+
+                    // ── 摘要 ──
+                    SnapshotManifest.Summary s = sn.getSummary();
+                    if (s == null) {
+                        s = new SnapshotManifest.Summary();
+                    } else if (validate) {
+                        validateSummary(s, field);
+                    }
+                    out.writeInt(s.getRegionsTotal());
+                    out.writeInt(s.getRegionsChanged());
+                    out.writeInt(s.getExtraFilesTotal());
+                    out.writeInt(s.getExtraFilesChanged());
+                    out.writeLong(s.getTotalCompressedBytes());
+                    out.writeLong(s.getTotalUncompressedBytes());
+                    out.writeLong(s.getNewBlobBytes());
+
+                    List<String> hashes = index.getEntryHashes(sn.getEpochSeconds());
+                    out.writeInt(hashes.size());
+                    for (String h : hashes) {
+                        if (validate) validateReference(index, h, field + ".entries");
+                        byte[] hb = h.getBytes(StandardCharsets.US_ASCII);
+                        if (hb.length != 32) {
+                            throw new IOException("metadataHash must be 32 ASCII chars: " + h);
+                        }
+                        out.write(hb);
+                    }
+                } catch (IllegalArgumentException e) {
+                    throw new IOException(field + ": " + e.getMessage(), e);
                 }
             }
     }
@@ -311,10 +364,8 @@ public class IndexStore implements AutoCloseable {
     // ──────────────────────────────────────────────
 
     /** 向索引流中写入一个带两字节长度前缀的 UTF-8 字符串。 */
-    private static void writeUTF(DataOutputStream out, String s) throws IOException {
-        byte[] bytes;
-        try { bytes = EntryMetadata.encode(s, false, "string"); }
-        catch (IllegalArgumentException e) { throw new IOException(e.getMessage(), e); }
+    private static void writeUTF(DataOutputStream out, String s, String fieldLabel) throws IOException {
+        byte[] bytes = EntryMetadata.encode(s, false, fieldLabel);
         out.writeShort(bytes.length);
         out.write(bytes);
     }
@@ -329,35 +380,6 @@ public class IndexStore implements AutoCloseable {
                 || s.getExtraFilesChanged() < 0 || s.getTotalCompressedBytes() < 0
                 || s.getTotalUncompressedBytes() < 0 || s.getNewBlobBytes() < 0) {
             throw new IOException(field + ".summary: negative count or size");
-        }
-    }
-
-    private static void validate(MetadataIndex index) throws IOException {
-        String field = "metadata";
-        try {
-            for (EntryMetadata meta : index.getAllMetadata()) meta.toBytes();
-            Set<String> ids = new HashSet<>();
-            Set<Long> epochs = new HashSet<>();
-            for (SnapshotManifest sn : index.getSnapshots()) {
-                field = "snapshot[" + sn.getSnapshotId() + "]";
-                if (!SnapshotStore.isValidSnapshotId(sn.getSnapshotId()) || !ids.add(sn.getSnapshotId()))
-                    throw new IOException(field + ".snapshotId: invalid or duplicate");
-                if (!epochs.add(sn.getEpochSeconds()))
-                    throw new IOException(field + ".timeSeconds: duplicate epoch " + sn.getEpochSeconds());
-                EntryMetadata.encode(sn.getSnapshotId(), false, "snapshotId");
-                EntryMetadata.encode(sn.getWorldName() == null ? "" : sn.getWorldName(), false, "worldName");
-                EntryMetadata.encode(sn.getMinecraftVersion() == null ? "" : sn.getMinecraftVersion(), false, "mcVersion");
-                if (sn.getTags() != null) {
-                    if (sn.getTags().size() > 65535) throw new IOException(field + ".tags_count: exceeds 65535");
-                    for (int i = 0; i < sn.getTags().size(); i++)
-                        EntryMetadata.encode(sn.getTags().get(i), false, "tags[" + i + "]");
-                }
-                if (sn.getSummary() != null) validateSummary(sn.getSummary(), field);
-                for (String hash : index.getEntryHashes(sn.getEpochSeconds()))
-                    validateReference(index, hash, field + ".entries");
-            }
-        } catch (IllegalArgumentException e) {
-            throw new IOException(field + ": " + e.getMessage(), e);
         }
     }
 

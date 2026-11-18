@@ -114,12 +114,31 @@ public class SnapshotStore {
         return id != null && SNAPSHOT_ID.matcher(id).matches();
     }
 
+    /** Thrown when an epoch resolved in the index has no corresponding loaded manifest. */
+    public static final class MissingSnapshotManifestException extends IOException {
+        public MissingSnapshotManifestException(String snapshotId) {
+            super("Snapshot not found: " + snapshotId);
+        }
+    }
+
     /** Resolve a user-facing snapshot ID to its unique internal epoch identity. */
     public long resolveEpoch(String snapshotId) throws IOException {
         if (!isValidSnapshotId(snapshotId)) throw new IOException("Invalid snapshot ID: " + snapshotId);
         var epoch = metadataIndex.findEpochBySnapshotId(snapshotId);
         if (epoch.isEmpty()) throw new IOException("Snapshot not found: " + snapshotId);
         return epoch.getAsLong();
+    }
+
+    /** Resolves {@code snapshotId} and returns its non-null manifest. */
+    public SnapshotManifest requireSnapshot(String snapshotId) throws IOException {
+        return requireSnapshot(resolveEpoch(snapshotId), snapshotId);
+    }
+
+    /** Loads the manifest for a resolved epoch and fails if absent. */
+    public SnapshotManifest requireSnapshot(long epochSeconds, String snapshotId) throws IOException {
+        SnapshotManifest manifest = loadSnapshot(epochSeconds);
+        if (manifest == null) throw new MissingSnapshotManifestException(snapshotId);
+        return manifest;
     }
 
     // ──────────────────────────────────────────────
@@ -193,14 +212,16 @@ public class SnapshotStore {
         if (discardedTempBytes > 0) {
             LOG.info("Discarded stale temporary index ({} bytes) before retention planning", discardedTempBytes);
         }
-        SnapshotCleanupPlanner.Plan plan = planCleanup(next, retentionPolicy);
+        CleanupAssessment cleanup = planCleanup(next, retentionPolicy);
+        SnapshotCleanupPlanner.Plan plan = cleanup != null ? cleanup.plan() : null;
         if (plan != null && plan.snapshotEpochs().contains(manifest.getEpochSeconds()))
             throw new IOException("Backup not committed: new snapshot cannot fit retention limits: "
                     + manifest.getSnapshotId());
 
         // 4. Atomically persist to disk and collect unreferenced blobs
         List<Long> expiredEpochs = plan != null ? plan.snapshotEpochs() : List.of();
-        removeAndCommit(next, expiredEpochs, manifest,
+        long precomputedSize = cleanup != null && expiredEpochs.isEmpty() ? cleanup.nextIndexBytes() : -1L;
+        removeAndCommit(next, expiredEpochs, manifest, precomputedSize,
                 plan != null ? gc -> verifyCleanup(retentionPolicy, plan, gc) : null);
     }
 
@@ -226,15 +247,18 @@ public class SnapshotStore {
         }
     }
 
-    private SnapshotCleanupPlanner.Plan planCleanup(MetadataIndex next, RetentionPolicy policy) throws IOException {
+    private record CleanupAssessment(SnapshotCleanupPlanner.Plan plan, long nextIndexBytes) {}
+
+    private CleanupAssessment planCleanup(MetadataIndex next, RetentionPolicy policy) throws IOException {
         if (policy == null || !policy.isEnabled() || !policy.hasLimits()) return null;
         RepositoryUsage usage = RepositoryUsage.read(backupRoot, next.getSnapshots());
         // 计入本次待提交索引的增长；删除 metadata 后的缩小不作为可保证的 blob 收益。
-        long nextIndexBytes = IndexStore.serializedSize(next);
+        long nextIndexBytes = IndexStore.validatedSerializedSize(next);
         long plannedBytes = Math.addExact(usage.totalBytes() - usage.indexBytes(), nextIndexBytes);
         long freeAfterCommit = Math.max(0, usage.usableBytes() - Math.max(0, nextIndexBytes - usage.indexBytes()));
-        return policy.plan(next.getSnapshots(), plannedBytes, freeAfterCommit,
-                System.currentTimeMillis() / 1000L);
+        return new CleanupAssessment(
+                policy.plan(next.getSnapshots(), plannedBytes, freeAfterCommit, System.currentTimeMillis() / 1000L),
+                nextIndexBytes);
     }
 
     private void verifyCleanup(RetentionPolicy policy, SnapshotCleanupPlanner.Plan plan,
@@ -261,11 +285,12 @@ public class SnapshotStore {
 
     /** 提交已暂存的快照删除并运行孤儿 blob GC；提交本身失败直接抛 IOException，已提交后的清理失败按需包装。 */
     private BlobMaintenance.GcResult removeAndCommit(MetadataIndex next, Collection<Long> epochsToRemove,
-            SnapshotManifest committedManifest, PostCommitCheck postCommit) throws IOException {
+            SnapshotManifest committedManifest, long precomputedValidatedSize,
+            PostCommitCheck postCommit) throws IOException {
         for (long epoch : epochsToRemove) {
             next.removeSnapshot(epoch);
         }
-        commit(next);
+        commit(next, precomputedValidatedSize);
         try {
             BlobMaintenance.GcResult gc = collectGarbageDetailedLocked();
             if (postCommit != null) {
@@ -289,17 +314,21 @@ public class SnapshotStore {
     /** 批量删除快照并执行一次 metadata 与 blob 垃圾回收；返回 GC 结果以暴露未清净状态。 */
     public BlobMaintenance.GcResult deleteSnapshots(Collection<Long> snapshotEpochs) throws IOException {
         try (WriteSession ignored = beginWrite()) {
-            return removeAndCommit(metadataIndex.copy(), snapshotEpochs, null, null);
+            return removeAndCommit(metadataIndex.copy(), snapshotEpochs, null, -1L, null);
         }
     }
 
     /** 只在写盘成功后发布新索引；无索引变化时跳过写盘。 */
-    private void commit(MetadataIndex next) throws IOException {
+    private void commit(MetadataIndex next, long precomputedValidatedSize) throws IOException {
+        int preGcMetadataCount = next.getAllMetadata().size();
         gcIndex(next);
         if (next.sameContents(metadataIndex)) {
             return;
         }
-        indexStore.save(next);
+        long validatedSize = next.getAllMetadata().size() == preGcMetadataCount ? precomputedValidatedSize : -1L;
+        try (var ignored = indexStore.prevalidated(next, validatedSize)) {
+            indexStore.save(next);
+        }
         metadataIndex = next.freeze();
     }
 

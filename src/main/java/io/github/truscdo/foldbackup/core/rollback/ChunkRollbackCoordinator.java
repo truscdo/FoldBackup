@@ -1,6 +1,7 @@
 package io.github.truscdo.foldbackup.core.rollback;
 
 import io.github.truscdo.foldbackup.core.LogUtil;
+import io.github.truscdo.foldbackup.core.format.ChunkCoordinates;
 import io.github.truscdo.foldbackup.core.format.ChunkData;
 import io.github.truscdo.foldbackup.core.format.EntityRegionCodec;
 import io.github.truscdo.foldbackup.core.store.BlobStore;
@@ -61,9 +62,9 @@ public class ChunkRollbackCoordinator {
             Long epochSeconds,
             String dimensionSubPath) throws IOException {
         // ── compute region coordinates and grid index ──
-        int regionX = chunkX >> 5;
-        int regionZ = chunkZ >> 5;
-        int gridIndex = (chunkZ & 31) * 32 + (chunkX & 31);
+        int regionX = ChunkCoordinates.chunkToRegion(chunkX);
+        int regionZ = ChunkCoordinates.chunkToRegion(chunkZ);
+        int gridIndex = ChunkCoordinates.slotIndex(chunkX, chunkZ);
 
         // ── resolve snapshot metadata and stream the requested chunk ──
         ChunkRollbackSupport.ResolvedSnapshot resolved;

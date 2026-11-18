@@ -40,7 +40,7 @@ final class ArchiveLibrary {
     }
 
     static ArchiveLibrary scan(Path root) throws IOException {
-        List<String> errors = new ArrayList<>();
+        var errors = new ArchiveErrorCollector();
         List<String> warnings = new ArrayList<>();
         List<Path> tars = tarFiles(root);
 
@@ -81,7 +81,7 @@ final class ArchiveLibrary {
             } else {
                 List<String> names = group.stream().map(item -> item.entry().fileName()).toList();
                 conflictedFulls.put(epoch, names);
-                errors.add(ArchiveFormatUtil.conflictingFullMessage(epoch, names) + " (skipping epoch)");
+                errors.addRaw(ArchiveFormatUtil.conflictingFullMessage(epoch, names) + " (skipping epoch)");
             }
         }
 
@@ -89,11 +89,11 @@ final class ArchiveLibrary {
             ArchiveSnapshot meta = entry.meta();
             if (meta.isDiff() && conflictedFulls.containsKey(meta.baseEpoch)) {
                 List<String> names = conflictedFulls.get(meta.baseEpoch);
-                error(errors, entry.fileName(), "baseline epoch " + meta.baseEpoch
+                errors.add(entry.fileName(), "baseline epoch " + meta.baseEpoch
                         + " skipped due to conflicting full archives: " + String.join(", ", names));
             } else if (conflictedFulls.containsKey(meta.epoch)) {
                 List<String> names = conflictedFulls.get(meta.epoch);
-                error(errors, entry.fileName(), "epoch " + meta.epoch
+                errors.add(entry.fileName(), "epoch " + meta.epoch
                         + " skipped due to conflicting full archives: " + String.join(", ", names));
             } else {
                 entries.add(entry);
@@ -102,7 +102,7 @@ final class ArchiveLibrary {
 
         entries.sort(Comparator.comparingLong((Entry entry) -> entry.meta().epoch)
                 .thenComparing(Entry::fileName));
-        return new ArchiveLibrary(entries, warnings, errors);
+        return new ArchiveLibrary(entries, warnings, errors.list());
     }
 
     /** 目录内全部 {@code .tar}，按文件名排序：同 Epoch 去重时“保留第一份”才是确定的。 */
@@ -121,34 +121,30 @@ final class ArchiveLibrary {
      * 读取并解析一个归档的 {@code snapshot.bin}；不可导入时把原因记入 {@code errors} 并返回
      * {@code null}，扫描继续处理下一个归档。
      */
-    private static Scanned readArchive(Path tar, String fileName, List<String> errors) throws IOException {
+    private static Scanned readArchive(Path tar, String fileName, ArchiveErrorCollector errors) throws IOException {
         byte[] bytes;
         try {
             bytes = ArchiveFormatUtil.readSnapshotBytes(tar);
         } catch (IOException | RuntimeException e) {
-            error(errors, fileName, e.getMessage());
+            errors.add(fileName, e.getMessage());
             return null;
         }
         if (bytes == null) {
-            error(errors, fileName, "snapshot.bin is missing");
+            errors.add(fileName, "snapshot.bin is missing");
             return null;
         }
         ArchiveSnapshot meta;
         try {
             meta = ArchiveSnapshotCodec.decode(bytes);
         } catch (RuntimeException e) {
-            error(errors, fileName, e.getMessage());
+            errors.add(fileName, e.getMessage());
             return null;
         }
         if (meta == null) {
-            error(errors, fileName, "snapshot.bin is missing");
+            errors.add(fileName, "snapshot.bin is missing");
             return null;
         }
         return new Scanned(bytes, meta);
-    }
-
-    private static void error(List<String> errors, String fileName, String message) {
-        errors.add(fileName + ": " + message);
     }
 
     /** 原始 {@code snapshot.bin} 字节与其解析结果：前者用于同 Epoch full 的逐字节比较。 */

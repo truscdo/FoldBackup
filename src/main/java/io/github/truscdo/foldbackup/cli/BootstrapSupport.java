@@ -39,10 +39,13 @@ final class BootstrapSupport {
     static LibArgs parseLibArg(String[] args) {
         for (int i = 0; i < args.length; i++) {
             if ("--lib".equals(args[i])) {
-                if (i + 1 >= args.length || args[i + 1].startsWith("--")) {
-                    throw new IllegalArgumentException("--lib requires a directory path");
+                String dir;
+                try {
+                    dir = CliArgs.requireValue(args, i + 1, "--lib");
+                } catch (IOException e) {
+                    throw new IllegalArgumentException(e.getMessage(), e);
                 }
-                return new LibArgs(Path.of(args[i + 1]), removeRange(args, i, i + 2));
+                return new LibArgs(Path.of(dir), removeRange(args, i, i + 2));
             }
         }
         return new LibArgs(null, args);

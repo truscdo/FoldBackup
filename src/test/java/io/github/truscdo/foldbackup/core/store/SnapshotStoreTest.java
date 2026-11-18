@@ -184,6 +184,9 @@ class SnapshotStoreTest {
         assertEquals(localEpochZeroId, SnapshotStore.generateSnapshotId(0));
         assertThrows(IOException.class, () -> store.resolveEpoch(localEpochZeroId));
         assertThrows(IOException.class, () -> store.saveSnapshot(snapshot("S-20260902_120001", 1_788_351_200L)));
+        assertEquals(first.getSnapshotId(), store.requireSnapshot(first.getSnapshotId()).getSnapshotId());
+        assertThrows(SnapshotStore.MissingSnapshotManifestException.class,
+                () -> store.requireSnapshot(999_999L, "S-missing"));
     }
 
     /** 创建用于测试的最小快照清单。 */

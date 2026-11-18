@@ -1,6 +1,7 @@
 package io.github.truscdo.foldbackup.mod.rollback;
 
 import io.github.truscdo.foldbackup.core.LogUtil;
+import io.github.truscdo.foldbackup.core.format.ChunkCoordinates;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.GlobalPos;
 import net.minecraft.core.Holder;
@@ -119,7 +120,8 @@ final class PoiRollbackSupport {
                 GlobalPos globalPos = position.get();
                 if (!globalPos.dimension().equals(level.dimension())) continue;
                 BlockPos pos = globalPos.pos();
-                if ((pos.getX() >> 4) != chunkPos.x || (pos.getZ() >> 4) != chunkPos.z) continue;
+                if (ChunkCoordinates.blockToChunk(pos.getX()) != chunkPos.x
+                        || ChunkCoordinates.blockToChunk(pos.getZ()) != chunkPos.z) continue;
                 var type = poiManager.getType(pos);
                 if (type.isEmpty() || !memory.getValue().test(villager, type.get())) continue;
                 // One villager holds at most one ticket at a given position.

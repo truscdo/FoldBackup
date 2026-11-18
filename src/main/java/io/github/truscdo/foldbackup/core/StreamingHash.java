@@ -5,6 +5,8 @@ import com.dynatrace.hash4j.hashing.HashStream128;
 import com.dynatrace.hash4j.hashing.HashStream64;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InterruptedIOException;
+import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 
@@ -36,8 +38,23 @@ public final class StreamingHash {
         byte[] buffer = new byte[65536];
         long total = 0;
         for (int n; (n = in.read(buffer)) != -1;) {
-            if (Thread.currentThread().isInterrupted()) throw new java.io.InterruptedIOException();
+            if (Thread.currentThread().isInterrupted()) throw new InterruptedIOException("Operation cancelled");
+            if (n == 0) continue;
             hash.update(buffer, 0, n);
+            total = Math.addExact(total, n);
+        }
+        return total;
+    }
+
+    /** Copies {@code in} to {@code out} while updating {@code hash}, respecting interrupts and byte-count overflow. */
+    public static long copy(InputStream in, OutputStream out, Hash128 hash) throws IOException {
+        byte[] buffer = new byte[65536];
+        long total = 0;
+        for (int n; (n = in.read(buffer)) != -1;) {
+            if (Thread.currentThread().isInterrupted()) throw new InterruptedIOException("Operation cancelled");
+            if (n == 0) continue;
+            hash.update(buffer, 0, n);
+            out.write(buffer, 0, n);
             total = Math.addExact(total, n);
         }
         return total;

@@ -13,12 +13,28 @@ import java.io.IOException;
  * 所有方法形状一致：检查 → 失败则提示 → 返回空。调用方拿到非空结果后必须全程复用，
  * 因为后端可能随时被关停，二次取值会读到 {@code null}。
  */
-final class BackendGuard {
+public final class BackendGuard {
 
     /** 后端暂不可用时统一使用的提示键。 */
     private static final String NOT_READY_KEY = "foldbackup.command.backend_not_ready";
 
+    @FunctionalInterface
+    public interface FailureReporter {
+        void report(String translationKey, Object... args);
+    }
+
     private BackendGuard() {
+    }
+
+    /**
+     * 取当前可用的快照仓库，不可用时通过 {@code reporter} 提示。
+     */
+    public static SnapshotStore requireSnapshotStore(FoldBackupMod mod, FailureReporter reporter) {
+        SnapshotStore store = mod.getSnapshotStore();
+        if (store == null) {
+            reporter.report(NOT_READY_KEY);
+        }
+        return store;
     }
 
     /**
@@ -27,11 +43,7 @@ final class BackendGuard {
      * @return 可用的仓库；不可用时已向来源报告，返回 {@code null}
      */
     static SnapshotStore requireSnapshotStore(CommandSourceStack source, FoldBackupMod mod) {
-        SnapshotStore store = mod.getSnapshotStore();
-        if (store == null) {
-            CommandFeedback.failure(source, mod, NOT_READY_KEY);
-        }
-        return store;
+        return requireSnapshotStore(mod, (key, args) -> CommandFeedback.failure(source, mod, key, args));
     }
 
     /**
@@ -63,17 +75,24 @@ final class BackendGuard {
     }
 
     /**
+     * 把快照 ID 解析为 epoch 秒，找不到时通过 {@code reporter} 提示。
+     */
+    public static Long resolveEpoch(SnapshotStore store, String id, FailureReporter reporter) {
+        try {
+            return store.resolveEpoch(id);
+        } catch (IOException e) {
+            reporter.report("foldbackup.command.info.not_found", id);
+            return null;
+        }
+    }
+
+    /**
      * 把快照 ID 解析为 epoch 秒。
      *
      * @return 解析结果；找不到时已向来源报告，返回 {@code null}
      */
     static Long resolveEpoch(CommandSourceStack source, FoldBackupMod mod, SnapshotStore store, String id) {
-        try {
-            return store.resolveEpoch(id);
-        } catch (IOException e) {
-            CommandFeedback.failure(source, mod, "foldbackup.command.info.not_found", id);
-            return null;
-        }
+        return resolveEpoch(store, id, (key, args) -> CommandFeedback.failure(source, mod, key, args));
     }
 
     /** 一次取值得到的回档后端句柄。 */

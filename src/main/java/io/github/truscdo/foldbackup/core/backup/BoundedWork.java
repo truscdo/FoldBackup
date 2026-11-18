@@ -12,8 +12,12 @@ final class BoundedWork<T> implements AutoCloseable {
     private final int capacity;
     private final Collector<T> collector;
     BoundedWork(int workers, Collector<T> collector) {
-        executor = Executors.newFixedThreadPool(workers);
-        capacity = workers * 2;
+        this(BackupResourceBudget.quotaOf(workers, Integer.MAX_VALUE), collector);
+    }
+
+    BoundedWork(BackupResourceBudget.RegionQuota quota, Collector<T> collector) {
+        executor = Executors.newFixedThreadPool(quota.workers());
+        capacity = quota.inFlightWindow();
         this.collector = collector;
     }
     void submit(Callable<T> task) throws IOException {

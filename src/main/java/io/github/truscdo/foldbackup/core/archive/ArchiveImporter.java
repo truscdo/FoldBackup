@@ -96,7 +96,10 @@ public class ArchiveImporter {
 
         var snapshots = new SnapshotStore(backupRoot);
         var blobs = new BlobStore(backupRoot, ArchiveDefaults.RESTORE_LEVEL);
-        List<String> errors = new ArrayList<>(library.errors());
+        var errors = new ArchiveErrorCollector();
+        for (String libraryError : library.errors()) {
+            errors.addRaw(libraryError);
+        }
 
         try (SnapshotStore.WriteSession ignored = snapshots.beginWrite()) {
             int imported = 0;
@@ -118,12 +121,12 @@ public class ArchiveImporter {
                     }
                     if (id != null) imported++;
                 } catch (IOException | RuntimeException e) {
-                    errors.add(entry.fileName() + ": " + e.getMessage());
+                    errors.add(entry.fileName(), e.getMessage());
                 }
             }
             if (!errors.isEmpty()) {
                 throw new IOException("Import completed with " + imported + " snapshot(s) imported and "
-                        + errors.size() + " archive error(s):\n - " + String.join("\n - ", errors));
+                        + errors.size() + " archive error(s):\n - " + String.join("\n - ", errors.list()));
             }
             if (listener != null && totalEntries > 0) {
                 listener.onProgress(new ProgressEvent("Importing snapshots", totalEntries, totalEntries, ""));
@@ -245,9 +248,7 @@ public class ArchiveImporter {
         for (int i = 0; i < plan.regions.size(); i++) {
             var region = plan.regions.get(i);
             if (blobs.exists(region.contentHash(), "lrh")) {
-                String path = blobs.getRelativePath(region.contentHash(), "lrh");
-                imported[i] = new RegionEntry(region.path(), region.contentHash(), path, blobs.size(path),
-                        region.sizeUncompressed(), region.sourceMetadata());
+                imported[i] = toExistingRegionEntry(region, blobs);
             } else {
                 missing.add(i);
             }
@@ -263,11 +264,9 @@ public class ArchiveImporter {
                     try (var session = blobs.newWriteSession()) {
                         var summary = LrhFormat.write(session.channel(), source, ArchiveDefaults.RESTORE_LEVEL);
                         String actualHash = HashUtil.bytesToHex(summary.hash());
-                        if (!region.contentHash().equals(actualHash))
-                            throw new IOException("Merged Region identity mismatch: " + region.path());
+                        ArchiveObjects.verifyMergedRegionHash(region, actualHash);
                         var commit = session.commit(actualHash, "lrh");
-                        return new RegionEntry(region.path(), actualHash, commit.path(), commit.size(),
-                                region.sizeUncompressed(), region.sourceMetadata());
+                        return toRegionEntry(region, actualHash, commit.path(), commit.size());
                     }
                 });
         for (int i : missing) {
@@ -278,11 +277,9 @@ public class ArchiveImporter {
     }
 
     private RegionEntry importRegionObject(ArchiveRestorePlan.Region region, BlobStore blobs) throws IOException {
-        String blobPath = blobs.getRelativePath(region.contentHash(), "lrh");
         if (blobs.exists(region.contentHash(), "lrh")) {
             // Read-time verification: an object that is not read is not verified.
-            return new RegionEntry(region.path(), region.contentHash(), blobPath, blobs.size(blobPath),
-                    region.sizeUncompressed(), region.sourceMetadata());
+            return toExistingRegionEntry(region, blobs);
         }
         var object = region.base();
         if (object == null) throw new IOException("Missing Region object: " + region.path());
@@ -295,9 +292,20 @@ public class ArchiveImporter {
             if (!region.contentHash().equals(actualHash))
                 throw new IOException("Region object identity mismatch: " + region.path());
             var commit = session.commit(actualHash, "lrh");
-            return new RegionEntry(region.path(), actualHash, commit.path(), commit.size(),
-                    region.sizeUncompressed(), region.sourceMetadata());
+            return toRegionEntry(region, actualHash, commit.path(), commit.size());
         }
+    }
+
+    private static RegionEntry toExistingRegionEntry(ArchiveRestorePlan.Region region, BlobStore blobs)
+            throws IOException {
+        String path = blobs.getRelativePath(region.contentHash(), "lrh");
+        return toRegionEntry(region, region.contentHash(), path, blobs.size(path));
+    }
+
+    private static RegionEntry toRegionEntry(ArchiveRestorePlan.Region region, String hash, String blobPath,
+            long compressedSize) {
+        return new RegionEntry(region.path(), hash, blobPath, compressedSize,
+                region.sizeUncompressed(), region.sourceMetadata());
     }
 
     /** Regular files: reuse the blob when present, otherwise copy and verify in one pass. */

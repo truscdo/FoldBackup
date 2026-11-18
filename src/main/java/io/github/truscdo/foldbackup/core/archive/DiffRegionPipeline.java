@@ -120,8 +120,8 @@ final class DiffRegionPipeline {
                 String previous = baseline == null ? null : baseline[index];
                 if (Objects.equals(actual, previous)) { payload.close(); payload = null; return; }
                 var chunk = new LrhdFormat.ChunkIndex();
-                chunk.cx = Math.addExact(Math.multiplyExact(task.rx, 32), index % 32);
-                chunk.cz = Math.addExact(Math.multiplyExact(task.rz, 32), index / 32);
+                chunk.cx = ChunkCoordinates.chunkXExact(task.rx, index);
+                chunk.cz = ChunkCoordinates.chunkZExact(task.rz, index);
                 chunk.ts = timestamp; chunk.length = length; chunk.deleted = length == 0;
                 chunk.hash = actual == null ? "" : actual;
                 try (var data = payload) {

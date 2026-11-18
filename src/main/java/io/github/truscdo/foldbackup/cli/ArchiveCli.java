@@ -34,22 +34,22 @@ public final class ArchiveCli {
             switch (args.get(i)) {
                 case "--snapshot" -> {
                     if (snapshotSeen) throw new IOException("Duplicate --snapshot");
-                    snapshotId = optionValue(args, ++i, "--snapshot");
+                    snapshotId = CliArgs.requireValue(args, ++i, "--snapshot");
                     snapshotSeen = true;
                 }
                 case "--base" -> {
                     if (baseSeen) throw new IOException("Duplicate --base");
-                    baseId = optionValue(args, ++i, "--base");
+                    baseId = CliArgs.requireValue(args, ++i, "--base");
                     baseSeen = true;
                 }
                 case "--level" -> {
                     if (levelSeen) throw new IOException("Duplicate --level");
-                    level = parsePositiveOption(args, ++i, "--level");
+                    level = CliArgs.requirePositiveInt(args, ++i, "--level");
                     levelSeen = true;
                 }
                 case "--threads" -> {
                     if (threadsSeen) throw new IOException("Duplicate --threads");
-                    threads = parsePositiveOption(args, ++i, "--threads");
+                    threads = CliArgs.requirePositiveInt(args, ++i, "--threads");
                     threadsSeen = true;
                 }
                 case "--no-recompress" -> {
@@ -100,7 +100,7 @@ public final class ArchiveCli {
             switch (args.get(i)) {
                 case "--output" -> {
                     if (outputSeen) throw new IOException("Duplicate --output");
-                    output = Path.of(optionValue(args, ++i, "--output"));
+                    output = Path.of(CliArgs.requireValue(args, ++i, "--output"));
                     outputSeen = true;
                 }
                 case "--delete-extra" -> {
@@ -113,7 +113,7 @@ public final class ArchiveCli {
                 }
                 case "--threads" -> {
                     if (threadsSeen) throw new IOException("Duplicate --threads");
-                    threads = parsePositiveOption(args, ++i, "--threads");
+                    threads = CliArgs.requirePositiveInt(args, ++i, "--threads");
                     threadsSeen = true;
                 }
                 default -> throw new IOException("Unknown archive export option: " + args.get(i));
@@ -122,23 +122,6 @@ public final class ArchiveCli {
         if (output == null) throw new IOException("archive export requires --output <dir>");
         CliRestore.run(() -> ArchiveRestoreSource.open(archiveRoot, archiveFile),
                 archiveFile.toString(), output, dryRun, deleteExtra, threads, ArchiveDefaults.RESTORE_LEVEL);
-    }
-
-    private static String optionValue(List<String> args, int index, String option) throws IOException {
-        if (index >= args.size() || args.get(index).startsWith("--"))
-            throw new IOException(option + " requires a value");
-        return args.get(index);
-    }
-
-    private static int parsePositiveOption(List<String> args, int index, String option) throws IOException {
-        String value = optionValue(args, index, option);
-        try {
-            int parsed = Integer.parseInt(value);
-            if (parsed <= 0) throw new IOException(option + " must be a positive integer");
-            return parsed;
-        } catch (NumberFormatException e) {
-            throw new IOException(option + " requires an integer", e);
-        }
     }
 
 }

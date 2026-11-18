@@ -91,18 +91,20 @@ public class ArchiveVerifier {
 
     public Result verifyArchive(Path archiveRoot, Path archiveFile, ProgressListener listener) throws IOException {
         Result result = new Result();
+        var collector = ArchiveErrorCollector.wrap(result.errors);
+        String archiveName = archiveFile.getFileName().toString();
         var progress = new ProgressTracker(listener);
         if (!Files.isDirectory(archiveRoot)) {
-            result.errors.add("Archive root not found: " + archiveRoot);
+            collector.addRaw("Archive root not found: " + archiveRoot);
             return result;
         }
         if (!Files.isRegularFile(archiveFile)) {
-            result.errors.add(archiveFile.getFileName() + ": archive file not found");
+            collector.add(archiveName, "archive file not found");
             return result;
         }
         ArchiveSnapshot meta = ArchiveFormatUtil.readSnapshot(archiveFile);
         if (meta == null) {
-            result.errors.add(archiveFile.getFileName() + ": cannot read snapshot.bin or archive is damaged");
+            collector.add(archiveName, "cannot read snapshot.bin or archive is damaged");
             return result;
         }
         if (meta.isFull()) {
@@ -110,14 +112,14 @@ public class ArchiveVerifier {
             try (ArchiveBaseline baseline = readBaseline(archiveFile, full)) {
                 if (baseline != null) verifyFullTar(archiveFile, baseline, full, progress);
             }
-            mergeResult(result, full, archiveFile.getFileName().toString());
+            mergeResult(result, full, archiveName);
         } else if (meta.isDiff()) {
             Path fullTar;
             try {
                 fullTar = ArchiveTarScanner.fullAtEpoch(ArchiveTarScanner.scan(archiveRoot), meta.baseEpoch);
             } catch (IOException e) {
                 String expected = ArchiveCreator.fullTarName(SnapshotStore.generateSnapshotId(meta.baseEpoch));
-                result.errors.add(archiveFile.getFileName() + ": required baseline archive "
+                collector.add(archiveName, "required baseline archive "
                         + expected + " is missing: " + e.getMessage());
                 return result;
             }
@@ -136,10 +138,10 @@ public class ArchiveVerifier {
                         diff.errors.add(e.getMessage());
                     }
                 }
-                mergeResult(result, diff, archiveFile.getFileName().toString());
+                mergeResult(result, diff, archiveName);
             }
         } else {
-            result.errors.add(archiveFile.getFileName() + ": unsupported archive type " + meta.type);
+            collector.add(archiveName, "unsupported archive type " + meta.type);
         }
         return result;
     }
@@ -159,12 +161,14 @@ public class ArchiveVerifier {
         target.lrhdChecked += source.lrhdChecked;
         target.chunkHashesChecked += source.chunkHashesChecked;
         target.totalBytes += source.totalBytes;
-        for (String error : source.errors) target.errors.add(archiveName + ": " + error);
+        var collector = ArchiveErrorCollector.wrap(target.errors);
+        for (String error : source.errors) collector.add(archiveName, error);
     }
 
     /** Verify every tar in the archive root, continuing after individual failures. */
     public Result verifyAll(Path archiveRoot, ProgressListener listener) throws IOException {
         Result combined = new Result();
+        var collector = ArchiveErrorCollector.wrap(combined.errors);
         if (!Files.isDirectory(archiveRoot)) throw new IOException("Archive root not found: " + archiveRoot);
         List<Path> archives;
         try (var stream = Files.list(archiveRoot)) {
@@ -186,10 +190,9 @@ public class ArchiveVerifier {
                 combined.chunkHashesChecked += one.chunkHashesChecked;
                 combined.totalBytes += one.totalBytes;
                 for (String error : one.errors)
-                    combined.errors.add(error.startsWith(archiveName + ":")
-                            ? error : archiveName + ": " + error);
+                    collector.addIfUnprefixed(archiveName, error);
             } catch (IOException | RuntimeException e) {
-                combined.errors.add(archiveName + ": " + e.getMessage());
+                collector.add(archiveName, e.getMessage());
             }
         }
         if (!archives.isEmpty() && listener != null) {
@@ -287,8 +290,7 @@ public class ArchiveVerifier {
                         var accumulator = new RegionStream.Accumulator();
                         source.read(accumulator);
                         String actualHash = HashUtil.bytesToHex(accumulator.finish().hash());
-                        if (!region.contentHash().equals(actualHash))
-                            throw new IOException("Merged Region identity mismatch: " + region.path());
+                        ArchiveObjects.verifyMergedRegionHash(region, actualHash);
                         return Boolean.TRUE;
                     });
         }

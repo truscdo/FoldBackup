@@ -140,7 +140,7 @@ public final class EntityRegionCodec {
     }
 
     private static void checkChunk(EntityTag entity, int x, int z) throws IOException {
-        if ((int)Math.floor(entity.x / 16) != x || (int)Math.floor(entity.z / 16) != z)
+        if (ChunkCoordinates.entityToChunk(entity.x) != x || ChunkCoordinates.entityToChunk(entity.z) != z)
             throw new IOException("Entity/passenger " + entity.uuid + " is outside target chunk");
         for (EntityTag child : entity.passengers) checkChunk(child, x, z);
     }

@@ -1,5 +1,8 @@
 package io.github.truscdo.foldbackup.core.rollback;
 
+import io.github.truscdo.foldbackup.core.FileIo;
+import io.github.truscdo.foldbackup.core.WorldPaths;
+import io.github.truscdo.foldbackup.core.format.ChunkCoordinates;
 import io.github.truscdo.foldbackup.core.format.EntityRegionCodec;
 import io.github.truscdo.foldbackup.core.format.McaHasher;
 import io.github.truscdo.foldbackup.core.format.McaStream;
@@ -24,19 +27,14 @@ final class OfflineRollbackWriter implements AutoCloseable {
     @FunctionalInterface interface MoveOperation { void move(Path source, Path target) throws IOException; }
 
     OfflineRollbackWriter(Path regionDir) throws IOException {
-        this(regionDir, (source, target) -> Files.move(source, target,
-                StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING));
+        this(regionDir, FileIo::moveReplacing);
     }
 
     OfflineRollbackWriter(Path regionDir, MoveOperation move) throws IOException {
         this.move = move;
         dimensionDir = regionDir.toAbsolutePath().normalize().getParent();
         if (dimensionDir == null || !Files.isDirectory(dimensionDir)) throw new IOException("World directory does not exist");
-        Path root = dimensionDir;
-        if (Set.of("DIM-1", "DIM1").contains(root.getFileName().toString())) root = root.getParent();
-        for (Path p = dimensionDir; p != null; p = p.getParent()) {
-            if (p.getFileName() != null && p.getFileName().toString().equals("dimensions")) { root = p.getParent(); break; }
-        }
+        Path root = WorldPaths.worldRoot(dimensionDir);
         worldRoot = root;
         channel = FileChannel.open(root.resolve("session.lock"), StandardOpenOption.CREATE, StandardOpenOption.WRITE);
         try {
@@ -88,8 +86,8 @@ final class OfflineRollbackWriter implements AutoCloseable {
                             targetChunk[0] = raw;
                             return;
                         }
-                        int chunkX = coords[0] * 32 + activeIndex[0] % 32;
-                        int chunkZ = coords[1] * 32 + activeIndex[0] / 32;
+                        int chunkX = ChunkCoordinates.chunkX(coords[0], activeIndex[0]);
+                        int chunkZ = ChunkCoordinates.chunkZ(coords[1], activeIndex[0]);
                         var other = EntityRegionCodec.read(raw, chunkX, chunkZ);
                         for (UUID id : EntityRegionCodec.uuids(other)) {
                             if (incoming.contains(id)) {
@@ -192,8 +190,7 @@ final class OfflineRollbackWriter implements AutoCloseable {
             for (Path relative : changed) {
                 try {
                     Path target = dimensionDir.resolve(relative);
-                    if (existed.get(relative)) Files.move(stage.resolve("old").resolve(relative), target,
-                            StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+                    if (existed.get(relative)) FileIo.moveReplacing(stage.resolve("old").resolve(relative), target);
                     else Files.deleteIfExists(target);
                 } catch (IOException recovery) { failure.addSuppressed(recovery); preserve = true; }
             }
@@ -202,47 +199,12 @@ final class OfflineRollbackWriter implements AutoCloseable {
         } finally {
             if (!preserve) {
                 try {
-                    deleteTree(stage);
+                    FileIo.deleteTree(stage, false, false, FileIo.DeletePolicy.FAIL_FAST);
                 } catch (IOException cleanup) {
                     throw new IOException((committed ? "Rollback committed; " : "Rollback recovery finished; ")
                             + "temporary cleanup failed at " + stage, cleanup);
                 }
             }
-        }
-    }
-
-    /** Deletes the staging tree; enumeration handles are released before any path is removed. */
-    private static void deleteTree(Path root) throws IOException {
-        List<Path> paths;
-        try (var walk = Files.walk(root)) {
-            paths = walk.sorted(Comparator.reverseOrder()).toList();
-        }
-        for (Path path : paths) delete(path);
-    }
-
-    /**
-     * Windows can briefly report a directory whose last child was moved out as not empty, or deny
-     * access while a scan still holds it. Bounded retries keep that transient state from turning a
-     * completed rollback into a cleanup failure; cleanup still finishes when the thread is interrupted.
-     */
-    private static void delete(Path path) throws IOException {
-        boolean interrupted = Thread.interrupted();
-        try {
-            for (int attempt = 0; ; attempt++) {
-                try {
-                    Files.deleteIfExists(path);
-                    return;
-                } catch (DirectoryNotEmptyException | AccessDeniedException e) {
-                    if (attempt == 19) throw e;
-                    try {
-                        Thread.sleep(25);
-                    } catch (InterruptedException cancellation) {
-                        interrupted = true;
-                    }
-                }
-            }
-        } finally {
-            if (interrupted) Thread.currentThread().interrupt();
         }
     }
 
@@ -253,8 +215,8 @@ final class OfflineRollbackWriter implements AutoCloseable {
         int count = relative.getNameCount();
         String first = relative.getName(0).toString();
         return (count == 2 && first.equals("entities"))
-                || (count == 3 && Set.of("DIM-1", "DIM1").contains(first))
-                || (count >= 5 && first.equals("dimensions") && !relative.toString().contains(".foldbackup-rollback-"));
+                || (count == 3 && Set.of(WorldPaths.NETHER_DIR, WorldPaths.END_DIR).contains(first))
+                || (count >= 5 && first.equals(WorldPaths.CUSTOM_DIMENSIONS_DIR) && !relative.toString().contains(".foldbackup-rollback-"));
     }
 
     @Override public void close() throws IOException {

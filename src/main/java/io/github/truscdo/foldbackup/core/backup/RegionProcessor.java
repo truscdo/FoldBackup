@@ -126,11 +126,11 @@ public class RegionProcessor {
         DedupStats stats = new DedupStats(snapshotId);
         long memory = BackupResourceBudget.memoryBudgetBytes(regionMemoryLimitMB, Runtime.getRuntime().maxMemory(),
                 Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory());
-        int workers = BackupResourceBudget.modRegionQuota(Integer.MAX_VALUE, memory, 0,
+        var quota = BackupResourceBudget.modRegionQuota(Integer.MAX_VALUE, memory, 0,
                 BackupResourceBudget.compressTaskBytes(compressionLevel),
-                Runtime.getRuntime().availableProcessors(), regionThreads).workers();
+                Runtime.getRuntime().availableProcessors(), regionThreads);
         final Object progressLock = new Object();
-        try (var work = new BoundedWork<ScanResult>(workers, partial -> {
+        try (var work = new BoundedWork<ScanResult>(quota, partial -> {
             blobStore.checkBackupWrites();
             for (var entry : partial.getRegions())
                 result.addRegion(entry);

@@ -17,13 +17,7 @@ final class FileContentIdentity {
 
     static Summary inspect(InputStream input) throws IOException {
         var hash = new StreamingHash.Hash128();
-        long length = 0;
-        byte[] buffer = new byte[65536];
-        for (int count; (count = input.read(buffer)) != -1;) {
-            if (count == 0) continue;
-            hash.update(buffer, 0, count);
-            length = Math.addExact(length, count);
-        }
+        long length = StreamingHash.read(input, hash);
         return new Summary(length, hash.fileHex());
     }
 }

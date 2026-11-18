@@ -2,6 +2,7 @@ package io.github.truscdo.foldbackup.core.cleanup;
 
 import io.github.truscdo.foldbackup.core.store.RepositoryLayout;
 import io.github.truscdo.foldbackup.core.store.SnapshotManifest;
+import io.github.truscdo.foldbackup.core.store.SnapshotReclamationEstimator;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.*;
@@ -12,14 +13,11 @@ import java.util.*;
 public record RepositoryUsage(long totalBytes, long indexBytes, long usableBytes) {
 
     public static RepositoryUsage read(Path root, List<SnapshotManifest> snapshots) throws IOException {
-        Map<String, Long> expectedBlobSizes = new HashMap<>();
-        for (SnapshotManifest snapshot : snapshots) {
-            if (snapshot.getRegions() != null)
-                for (var entry : snapshot.getRegions())
-                    addExpectedBlobSize(expectedBlobSizes, entry.getBlobPath(), entry.getSizeCompressed());
-            if (snapshot.getExtraFiles() != null)
-                for (var entry : snapshot.getExtraFiles())
-                    addExpectedBlobSize(expectedBlobSizes, entry.getBlobPath(), entry.getSizeCompressed());
+        Map<String, Long> expectedBlobSizes;
+        try {
+            expectedBlobSizes = SnapshotReclamationEstimator.collectBlobSizes(snapshots);
+        } catch (IllegalArgumentException e) {
+            throw new IOException(e.getMessage(), e);
         }
 
         Set<String> foundReferencedBlobs = new HashSet<>();
@@ -61,13 +59,5 @@ public record RepositoryUsage(long totalBytes, long indexBytes, long usableBytes
         } catch (ArithmeticException | UncheckedIOException e) {
             throw new IOException("Cannot measure repository usage", e);
         }
-    }
-
-    private static void addExpectedBlobSize(Map<String, Long> sizes, String path, long size) throws IOException {
-        if (path == null || path.isBlank()) throw new IOException("Missing blob path in snapshot metadata");
-        if (size < 0) throw new IOException("Negative blob size in snapshot metadata: " + path);
-        Long previous = sizes.putIfAbsent(path, size);
-        if (previous != null && previous != size)
-            throw new IOException("Conflicting blob sizes in snapshot metadata: " + path);
     }
 }

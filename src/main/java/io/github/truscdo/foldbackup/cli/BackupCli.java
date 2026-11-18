@@ -8,6 +8,7 @@ import io.github.truscdo.foldbackup.core.console.SnapshotTablePrinter;
 import io.github.truscdo.foldbackup.core.archive.ArchiveDefaults;
 import io.github.truscdo.foldbackup.core.archive.ArchiveVerifier;
 import io.github.truscdo.foldbackup.core.export.SnapshotZipExport;
+import io.github.truscdo.foldbackup.core.format.ChunkCoordinates;
 import io.github.truscdo.foldbackup.core.rollback.ChunkRollbackCoordinator;
 import io.github.truscdo.foldbackup.core.rollback.ChunkRollbackSupport;
 import io.github.truscdo.foldbackup.core.restore.SnapshotRestoreSource;
@@ -97,14 +98,11 @@ public class BackupCli {
             switch (args.get(i)) {
                 case "--world" -> {
                     if (world != null) throw new IOException("Duplicate --world");
-                    world = Path.of(requireValue(args, ++i, "--world"));
+                    world = Path.of(CliArgs.requireValue(args, ++i, "--world"));
                 }
                 case "--threads" -> {
                     if (threads != null) throw new IOException("Duplicate --threads");
-                    String value = requireValue(args, ++i, "--threads");
-                    try { threads = Integer.parseInt(value); }
-                    catch (NumberFormatException e) { throw new IOException("--threads requires a positive integer", e); }
-                    if (threads <= 0) throw new IOException("--threads requires a positive integer");
+                    threads = CliArgs.requirePositiveInt(args, ++i, "--threads");
                 }
                 default -> throw new IOException("Unknown snapshot create option: " + args.get(i));
             }
@@ -144,7 +142,7 @@ public class BackupCli {
             switch (args.get(i)) {
                 case "--output" -> {
                     if (outputSeen) throw new IOException("Duplicate --output");
-                    output = Path.of(requireValue(args, ++i, "--output"));
+                    output = Path.of(CliArgs.requireValue(args, ++i, "--output"));
                     outputSeen = true;
                 }
                 case "--zip" -> {
@@ -161,9 +159,7 @@ public class BackupCli {
                 }
                 case "--threads" -> {
                     if (threads != 0) throw new IOException("Duplicate --threads");
-                    try { threads = Integer.parseInt(requireValue(args, ++i, "--threads")); }
-                    catch (NumberFormatException e) { throw new IOException("--threads requires a positive integer", e); }
-                    if (threads < 1) throw new IOException("--threads must be >= 1");
+                    threads = CliArgs.requirePositiveInt(args, ++i, "--threads");
                 }
                 default -> throw new IOException("Unknown snapshot export option: " + args.get(i));
             }
@@ -185,9 +181,7 @@ public class BackupCli {
             return;
         }
 
-        long epoch = snapshots.resolveEpoch(snapshotId);
-        SnapshotManifest manifest = snapshots.loadSnapshot(epoch);
-        if (manifest == null) throw new IOException("Snapshot not found: " + snapshotId);
+        SnapshotManifest manifest = snapshots.requireSnapshot(snapshotId);
         CliRestore.run(() -> new SnapshotRestoreSource(manifest, blobs),
                 snapshotId, output, dryRun, deleteExtra, threads, ArchiveDefaults.EXPORT_LEVEL);
     }
@@ -201,8 +195,8 @@ public class BackupCli {
             else throw new IOException("Unknown or duplicate snapshot delete option: " + args.get(i));
         }
         SnapshotStore snapshots = snapshotStore(invocation.snapshotRoot());
-        long epoch = snapshots.resolveEpoch(snapshotId);
-        SnapshotManifest snapshot = snapshots.loadSnapshot(epoch);
+        SnapshotManifest snapshot = snapshots.requireSnapshot(snapshotId);
+        long epoch = snapshot.getEpochSeconds();
         System.out.println("Snapshot to delete: " + snapshotId);
         System.out.println("  Regions: " + (snapshot.getRegions() == null ? 0 : snapshot.getRegions().size()));
         System.out.println("  Files:   " + (snapshot.getExtraFiles() == null ? 0 : snapshot.getExtraFiles().size()));
@@ -233,13 +227,13 @@ public class BackupCli {
             switch (args.get(i)) {
                 case "--world" -> {
                     if (worldSeen) throw new IOException("Duplicate --world");
-                    world = Path.of(requireValue(args, ++i, "--world"));
+                    world = Path.of(CliArgs.requireValue(args, ++i, "--world"));
                     worldSeen = true;
                 }
                 case "--chunk" -> {
                     if (chunkSeen) throw new IOException("Duplicate --chunk");
-                    chunkX = parseCoordinate(requireValue(args, ++i, "--chunk"));
-                    chunkZ = parseCoordinate(requireValue(args, ++i, "--chunk"));
+                    chunkX = parseCoordinate(CliArgs.requireValue(args, ++i, "--chunk"));
+                    chunkZ = parseCoordinate(CliArgs.requireValue(args, ++i, "--chunk"));
                     chunkSeen = true;
                 }
                 case "--yes" -> {
@@ -265,7 +259,8 @@ public class BackupCli {
         System.out.println("  Snapshot:  " + snapshotId);
         System.out.println("  Dimension: " + (dimension.isEmpty() ? "overworld" : dimension));
         System.out.println("  Chunk:     [" + chunkX + ", " + chunkZ + "]");
-        System.out.println("  Region:    r." + (chunkX >> 5) + "." + (chunkZ >> 5) + ".mca");
+        System.out.println("  Region:    r." + ChunkCoordinates.chunkToRegion(chunkX)
+                + "." + ChunkCoordinates.chunkToRegion(chunkZ) + ".mca");
         System.out.println("  Scope:     terrain, block entities, entity data, and this chunk's POI column");
         System.out.println("  Excludes:  player data and world-level configuration");
         if (!confirm("Apply this chunk rollback?", yes)) {
@@ -317,12 +312,7 @@ public class BackupCli {
         for (int i = start; i < args.size(); i++) {
             if (!"--threads".equals(args.get(i))) throw new IOException("Unknown option: " + args.get(i));
             if (threads != 0) throw new IOException("Duplicate --threads");
-            try {
-                threads = Integer.parseInt(requireValue(args, ++i, "--threads"));
-            } catch (NumberFormatException e) {
-                throw new IOException("--threads requires a positive integer", e);
-            }
-            if (threads < 1) throw new IOException("--threads must be >= 1");
+            threads = CliArgs.requirePositiveInt(args, ++i, "--threads");
         }
         return threads;
     }
@@ -351,12 +341,6 @@ public class BackupCli {
         return answer != null && ("y".equalsIgnoreCase(answer.trim()) || "yes".equalsIgnoreCase(answer.trim()));
     }
 
-    private static String requireValue(List<String> args, int index, String option) throws IOException {
-        if (index >= args.size() || args.get(index).startsWith("--"))
-            throw new IOException(option + " requires a value");
-        return args.get(index);
-    }
-
     private static void requireCount(List<String> args, int count, String usage) throws IOException {
         if (args.size() != count) throw new IOException("Usage: " + usage);
     }
@@ -378,30 +362,24 @@ public class BackupCli {
                 switch (arg) {
                     case "--snapshot-root", "--online-root" -> {
                         if (seenSnapshotRoot) throw new IOException("Duplicate --snapshot-root");
-                        snapshotRoot = Path.of(requireRawValue(raw, ++i, arg)).toAbsolutePath().normalize();
+                        snapshotRoot = Path.of(CliArgs.requireValue(raw, ++i, arg)).toAbsolutePath().normalize();
                         seenSnapshotRoot = true;
                     }
                     case "--archive-root" -> {
                         if (seenArchiveRoot) throw new IOException("Duplicate --archive-root");
-                        archiveRoot = Path.of(requireRawValue(raw, ++i, arg)).toAbsolutePath().normalize();
+                        archiveRoot = Path.of(CliArgs.requireValue(raw, ++i, arg)).toAbsolutePath().normalize();
                         seenArchiveRoot = true;
                     }
                     case "--tui" -> command.add("tui");
                     case "--lib" -> {
                         if (seenLib) throw new IOException("Duplicate --lib");
-                        requireRawValue(raw, ++i, arg); // Bootstrap consumes this option in packaged runs.
+                        CliArgs.requireValue(raw, ++i, arg); // Bootstrap consumes this option in packaged runs.
                         seenLib = true;
                     }
                     default -> command.add(arg);
                 }
             }
             return new Invocation(snapshotRoot, archiveRoot, List.copyOf(command));
-        }
-
-        private static String requireRawValue(String[] args, int index, String option) throws IOException {
-            if (index >= args.length || args[index].startsWith("--"))
-                throw new IOException(option + " requires a directory path");
-            return args[index];
         }
     }
 }

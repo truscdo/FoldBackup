@@ -1,5 +1,7 @@
 package io.github.truscdo.foldbackup.core.rollback;
 
+import io.github.truscdo.foldbackup.core.WorldPaths;
+import io.github.truscdo.foldbackup.core.format.ChunkCoordinates;
 import io.github.truscdo.foldbackup.core.store.BlobStore;
 import io.github.truscdo.foldbackup.core.store.RegionEntry;
 import io.github.truscdo.foldbackup.core.store.SnapshotManifest;
@@ -59,14 +61,18 @@ public class ChunkRollbackSupport {
     public static ChunkData resolvePoiChunk(SnapshotManifest manifest, BlobStore blobs,
             int chunkX, int chunkZ, String dimensionSubPath) throws IOException {
         return readColumn(manifest, blobs,
-                poiRegionFilename(dimensionSubPath, chunkX >> 5, chunkZ >> 5), chunkX, chunkZ).chunk();
+                poiRegionFilename(dimensionSubPath,
+                        ChunkCoordinates.chunkToRegion(chunkX), ChunkCoordinates.chunkToRegion(chunkZ)),
+                chunkX, chunkZ).chunk();
     }
 
     /** Uses the already resolved manifest, so latest cannot change between the two reads. */
     public static ResolvedEntitySnapshot resolveEntities(SnapshotManifest manifest, BlobStore blobs,
             int chunkX, int chunkZ, String dimensionSubPath) throws IOException {
         ColumnData column = readColumn(manifest, blobs,
-                entityRegionFilename(dimensionSubPath, chunkX >> 5, chunkZ >> 5), chunkX, chunkZ);
+                entityRegionFilename(dimensionSubPath,
+                        ChunkCoordinates.chunkToRegion(chunkX), ChunkCoordinates.chunkToRegion(chunkZ)),
+                chunkX, chunkZ);
         if (!column.regionPresent()) return new ResolvedEntitySnapshot(EntitySnapshotState.REGION_MISSING,
                 EntityRegionCodec.empty(chunkX, chunkZ));
         if (column.chunk() == null) return new ResolvedEntitySnapshot(EntitySnapshotState.CHUNK_MISSING,
@@ -78,7 +84,9 @@ public class ChunkRollbackSupport {
     public static EntityRegionCodec.Recovery recoverEntities(SnapshotManifest manifest, BlobStore blobs,
             int x, int z, String dimensionSubPath) throws IOException {
         ColumnData column = readColumn(manifest, blobs,
-                entityRegionFilename(dimensionSubPath, x >> 5, z >> 5), x, z);
+                entityRegionFilename(dimensionSubPath,
+                        ChunkCoordinates.chunkToRegion(x), ChunkCoordinates.chunkToRegion(z)),
+                x, z);
         return EntityRegionCodec.recover(
                 column.chunk() == null ? EntityRegionCodec.empty(x, z).nbt() : column.chunk().getRawChunk(), x, z);
     }
@@ -94,7 +102,7 @@ public class ChunkRollbackSupport {
 
     /** Retains only the selected NBT, but consumes the full frame to validate its checksum and hash. */
     private static ChunkData readChunk(BlobStore blobs, RegionEntry entry, int x, int z) throws IOException {
-        int target = (z & 31) * 32 + (x & 31);
+        int target = ChunkCoordinates.slotIndex(x, z);
         var bytes = new ByteArrayOutputStream();
         LrhFormat.read(blobs.getRootDir().resolve(entry.getBlobPath()), new RegionStream.Consumer() {
             boolean selected;
@@ -140,7 +148,7 @@ public class ChunkRollbackSupport {
                     : "No snapshots available");
         }
 
-        int regionX = chunkX >> 5, regionZ = chunkZ >> 5;
+        int regionX = ChunkCoordinates.chunkToRegion(chunkX), regionZ = ChunkCoordinates.chunkToRegion(chunkZ);
         String regionFilename = dimensionSubPath + "region/r." + regionX + "." + regionZ + ".mca";
         RegionEntry entry = findRegionEntry(manifest, regionFilename);
         if (entry == null) {
@@ -175,20 +183,11 @@ public class ChunkRollbackSupport {
      * @return the dimension sub-path with trailing slash
      */
     public static String deriveDimensionSubPath(String worldDirName) {
-        return switch (worldDirName) {
-            case "DIM-1" -> "DIM-1/";
-            case "DIM1" -> "DIM1/";
-            default -> "";
-        };
+        return WorldPaths.dimensionSubPath(worldDirName);
     }
 
     public static String deriveDimensionSubPath(Path dimensionDirectory) {
-        Path directory = dimensionDirectory.toAbsolutePath().normalize();
-        for (Path parent = directory; parent != null; parent = parent.getParent()) {
-            if (parent.getFileName() != null && parent.getFileName().toString().equals("dimensions"))
-                return parent.getParent().relativize(directory).toString().replace('\\', '/') + "/";
-        }
-        return directory.getFileName() == null ? "" : deriveDimensionSubPath(directory.getFileName().toString());
+        return WorldPaths.dimensionSubPath(dimensionDirectory);
     }
 
     /**

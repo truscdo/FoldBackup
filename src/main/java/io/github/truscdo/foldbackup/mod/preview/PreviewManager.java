@@ -4,6 +4,7 @@ import io.github.truscdo.foldbackup.core.rollback.PreviewDifference;
 import io.github.truscdo.foldbackup.core.store.SnapshotStore;
 import io.github.truscdo.foldbackup.mod.DimensionPath;
 import io.github.truscdo.foldbackup.mod.FoldBackupMod;
+import io.github.truscdo.foldbackup.mod.command.BackendGuard;
 import io.github.truscdo.foldbackup.mod.i18n.FoldBackupTranslations;
 import it.unimi.dsi.fastutil.shorts.ShortOpenHashSet;
 import net.minecraft.core.BlockPos;
@@ -23,7 +24,6 @@ import net.neoforged.neoforge.event.server.ServerStoppingEvent;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
 import org.joml.Vector3f;
 
-import java.io.IOException;
 import java.util.*;
 
 /** 会话和世界操作在服务器线程执行，视图过滤与发包在网络线程顺序执行。 */
@@ -67,17 +67,14 @@ public final class PreviewManager {
     }
 
     public int start(ServerPlayer player, int x, int z, String snapshotId) {
-        SnapshotStore store = mod.getSnapshotStore();
+        SnapshotStore store = BackendGuard.requireSnapshotStore(mod, (key, args) -> message(player, key, args));
         if (store == null) {
-            message(player, "foldbackup.command.backend_not_ready");
             return 0;
         }
         Long epochSeconds = null;
         if (snapshotId != null) {
-            try {
-                epochSeconds = store.resolveEpoch(snapshotId);
-            } catch (IOException e) {
-                message(player, "foldbackup.command.info.not_found", snapshotId);
+            epochSeconds = BackendGuard.resolveEpoch(store, snapshotId, (key, args) -> message(player, key, args));
+            if (epochSeconds == null) {
                 return 0;
             }
         }
