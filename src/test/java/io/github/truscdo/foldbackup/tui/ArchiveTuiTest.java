@@ -55,7 +55,10 @@ class ArchiveTuiTest {
             System.setOut(previous);
         }
 
-        assertTrue(output.toString().contains("Put the full archive"));
+        String text = output.toString();
+        assertTrue(text.contains("Put the full archive"), text);
+        assertTrue(text.contains(io.github.truscdo.foldbackup.core.archive.ArchiveFormatUtil.expectedFullName(100)),
+                text);
     }
 
     @Test

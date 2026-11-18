@@ -168,7 +168,7 @@ public class ArchiveImporter {
         return importOne(entry, snapshots, blobs, listener, true, meta -> {
             SnapshotManifest baseline = snapshots.loadSnapshot(meta.baseEpoch);
             if (baseline == null) {
-                String expected = ArchiveCreator.fullTarName(SnapshotStore.generateSnapshotId(meta.baseEpoch));
+                String expected = ArchiveFormatUtil.expectedFullName(meta.baseEpoch);
                 throw new IOException("required baseline snapshot is not available in the online store: "
                         + SnapshotStore.generateSnapshotId(meta.baseEpoch) + " (import " + expected + " first)");
             }

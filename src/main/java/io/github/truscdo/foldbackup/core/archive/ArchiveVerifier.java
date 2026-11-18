@@ -6,7 +6,6 @@ import io.github.truscdo.foldbackup.core.ProgressTracker;
 import io.github.truscdo.foldbackup.core.format.LrhdFormat;
 import io.github.truscdo.foldbackup.core.format.RegionStream;
 import io.github.truscdo.foldbackup.core.HashUtil;
-import io.github.truscdo.foldbackup.core.store.SnapshotStore;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -17,7 +16,10 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 
 /**
  * Archive verifier: checks snapshot.bin, every {@code .lrh} frame and
@@ -67,21 +69,35 @@ public class ArchiveVerifier {
             throw new IOException("Archive root not found: " + archiveRoot);
         }
 
+        List<ArchiveTarScanner.ArchiveTarInfo> tars = ArchiveTarScanner.scan(archiveRoot);
         progress.stage("Locating backups", diffEpochSeconds == null ? 1 : 2);
-        Path fullTar = locateFullTar(archiveRoot, baseEpochSeconds);
+        Path fullTar = locateFullTar(archiveRoot, tars, baseEpochSeconds);
         progress.done(fullTar.getFileName().toString());
         Path diffTar = null;
         if (diffEpochSeconds != null) {
-            diffTar = locateDiffTar(archiveRoot, baseEpochSeconds, diffEpochSeconds);
+            diffTar = locateDiffTar(tars, baseEpochSeconds, diffEpochSeconds);
             progress.done(diffTar.getFileName().toString());
         }
+        verifyLocated(fullTar, diffTar, result, progress);
+        return result;
+    }
+
+    /** Verify already-located full (and optional diff) archives without scanning {@code archiveRoot}. */
+    public Result verifyLocated(Path fullTar, Path diffTar, ProgressListener listener) throws IOException {
+        Objects.requireNonNull(fullTar, "fullTar");
+        Result result = new Result();
+        verifyLocated(fullTar, diffTar, result, new ProgressTracker(listener));
+        return result;
+    }
+
+    private void verifyLocated(Path fullTar, Path diffTar, Result result, ProgressTracker progress)
+            throws IOException {
         try (var baseline = new ArchiveBaseline(fullTar)) {
             verifyFullTar(fullTar, baseline, result, progress);
             if (diffTar != null) {
                 verifyDiffTar(baseline, diffTar, result, progress);
             }
         }
-        return result;
     }
 
     /** Verify the selected archive and, for a diff, its required full baseline. */
@@ -90,58 +106,47 @@ public class ArchiveVerifier {
     }
 
     public Result verifyArchive(Path archiveRoot, Path archiveFile, ProgressListener listener) throws IOException {
+        return verifyArchive(archiveRoot, archiveFile, listener, null);
+    }
+
+    private Result verifyArchive(Path archiveRoot, Path archiveFile, ProgressListener listener,
+            Supplier<List<ArchiveTarScanner.ArchiveTarInfo>> tarSupplier) throws IOException {
         Result result = new Result();
         var collector = ArchiveErrorCollector.wrap(result.errors);
         String archiveName = archiveFile.getFileName().toString();
+        ArchiveTarScanner.ResolvedArchive resolved;
+        try {
+            resolved = ArchiveTarScanner.resolveArchive(archiveRoot, archiveFile, tarSupplier);
+        } catch (ArchiveTarScanner.ArchiveResolutionException e) {
+            if (e.rootError) collector.addRaw(e.getMessage());
+            else collector.add(archiveName, e.getMessage());
+            return result;
+        }
         var progress = new ProgressTracker(listener);
-        if (!Files.isDirectory(archiveRoot)) {
-            collector.addRaw("Archive root not found: " + archiveRoot);
-            return result;
-        }
-        if (!Files.isRegularFile(archiveFile)) {
-            collector.add(archiveName, "archive file not found");
-            return result;
-        }
-        ArchiveSnapshot meta = ArchiveFormatUtil.readSnapshot(archiveFile);
-        if (meta == null) {
-            collector.add(archiveName, "cannot read snapshot.bin or archive is damaged");
-            return result;
-        }
-        if (meta.isFull()) {
+        if (!resolved.isDiff()) {
             Result full = new Result();
-            try (ArchiveBaseline baseline = readBaseline(archiveFile, full)) {
-                if (baseline != null) verifyFullTar(archiveFile, baseline, full, progress);
+            try (ArchiveBaseline baseline = readBaseline(resolved.fullTar(), full)) {
+                if (baseline != null) verifyFullTar(resolved.fullTar(), baseline, full, progress);
             }
             mergeResult(result, full, archiveName);
-        } else if (meta.isDiff()) {
-            Path fullTar;
-            try {
-                fullTar = ArchiveTarScanner.fullAtEpoch(ArchiveTarScanner.scan(archiveRoot), meta.baseEpoch);
-            } catch (IOException e) {
-                String expected = ArchiveCreator.fullTarName(SnapshotStore.generateSnapshotId(meta.baseEpoch));
-                collector.add(archiveName, "required baseline archive "
-                        + expected + " is missing: " + e.getMessage());
-                return result;
-            }
+        } else {
             Result baseline = new Result();
-            try (ArchiveBaseline base = readBaseline(fullTar, baseline)) {
-                if (base != null) verifyFullTar(fullTar, base, baseline, progress);
-                mergeResult(result, baseline, fullTar.getFileName().toString());
+            try (ArchiveBaseline base = readBaseline(resolved.fullTar(), baseline)) {
+                if (base != null) verifyFullTar(resolved.fullTar(), base, baseline, progress);
+                mergeResult(result, baseline, resolved.fullTar().getFileName().toString());
 
                 Result diff = new Result();
                 if (base == null) {
                     diff.errors.add("baseline archive cannot be read");
                 } else {
                     try {
-                        verifyDiffTar(base, archiveFile, diff, progress);
+                        verifyDiffTar(base, resolved.diffTar(), diff, progress);
                     } catch (IOException | RuntimeException e) {
                         diff.errors.add(e.getMessage());
                     }
                 }
                 mergeResult(result, diff, archiveName);
             }
-        } else {
-            collector.add(archiveName, "unsupported archive type " + meta.type);
         }
         return result;
     }
@@ -175,6 +180,15 @@ public class ArchiveVerifier {
             archives = stream.filter(path -> path.getFileName().toString().endsWith(".tar"))
                     .sorted().toList();
         }
+        var scannedTars = new AtomicReference<List<ArchiveTarScanner.ArchiveTarInfo>>();
+        Supplier<List<ArchiveTarScanner.ArchiveTarInfo>> tarCache = () -> {
+            List<ArchiveTarScanner.ArchiveTarInfo> cached = scannedTars.get();
+            if (cached == null) {
+                cached = ArchiveTarScanner.scan(archiveRoot);
+                scannedTars.set(cached);
+            }
+            return cached;
+        };
         var progress = new ProgressTracker(listener);
         progress.stage("Verifying archives", archives.size());
         for (int i = 0; i < archives.size(); i++) {
@@ -184,7 +198,7 @@ public class ArchiveVerifier {
             ProgressListener subListener = ProgressTracker.prefixed(
                     listener, "[" + (i + 1) + "/" + archives.size() + " " + archiveName + "] ");
             try {
-                Result one = verifyArchive(archiveRoot, archive, subListener);
+                Result one = verifyArchive(archiveRoot, archive, subListener, tarCache);
                 combined.lrhChecked += one.lrhChecked;
                 combined.lrhdChecked += one.lrhdChecked;
                 combined.chunkHashesChecked += one.chunkHashesChecked;
@@ -327,20 +341,21 @@ public class ArchiveVerifier {
         }
     }
 
-    // ── tar location (mirrors ArchiveRestoreSource) ──
+    // ── tar location (uses shared ArchiveTarScanner lookups) ──
 
-    private Path locateFullTar(Path archiveRoot, Long baseEpochSeconds) throws IOException {
-        List<ArchiveTarScanner.ArchiveTarInfo> tars = ArchiveTarScanner.scan(archiveRoot);
+    private Path locateFullTar(Path archiveRoot, List<ArchiveTarScanner.ArchiveTarInfo> tars,
+            Long baseEpochSeconds) throws IOException {
         if (baseEpochSeconds != null) return ArchiveTarScanner.fullAtEpoch(tars, baseEpochSeconds);
         List<ArchiveTarScanner.ArchiveTarInfo> fulls = ArchiveTarScanner.fulls(tars);
         if (fulls.isEmpty()) throw new IOException("No full archive found in " + archiveRoot);
         return ArchiveTarScanner.fullAtEpoch(tars, fulls.getFirst().meta().epoch);
     }
 
-    private Path locateDiffTar(Path archiveRoot, Long baseEpochSeconds, long diffEpochSeconds) throws IOException {
+    private Path locateDiffTar(List<ArchiveTarScanner.ArchiveTarInfo> tars,
+            Long baseEpochSeconds, long diffEpochSeconds) throws IOException {
         if (baseEpochSeconds == null) {
             throw new IOException("--base is required when --diff is specified");
         }
-        return ArchiveTarScanner.diffAtEpoch(ArchiveTarScanner.scan(archiveRoot), baseEpochSeconds, diffEpochSeconds);
+        return ArchiveTarScanner.diffAtEpoch(tars, baseEpochSeconds, diffEpochSeconds);
     }
 }

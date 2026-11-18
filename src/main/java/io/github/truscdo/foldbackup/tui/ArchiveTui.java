@@ -38,7 +38,7 @@ public class ArchiveTui {
             String targetId = selected.target().meta().sourceSnapshotId;
             Path defaultOutput = ArchiveDefaults.worldExport(targetId);
             var flow = RestoreInteraction.runFromPathPrompt(prompt, "World files directory", defaultOutput,
-                    () -> ArchiveRestoreSource.open(archiveRoot, selected.target().tar()),
+                    () -> ArchiveRestoreSource.openResolved(selected.fullTar(), selected.diffTar()),
                     ArchiveDefaults.RESTORE_LEVEL, "Restoring...", "Restore cancelled.", "Restore failed: ");
             if (flow != RestoreInteraction.Flow.BACK_TO_PATH) {
                 return;
@@ -54,9 +54,8 @@ public class ArchiveTui {
 
         ArchiveVerifier.Result result;
         try (var progress = new ProgressPrinter(System.out)) {
-            result = new ArchiveVerifier().verify(archiveRoot, selected.full().meta().epoch,
-                    selected.target().meta().isDiff() ? selected.target().meta().epoch : null,
-                    progress.onProgress());
+            result = new ArchiveVerifier().verifyLocated(
+                    selected.fullTar(), selected.diffTar(), progress.onProgress());
         } catch (IOException e) {
             System.err.println("Verify failed: " + e.getMessage() + "\n");
             return;
@@ -99,6 +98,13 @@ public class ArchiveTui {
 
     /** A selected target plus the full archive required to read it. */
     private record SelectedArchive(ArchiveTarInfo full, ArchiveTarInfo target) {
+        Path fullTar() {
+            return full.tar();
+        }
+
+        Path diffTar() {
+            return target.meta().isDiff() ? target.tar() : null;
+        }
     }
 
     /**
@@ -144,13 +150,12 @@ public class ArchiveTui {
         try {
             fullPath = ArchiveTarScanner.fullAtEpoch(tars, target.meta().baseEpoch);
         } catch (IOException e) {
-            if (ArchiveFormatUtil.isConflictingFullError(e)) {
-                System.out.println(e.getMessage() + "\n");
-            } else {
-                System.out.println("No corresponding full archive found for diff "
-                        + target.meta().sourceSnapshotId + ". Put the full archive in "
-                        + archiveRoot + " and retry.\n");
+            String message = ArchiveFormatUtil.baselineArchiveErrorMessage(target.meta().baseEpoch, e);
+            if (!ArchiveFormatUtil.isConflictingFullError(e)) {
+                message += " for diff " + target.meta().sourceSnapshotId
+                        + ". Put the full archive in " + archiveRoot + " and retry.";
             }
+            System.out.println(message + "\n");
             return null;
         }
         ArchiveTarInfo full = tars.stream()

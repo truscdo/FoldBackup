@@ -142,17 +142,7 @@ class ArchiveRestoreSourceTest {
         assertEquals("level-v2", Files.readString(output.resolve("level.dat")));
         assertEquals(1, outcome.stats().changedRegions());
 
-        var entries = new java.util.LinkedHashMap<String, byte[]>();
-        try (var reader = new io.github.truscdo.foldbackup.core.archive.TarReader(Files.newInputStream(copyFull))) {
-            io.github.truscdo.foldbackup.core.archive.TarReader.Entry e;
-            while ((e = reader.nextEntry()) != null) entries.put(e.name, reader.readEntryData());
-        }
-        var meta = io.github.truscdo.foldbackup.core.archive.ArchiveSnapshotCodec.decode(entries.get("snapshot.bin"));
-        meta.world = "other-world";
-        entries.put("snapshot.bin", io.github.truscdo.foldbackup.core.archive.ArchiveSnapshotCodec.encode(meta));
-        try (var writer = new io.github.truscdo.foldbackup.core.archive.TarWriter(Files.newOutputStream(copyFull))) {
-            for (var e : entries.entrySet()) writer.putEntry(e.getKey(), e.getValue());
-        }
+        rewriteWorld(copyFull, "other-world");
 
         IOException failure = assertThrows(IOException.class,
                 () -> restore(archives, diff, temp.resolve("out-conflict"), false));
@@ -160,5 +150,51 @@ class ArchiveRestoreSourceTest {
         assertTrue(failure.getMessage().contains("is ambiguous"), failure.getMessage());
         assertTrue(failure.getMessage().contains(full.getFileName().toString()), failure.getMessage());
         assertTrue(failure.getMessage().contains("z-copy-full.tar"), failure.getMessage());
+    }
+
+    @Test
+    void openResolvedOpensLocatedFullAndDiffWithoutDirectoryRescan() throws Exception {
+        Path world = world();
+        Path store = temp.resolve("store-resolved");
+        Path archives = temp.resolve("archives-resolved");
+        SnapshotManifest base = SnapshotCreation.create(world, store, 1, event -> { });
+        Path full = new ArchiveCreator(new SnapshotStore(store), new BlobStore(store, 6), 6)
+                .createFull(base.getEpochSeconds(), archives);
+
+        Thread.sleep(1100);
+        mutate(world);
+        SnapshotManifest target = SnapshotCreation.create(world, store, 1, event -> { });
+        Path diff = new ArchiveCreator(new SnapshotStore(store), new BlobStore(store, 6), 6)
+                .createDiff(base.getEpochSeconds(), target.getEpochSeconds(), archives);
+
+        Path conflictFull = archives.resolve("z-conflict-full.tar");
+        Files.copy(full, conflictFull);
+        rewriteWorld(conflictFull, "other-world");
+
+        Path fullOut = temp.resolve("out-full-resolved");
+        try (var source = ArchiveRestoreSource.openResolved(full, null)) {
+            RestoreOperation.run(source, fullOut, new RestoreOperation.Options(false, false, 1, 6), null);
+        }
+        assertEquals("level-v1", Files.readString(fullOut.resolve("level.dat")));
+
+        Path diffOut = temp.resolve("out-diff-resolved");
+        try (var source = ArchiveRestoreSource.openResolved(full, diff)) {
+            RestoreOperation.run(source, diffOut, new RestoreOperation.Options(false, false, 1, 6), null);
+        }
+        assertEquals("level-v2", Files.readString(diffOut.resolve("level.dat")));
+    }
+
+    private static void rewriteWorld(Path tar, String worldName) throws IOException {
+        var entries = new java.util.LinkedHashMap<String, byte[]>();
+        try (var reader = new io.github.truscdo.foldbackup.core.archive.TarReader(Files.newInputStream(tar))) {
+            io.github.truscdo.foldbackup.core.archive.TarReader.Entry e;
+            while ((e = reader.nextEntry()) != null) entries.put(e.name, reader.readEntryData());
+        }
+        var meta = io.github.truscdo.foldbackup.core.archive.ArchiveSnapshotCodec.decode(entries.get("snapshot.bin"));
+        meta.world = worldName;
+        entries.put("snapshot.bin", io.github.truscdo.foldbackup.core.archive.ArchiveSnapshotCodec.encode(meta));
+        try (var writer = new io.github.truscdo.foldbackup.core.archive.TarWriter(Files.newOutputStream(tar))) {
+            for (var e : entries.entrySet()) writer.putEntry(e.getKey(), e.getValue());
+        }
     }
 }

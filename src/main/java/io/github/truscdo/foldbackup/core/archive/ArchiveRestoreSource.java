@@ -3,7 +3,6 @@ package io.github.truscdo.foldbackup.core.archive;
 import com.github.luben.zstd.ZstdInputStream;
 import io.github.truscdo.foldbackup.core.restore.RestoreEntry;
 import io.github.truscdo.foldbackup.core.restore.RestoreSource;
-import io.github.truscdo.foldbackup.core.store.SnapshotStore;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -12,6 +11,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -28,28 +28,18 @@ public final class ArchiveRestoreSource implements RestoreSource {
     private final List<RestoreEntry> regionEntries;
 
     public static ArchiveRestoreSource open(Path archiveRoot, Path archiveFile) throws IOException {
-        if (!Files.isDirectory(archiveRoot)) throw new IOException("Archive root not found: " + archiveRoot);
-        if (!Files.isRegularFile(archiveFile)) throw new IOException("Archive file not found: " + archiveFile);
-        ArchiveSnapshot meta = ArchiveFormatUtil.readSnapshot(archiveFile);
-        if (meta == null) throw new IOException("Cannot read snapshot metadata from archive: " + archiveFile);
+        ArchiveTarScanner.ResolvedArchive resolved = ArchiveTarScanner.resolveArchive(archiveRoot, archiveFile);
+        return new ArchiveRestoreSource(resolved.fullTar(), resolved.diffTar());
+    }
 
-        Path fullTar;
-        Path diffTar = null;
-        if (meta.isFull()) {
-            fullTar = archiveFile;
-        } else if (meta.isDiff()) {
-            try {
-                fullTar = ArchiveTarScanner.fullAtEpoch(ArchiveTarScanner.scan(archiveRoot), meta.baseEpoch);
-            } catch (IOException e) {
-                String expected = ArchiveCreator.fullTarName(SnapshotStore.generateSnapshotId(meta.baseEpoch));
-                if (ArchiveFormatUtil.isConflictingFullError(e)) {
-                    throw new IOException("Required baseline archive " + expected + " is ambiguous: " + e.getMessage(), e);
-                }
-                throw new IOException("Required baseline archive " + expected + " is missing", e);
-            }
-            diffTar = archiveFile;
-        } else {
-            throw new IOException("Unknown archive type in " + archiveFile + ": " + meta.type);
+    /** Open a restore source from already-located archives without rescanning {@code archiveRoot}. */
+    public static ArchiveRestoreSource openResolved(Path fullTar, Path diffTar) throws IOException {
+        Objects.requireNonNull(fullTar, "fullTar");
+        if (!Files.isRegularFile(fullTar)) {
+            throw new IOException("Archive file not found: " + fullTar);
+        }
+        if (diffTar != null && !Files.isRegularFile(diffTar)) {
+            throw new IOException("Archive file not found: " + diffTar);
         }
         return new ArchiveRestoreSource(fullTar, diffTar);
     }

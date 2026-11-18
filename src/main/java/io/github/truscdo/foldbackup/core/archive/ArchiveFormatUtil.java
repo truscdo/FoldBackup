@@ -1,5 +1,7 @@
 package io.github.truscdo.foldbackup.core.archive;
 
+import io.github.truscdo.foldbackup.core.store.SnapshotStore;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
@@ -69,6 +71,20 @@ public final class ArchiveFormatUtil {
     public static boolean isConflictingFullError(IOException error) {
         return error != null && error.getMessage() != null
                 && error.getMessage().startsWith(CONFLICTING_FULL_PREFIX);
+    }
+
+    /** 根据基线 Epoch 秒推导期望的完整归档文件名。 */
+    public static String expectedFullName(long baseEpoch) {
+        return ArchiveCreator.fullTarName(SnapshotStore.generateSnapshotId(baseEpoch));
+    }
+
+    /** 构造差分归档缺失或同 Epoch 基线冲突时的统一提示信息。 */
+    public static String baselineArchiveErrorMessage(long baseEpoch, IOException cause) {
+        String expected = expectedFullName(baseEpoch);
+        if (isConflictingFullError(cause)) {
+            return "Required baseline archive " + expected + " is ambiguous: " + cause.getMessage();
+        }
+        return "Required baseline archive " + expected + " is missing";
     }
 
     /** 格式化 epoch 秒为本地时区 {@code yyyy-MM-dd HH:mm:ss}。 */

@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
+import java.util.function.Supplier;
 
 /**
  * 归档目录扫描：列出 {@code *.tar}、解析 snapshot.bin、区分 full/diff。
@@ -25,6 +26,67 @@ public final class ArchiveTarScanner {
 
     /** 归档根下的一个 tar 及其解析出的元数据。 */
     public record ArchiveTarInfo(Path tar, String fileName, ArchiveSnapshot meta, long size) {
+    }
+
+    /** 已解析出的目标归档与其所需基线归档路径；全量归档的 {@code diffTar} 为 {@code null}。 */
+    record ResolvedArchive(Path fullTar, Path diffTar) {
+        boolean isDiff() {
+            return diffTar != null;
+        }
+    }
+
+    /**
+     * 目标/基线归档定位失败异常，标记是否属于归档根目录不可用（供校验器区分是否带文件名前缀）。
+     */
+    static final class ArchiveResolutionException extends IOException {
+        final boolean rootError;
+
+        ArchiveResolutionException(String message, boolean rootError) {
+            super(message);
+            this.rootError = rootError;
+        }
+
+        ArchiveResolutionException(String message, Throwable cause) {
+            super(message, cause);
+            this.rootError = false;
+        }
+    }
+
+    /** 解析单个归档（full 直接返回自身；diff 自动定位其基线 full 归档）。 */
+    static ResolvedArchive resolveArchive(Path archiveRoot, Path archiveFile) throws IOException {
+        return resolveArchive(archiveRoot, archiveFile, null);
+    }
+
+    /**
+     * 解析单个归档及其基线；若提供 {@code tarSupplier}，仅在定位差分归档基线时按需获取目录扫描结果。
+     */
+    static ResolvedArchive resolveArchive(Path archiveRoot, Path archiveFile,
+            Supplier<List<ArchiveTarInfo>> tarSupplier) throws IOException {
+        if (!Files.isDirectory(archiveRoot)) {
+            throw new ArchiveResolutionException("Archive root not found: " + archiveRoot, true);
+        }
+        if (!Files.isRegularFile(archiveFile)) {
+            throw new ArchiveResolutionException("Archive file not found: " + archiveFile, false);
+        }
+        ArchiveSnapshot meta = ArchiveFormatUtil.readSnapshot(archiveFile);
+        if (meta == null) {
+            throw new ArchiveResolutionException("Cannot read snapshot metadata from archive: " + archiveFile, false);
+        }
+        if (meta.isFull()) {
+            return new ResolvedArchive(archiveFile, null);
+        }
+        if (meta.isDiff()) {
+            List<ArchiveTarInfo> tars = tarSupplier != null ? tarSupplier.get() : scan(archiveRoot);
+            Path fullTar;
+            try {
+                fullTar = fullAtEpoch(tars, meta.baseEpoch);
+            } catch (IOException e) {
+                throw new ArchiveResolutionException(
+                        ArchiveFormatUtil.baselineArchiveErrorMessage(meta.baseEpoch, e), e);
+            }
+            return new ResolvedArchive(fullTar, archiveFile);
+        }
+        throw new ArchiveResolutionException("Unknown archive type in " + archiveFile + ": " + meta.type, false);
     }
 
     /**
