@@ -1,6 +1,6 @@
 package io.github.truscdo.foldbackup.core.console;
 
-import io.github.truscdo.foldbackup.core.archive.ArchiveFormatUtil;
+import io.github.truscdo.foldbackup.core.FormatUtil;
 import io.github.truscdo.foldbackup.core.archive.ArchiveVerifier;
 
 import java.io.PrintStream;
@@ -20,7 +20,7 @@ public final class ArchiveVerifyReporter {
     public static void print(ArchiveVerifier.Result r, PrintStream out) {
         out.println("Verified " + r.lrhChecked + " .lrh, " + r.lrhdChecked + " .lrhd, "
                 + r.chunkHashesChecked + " chunk hashes, "
-                + ArchiveFormatUtil.formatSize(r.totalBytes) + " total");
+                + FormatUtil.formatSize(r.totalBytes) + " total");
         if (r.ok()) {
             out.println("OK — no errors");
         } else {

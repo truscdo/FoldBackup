@@ -43,7 +43,7 @@ class BackupProgressAdapterTest {
     @Test
     void completionPreservesSmallSizesAndCleanupFailureIsDistinct() {
         var complete = BackupProgressAdapter.toEvent(new BackupStep.Completed(1, "snapshot", new ScanStats(0, 0, 1, 1), 73));
-        assertTrue(complete.item().contains("73 B"));
+        assertTrue(complete.item().contains("73B"));
         var cleanup = BackupProgressAdapter.toEvent(new BackupStep.CleanupFailed(1, "snapshot", "disk error"));
         assertEquals("Snapshot committed; cleanup failed", cleanup.phase());
         assertTrue(cleanup.item().contains("snapshot"));

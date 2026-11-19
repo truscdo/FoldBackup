@@ -18,9 +18,6 @@ import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.server.level.ServerPlayer;
 
-import java.text.SimpleDateFormat;
-import java.time.Instant;
-import java.util.Date;
 import java.util.List;
 
 /** {@code /foldbackup} command for backup management. */
@@ -239,8 +236,7 @@ public class FoldBackupCommand {
                         return 0;
                 }
 
-                SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
-                String date = dateFormat.format(Date.from(Instant.ofEpochSecond(snapshot.getEpochSeconds())));
+                String date = FormatUtil.formatEpoch(snapshot.getEpochSeconds());
                 source.sendSuccess(() -> CommandFeedback.text(source, mod, "foldbackup.command.info.title",
                                 snapshot.getSnapshotId()), false);
                 source.sendSuccess(() -> CommandFeedback.text(source, mod, "foldbackup.command.info.time",

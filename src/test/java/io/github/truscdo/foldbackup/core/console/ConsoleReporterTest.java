@@ -40,7 +40,7 @@ class ConsoleReporterTest {
 
         ArchiveVerifyReporter.print(r, c.stream());
         String out = c.output();
-        assertTrue(out.contains("Verified 3 .lrh, 1 .lrhd, 42 chunk hashes"));
+        assertTrue(out.contains("Verified 3 .lrh, 1 .lrhd, 42 chunk hashes, 1.0K total"));
         assertTrue(out.contains("OK — no errors"));
         assertFalse(out.contains("FAILED"));
     }
@@ -73,6 +73,7 @@ class ConsoleReporterTest {
         assertTrue(out.contains("Date"));
         assertTrue(out.contains("Size"));
         assertTrue(out.contains("snap-1"));
+        assertTrue(out.contains("1000B"));
         assertFalse(out.contains("Regions"), "selection table must not have Regions column");
     }
 
@@ -88,5 +89,7 @@ class ConsoleReporterTest {
         assertTrue(out.contains("Files"));
         assertTrue(out.contains("Cumulative Space"));
         assertTrue(out.contains("snap-1"));
+        assertTrue(out.contains("1000B"));
+        assertTrue(out.contains("0B"));
     }
 }

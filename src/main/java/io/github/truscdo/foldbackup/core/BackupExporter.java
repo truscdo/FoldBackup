@@ -4,10 +4,7 @@ import io.github.truscdo.foldbackup.core.store.SnapshotStore;
 import io.github.truscdo.foldbackup.core.store.SnapshotManifest;
 import io.github.truscdo.foldbackup.core.store.SnapshotReclamationEstimator;
 
-import java.text.SimpleDateFormat;
-import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -86,9 +83,8 @@ public class BackupExporter {
     private List<SnapshotInfo> toSnapshotInfo(List<SnapshotManifest> snapshots,
                                                Map<Long, Long> cumulativeSpaceByEpoch) {
         List<SnapshotInfo> result = new ArrayList<>(snapshots.size());
-        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
         for (SnapshotManifest sn : snapshots) {
-            String date = sdf.format(Date.from(Instant.ofEpochSecond(sn.getEpochSeconds())));
+            String date = FormatUtil.formatEpoch(sn.getEpochSeconds());
             SnapshotManifest.Summary s = sn.getSummary();
             int regions = (s != null) ? s.getRegionsTotal() : 0;
             int files = (s != null) ? s.getExtraFilesTotal() : 0;

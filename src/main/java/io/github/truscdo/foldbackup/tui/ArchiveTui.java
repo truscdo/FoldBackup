@@ -1,6 +1,7 @@
 package io.github.truscdo.foldbackup.tui;
 
 import io.github.truscdo.foldbackup.core.archive.ArchiveDefaults;
+import io.github.truscdo.foldbackup.core.FormatUtil;
 import io.github.truscdo.foldbackup.core.archive.ArchiveFormatUtil;
 import io.github.truscdo.foldbackup.core.archive.ArchiveImporter;
 import io.github.truscdo.foldbackup.core.archive.ArchiveRestoreSource;
@@ -128,11 +129,11 @@ public class ArchiveTui {
         for (int i = 0; i < archives.size(); i++) {
             ArchiveTarInfo t = archives.get(i);
             String baseEpoch = t.meta().isDiff()
-                    ? ArchiveFormatUtil.formatEpoch(t.meta().baseEpoch) : "-";
+                    ? FormatUtil.formatEpoch(t.meta().baseEpoch) : "-";
             System.out.printf("%-4d %-8s %-22s %-30s %-22s %8d %8d %10s%n",
-                    i + 1, t.meta().type, ArchiveFormatUtil.formatEpoch(t.meta().epoch),
+                    i + 1, t.meta().type, FormatUtil.formatEpoch(t.meta().epoch),
                     t.meta().sourceSnapshotId, baseEpoch, t.meta().regionCount,
-                    t.meta().chunkCount, ArchiveFormatUtil.formatSize(t.size()));
+                    t.meta().chunkCount, FormatUtil.formatSize(t.size()));
         }
         System.out.println();
 

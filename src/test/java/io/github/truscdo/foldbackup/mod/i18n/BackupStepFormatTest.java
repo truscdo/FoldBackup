@@ -14,7 +14,7 @@ class BackupStepFormatTest {
         var stats = new ScanStats(1, 0, 2, 1);
         assertTrue(BackupStepFormat.format(new BackupStep.PreparingSnapshot(stats)).startsWith("Preparing snapshot:"));
         assertEquals("Committing snapshot: sample", BackupStepFormat.format(new BackupStep.CommittingSnapshot("sample")));
-        assertTrue(BackupStepFormat.format(new BackupStep.Completed(1, "sample", stats, 73)).contains("73 B new"));
+        assertTrue(BackupStepFormat.format(new BackupStep.Completed(1, "sample", stats, 73)).contains("73B new"));
         assertTrue(BackupStepFormat.format(new BackupStep.CleanupFailed(1, "sample", "disk error"))
                 .contains("sample committed, but cleanup failed"));
     }
@@ -33,7 +33,7 @@ class BackupStepFormatTest {
                 assertFalse(text.contains("foldbackup.progress."), language + ": " + text);
                 assertFalse(text.contains("%s"), language + ": " + text);
                 assertFalse(text.isBlank());
-                if (step instanceof BackupStep.Completed) assertTrue(text.contains("73 B"), text);
+                if (step instanceof BackupStep.Completed) assertTrue(text.contains("73B"), text);
                 if (step instanceof BackupStep.CleanupFailed || step instanceof BackupStep.CommittingSnapshot)
                     assertTrue(text.contains("sample"), text);
             }

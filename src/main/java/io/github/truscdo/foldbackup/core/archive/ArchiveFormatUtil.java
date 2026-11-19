@@ -6,18 +6,15 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.text.SimpleDateFormat;
-import java.util.Date;
 import java.util.List;
 
 /**
- * 归档共享解析/格式化工具。
+ * 归档共享解析与基线报错工具。
  * <p>
- * 从 {@code cli/ArchiveCli} 的私有 static 方法提取，供 CLI 与 TUI 复用：
+ * 供 CLI、TUI 与校验/导入流程复用：
  * <ul>
  * <li>{@link #readSnapshot} — 读取 tar 内 {@code snapshot.bin}</li>
- * <li>{@link #formatEpoch} — epoch 秒 → {@code yyyy-MM-dd HH:mm:ss}（显示用）</li>
- * <li>{@link #formatSize} — 字节数 → B/K/M/G</li>
+ * <li>{@link #expectedFullName} / {@link #baselineArchiveErrorMessage} — 归档基线与冲突消息</li>
  * </ul>
  */
 public final class ArchiveFormatUtil {
@@ -85,24 +82,5 @@ public final class ArchiveFormatUtil {
             return "Required baseline archive " + expected + " is ambiguous: " + cause.getMessage();
         }
         return "Required baseline archive " + expected + " is missing";
-    }
-
-    /** 格式化 epoch 秒为本地时区 {@code yyyy-MM-dd HH:mm:ss}。 */
-    public static String formatEpoch(long epochSeconds) {
-        return new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date(epochSeconds * 1000));
-    }
-
-    /** 格式化字节数为人类可读的 B/K/M/G（无空格，如 {@code 1.5M}）。 */
-    public static String formatSize(long bytes) {
-        if (bytes < 1024) {
-            return bytes + "B";
-        }
-        if (bytes < 1024 * 1024) {
-            return String.format("%.1fK", bytes / 1024.0);
-        }
-        if (bytes < 1024L * 1024 * 1024) {
-            return String.format("%.1fM", bytes / (1024.0 * 1024));
-        }
-        return String.format("%.1fG", bytes / (1024.0 * 1024 * 1024));
     }
 }
