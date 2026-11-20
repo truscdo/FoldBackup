@@ -369,4 +369,90 @@ class BackupExecutorTest {
             }
         }
     }
+
+    @Test void finishBackupPreservesCoordinatorFailureMessage() throws Exception {
+        var world = new WorldAccessorTest.World();
+        var tasks = new TaskRegistry();
+        var cleanup = new SnapshotStore.CommittedCleanupException(42L, "snapshot-42",
+                new IOException("disk full"));
+        var coordinator = new BackupCoordinator(null, null, null, null) {
+            @Override public SnapshotManifest runBackup(TaskStatus status, Consumer<BackupStep> listener) throws IOException {
+                status.setArtifact(42L, "snapshot-42");
+                status.setFailed(cleanup.getMessage());
+                listener.accept(new BackupStep.CleanupFailed(42L, "snapshot-42", cleanup.getMessage()));
+                throw cleanup;
+            }
+        };
+        try (var worker = Executors.newSingleThreadExecutor()) {
+            var executor = new BackupExecutor(Runnable::run, (key, args) -> {}, world, coordinator,
+                    null, worker, tasks);
+            assertEquals(BackupResult.FAILED, executor.triggerBackup(true).get(2, TimeUnit.SECONDS));
+            assertFalse(tasks.hasActiveTask());
+            assertEquals(cleanup.getMessage(), tasks.getHistory().getFirst().message());
+        }
+    }
+
+    @Test void restoreSavingFailureInFinishBackupDoesNotMaskOriginalFailureAndStillFailsWhenOtherwiseOk() throws Exception {
+        // 1) 原始备份失败（CommittedCleanupException）+ 兜底恢复保存抛异常：不得掩盖原始失败通知与调度记录
+        var cleanup = new SnapshotStore.CommittedCleanupException(42L, "snapshot-42",
+                new IOException("disk full"));
+        var worldWithCleanup = new WorldAccessorTest.World() {
+            @Override public void enableSaving() {
+                super.enableSaving();
+                throw new IllegalStateException("enable failed");
+            }
+        };
+        var tasks1 = new TaskRegistry();
+        var warnings1 = new CopyOnWriteArrayList<String>();
+        var scheduler1 = new BackupScheduler(null);
+        var failingCoordinator = new BackupCoordinator(null, null, null, null) {
+            @Override public SnapshotManifest runBackup(TaskStatus status, Consumer<BackupStep> listener) throws IOException {
+                status.setArtifact(42L, "snapshot-42");
+                status.setFailed(cleanup.getMessage());
+                listener.accept(new BackupStep.CleanupFailed(42L, "snapshot-42", cleanup.getMessage()));
+                throw cleanup;
+            }
+        };
+        try (var worker = Executors.newSingleThreadExecutor()) {
+            var executor = new BackupExecutor(Runnable::run,
+                    (key, args) -> warnings1.add(args.length == 0 ? key : key + ":" + args[0]),
+                    worldWithCleanup, failingCoordinator, scheduler1, worker, tasks1);
+            assertEquals(BackupResult.FAILED, executor.triggerBackup(true).get(2, TimeUnit.SECONDS));
+            worldWithCleanup.assertRestored();
+            assertFalse(tasks1.hasActiveTask());
+            assertEquals(cleanup.getMessage(), tasks1.getHistory().getFirst().message());
+            assertTrue(scheduler1.getLastBackupTime() > 0);
+            assertEquals(List.of("foldbackup.progress.cleanup_failed:snapshot-42"), warnings1);
+        }
+
+        // 2) 备份未抛异常，但在 finishBackup 兜底恢复保存失败：仍应记 FAILED 并触发退避
+        var worldFailingRestore = new WorldAccessorTest.World() {
+            @Override public void enableSaving() {
+                super.enableSaving();
+                throw new IllegalStateException("enable failed");
+            }
+        };
+        var tasks2 = new TaskRegistry();
+        var warnings2 = new CopyOnWriteArrayList<String>();
+        var scheduler2 = new BackupScheduler(() -> 1, () -> 0);
+        for (int i = 0; i < 6; i++) {
+            for (int t = 0; t < 200; t++) scheduler2.shouldTrigger(true);
+        }
+        var okCoordinator = new BackupCoordinator(null, null, null, null) {
+            @Override public SnapshotManifest runBackup(TaskStatus status, Consumer<BackupStep> listener) {
+                return null;
+            }
+        };
+        try (var worker = Executors.newSingleThreadExecutor()) {
+            var executor = new BackupExecutor(Runnable::run, (key, args) -> warnings2.add(key),
+                    worldFailingRestore, okCoordinator, scheduler2, worker, tasks2);
+            assertEquals(BackupResult.FAILED, executor.triggerBackup(true).get(2, TimeUnit.SECONDS));
+            worldFailingRestore.assertRestored();
+            assertFalse(executor.isBackupRunning());
+            assertFalse(tasks2.hasActiveTask());
+            assertEquals("Failed to restore world saving", tasks2.getHistory().getFirst().message());
+            assertEquals(List.of("foldbackup.backup.failure"), warnings2);
+            assertEquals(0, scheduler2.getAccumulatedOnlineMinutes());
+        }
+    }
 }

@@ -125,9 +125,16 @@ public class TaskStatus {
 
     /**
      * Mark the task as failed, record the error message and completion time.
-     * Once called the status is immutable (no further updates).
+     * Once a non-empty failure message is recorded, subsequent calls preserve it
+     * along with the original completion timestamp.
      */
     public TaskStatus setFailed(String errorMessage) {
+        if (this.phase == Phase.FAILED) {
+            if ((this.message == null || this.message.isEmpty()) && errorMessage != null && !errorMessage.isEmpty()) {
+                this.message = errorMessage;
+            }
+            return this;
+        }
         this.phase = Phase.FAILED;
         this.message = errorMessage;
         this.completedAtMs = System.currentTimeMillis();

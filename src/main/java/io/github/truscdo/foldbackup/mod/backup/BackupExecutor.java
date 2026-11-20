@@ -279,14 +279,17 @@ public class BackupExecutor {
             return;
         }
         run.pause.end();
+        boolean savingRestored = restoreSaving("when finishing backup");
         BackupResult outcome = BackupResult.FAILED;
         Throwable failureCause = unwrapCompletion(ex);
         try {
-            worldAccessor.enableSaving();
             if (failureCause != null) {
                 LOG.error("Backup failed", failureCause);
                 taskRegistry.fail(run.status, "Backup failed: " + failureCause.getMessage());
                 notifyPlayersOfBackupFailure(failureCause);
+            } else if (!savingRestored) {
+                taskRegistry.fail(run.status, "Failed to restore world saving");
+                notifyPlayersOfBackupFailure();
             } else if (BackupResult.SUCCESS.equals(ok)) {
                 LOG.info("[{}] {}", run.status.taskId(), BackupStepFormat.format(run.status.stepProgress()));
                 taskRegistry.complete(run.status);
@@ -295,10 +298,6 @@ public class BackupExecutor {
                 taskRegistry.fail(run.status, "Backup failed with unexpected result");
                 notifyPlayersOfBackupFailure();
             }
-        } catch (Exception e) {
-            LOG.error("Failed to restore world saving", e);
-            taskRegistry.fail(run.status, "Failed to restore world saving: " + e.getMessage());
-            notifyPlayersOfBackupFailure();
         } finally {
             try {
                 updateSchedulerAfterRun(outcome, failureCause);

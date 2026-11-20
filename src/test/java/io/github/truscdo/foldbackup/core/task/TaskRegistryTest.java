@@ -20,4 +20,19 @@ class TaskRegistryTest {
         assertEquals(1, capturedHistory.size());
         assertThrows(UnsupportedOperationException.class, () -> capturedHistory.clear());
     }
+
+    @Test void failPreservesExistingNonEmptyFailureMessage() {
+        var registry = new TaskRegistry();
+        var specific = registry.startTask(TaskType.BACKUP).setRunning();
+        specific.setFailed("Snapshot committed, cleanup failed");
+        registry.fail(specific, "Backup failed: Snapshot committed, cleanup failed");
+
+        assertFalse(registry.hasActiveTask());
+        assertEquals("Snapshot committed, cleanup failed", registry.getHistory().getFirst().message());
+
+        var blank = registry.startTask(TaskType.BACKUP).setRunning();
+        blank.setFailed("");
+        registry.fail(blank, "Backup failed: fallback");
+        assertEquals("Backup failed: fallback", registry.getHistory().getFirst().message());
+    }
 }
