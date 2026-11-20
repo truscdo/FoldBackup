@@ -1,5 +1,7 @@
 package io.github.truscdo.foldbackup.core.restore;
 
+import io.github.truscdo.foldbackup.core.WorldSaveLock;
+
 import java.io.IOException;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;

@@ -2,6 +2,7 @@ package io.github.truscdo.foldbackup.core.rollback;
 
 import io.github.truscdo.foldbackup.core.FileIo;
 import io.github.truscdo.foldbackup.core.WorldPaths;
+import io.github.truscdo.foldbackup.core.WorldSaveLock;
 import io.github.truscdo.foldbackup.core.format.ChunkCoordinates;
 import io.github.truscdo.foldbackup.core.format.EntityRegionCodec;
 import io.github.truscdo.foldbackup.core.format.McaHasher;
@@ -11,16 +12,12 @@ import io.github.truscdo.foldbackup.core.format.RegionStream;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.nio.channels.FileChannel;
-import java.nio.channels.FileLock;
-import java.nio.channels.OverlappingFileLockException;
 import java.nio.file.*;
 import java.util.*;
 
 /** Holds Minecraft's world lock throughout preparation and commit. Never writes into a running world. */
 final class OfflineRollbackWriter implements AutoCloseable {
-    private final FileChannel channel;
-    private final FileLock lock;
+    private final WorldSaveLock saveLock;
     private final Path dimensionDir;
     private final Path worldRoot;
     private final MoveOperation move;
@@ -36,14 +33,8 @@ final class OfflineRollbackWriter implements AutoCloseable {
         if (dimensionDir == null || !Files.isDirectory(dimensionDir)) throw new IOException("World directory does not exist");
         Path root = WorldPaths.worldRoot(dimensionDir);
         worldRoot = root;
-        channel = FileChannel.open(root.resolve("session.lock"), StandardOpenOption.CREATE, StandardOpenOption.WRITE);
-        try {
-            lock = channel.tryLock();
-            if (lock == null) throw new IOException("World is locked; stop the server before rollback");
-        } catch (IOException | OverlappingFileLockException e) {
-            channel.close();
-            throw new IOException("World is locked; stop the server before rollback", e);
-        }
+        saveLock = WorldSaveLock.acquireRoot(root,
+                "World is locked: " + root.resolve("session.lock") + "; stop the server before rollback");
     }
 
     EntityScan scanEntityRegions(EntityRegionCodec.EntityChunkSnapshot snapshot, Path targetFile, int targetIndex,
@@ -223,6 +214,6 @@ final class OfflineRollbackWriter implements AutoCloseable {
     }
 
     @Override public void close() throws IOException {
-        try { lock.release(); } finally { channel.close(); }
+        saveLock.close();
     }
 }

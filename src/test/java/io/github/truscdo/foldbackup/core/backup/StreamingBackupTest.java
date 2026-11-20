@@ -111,6 +111,8 @@ class StreamingBackupTest {
         Path world = temp.resolve("world");
         Files.createDirectories(world.resolve("region"));
         Path mca = world.resolve("region/r.0.0.mca");
+        Path level = world.resolve("level.dat");
+        Files.writeString(level, "level-data");
         io.github.truscdo.foldbackup.core.format.AnvilTestSupport.writeRegionAnvil(mca, region((byte) 1), 6);
         AtomicInteger sessions = new AtomicInteger();
         Path root = temp.resolve("store");
@@ -123,16 +125,18 @@ class StreamingBackupTest {
         SnapshotStore store = new SnapshotStore(root);
         RegionProcessor processor = new RegionProcessor(store::getIndex, blobs, 6);
         var first = processor.scanWorld(world, null);
-        assertEquals(1, sessions.get());
+        assertEquals(2, sessions.get());
         var snapshot = new SnapshotManifest("S-20260912_100000", 1, "world");
         first.populateManifest(snapshot);
         store.saveSnapshot(snapshot);
         var metadataHit = processor.scanWorld(world, snapshot);
-        assertEquals(1, sessions.get());
+        assertEquals(2, sessions.get());
         assertEquals(0, metadataHit.getNewBytes());
+        assertEquals(1, metadataHit.getUnchangedRegions());
+        assertEquals(1, metadataHit.getUnchangedFiles());
         io.github.truscdo.foldbackup.core.format.AnvilTestSupport.writeRegionAnvil(mca, region((byte) 1), 0);
         var contentHit = processor.scanWorld(world, snapshot);
-        assertEquals(1, sessions.get());
+        assertEquals(2, sessions.get());
         assertEquals(0, contentHit.getNewBytes());
         assertEquals(first.getRegions().getFirst().getBlobPath(), contentHit.getRegions().getFirst().getBlobPath());
     }

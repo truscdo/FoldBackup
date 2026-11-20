@@ -225,10 +225,10 @@ public class RegionProcessor {
             Map<String, RegionEntry> latestRegions, DedupStats stats) throws IOException {
         SourceMetadata before = regionSourceMetadata(worldDir, mcaPath);
         RegionEntry previous = latestRegions.get(relPath);
+        // 保存已暂停且并发修改由后续 hash 后的 changedDuringRead（afterCheck）兜底，无需二次重读复核
         if (previous != null && !previous.getSourceMetadata().isEmpty()
                 && previous.getSourceMetadata().equals(before)
-                && blobStore.existsPath(previous.getBlobPath())
-                && before.equals(regionSourceMetadata(worldDir, mcaPath))) {
+                && blobStore.existsPath(previous.getBlobPath())) {
             stats.metadataHits.increment();
             return RegionOutcome.success(new RegionEntry(relPath, previous.getContentHash(), previous.getBlobPath(),
                     previous.getSizeCompressed(), previous.getSizeUncompressed(), before), false, 0);
@@ -300,10 +300,10 @@ public class RegionProcessor {
             ScanResult result) throws IOException {
         SourceMetadata before = SourceMetadata.of(relPath, Files.readAttributes(file, BasicFileAttributes.class));
         FileEntry previous = latestFiles.get(relPath);
+        // 并发修改竞态由后续 hash 后的 changedDuringRead（afterHash）兜底，无需二次 readAttributes 复核
         if (previous != null && !previous.getSourceMetadata().isEmpty()
                 && previous.getSourceMetadata().equals(before)
-                && blobStore.existsPath(previous.getBlobPath())
-                && before.equals(SourceMetadata.of(relPath, Files.readAttributes(file, BasicFileAttributes.class)))) {
+                && blobStore.existsPath(previous.getBlobPath())) {
             result.addFile(new FileEntry(
                     relPath, previous.getSourceHash(), previous.getBlobPath(),
                     previous.getSizeCompressed(), previous.getSizeUncompressed(), before));

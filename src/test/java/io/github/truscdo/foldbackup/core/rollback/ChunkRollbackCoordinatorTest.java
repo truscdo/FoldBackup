@@ -1,12 +1,20 @@
 package io.github.truscdo.foldbackup.core.rollback;
 
+import io.github.truscdo.foldbackup.core.format.AnvilTestSupport;
+import io.github.truscdo.foldbackup.core.format.ChunkData;
+import io.github.truscdo.foldbackup.core.format.Region;
 import io.github.truscdo.foldbackup.core.store.BlobStore;
+import io.github.truscdo.foldbackup.core.store.RegionEntry;
+import io.github.truscdo.foldbackup.core.store.SnapshotManifest;
 import io.github.truscdo.foldbackup.core.store.SnapshotStore;
+import io.github.truscdo.foldbackup.core.backup.RegionProcessor;
+import io.github.truscdo.foldbackup.core.store.MetadataIndex;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
@@ -63,6 +71,65 @@ class ChunkRollbackCoordinatorTest {
         var result = coordinator.rollbackChunk(
                 root.resolve("nonexistent"), 0, 0, null, "");
         assertFalse(result.success());
+    }
+
+    @Test
+    void rollbackChunk_resolvedEmptyChunk_returnsFailure() throws IOException {
+        var root = createTempBackupRoot();
+        var sm = new SnapshotStore(root);
+        var bs = new BlobStore(root, 6);
+        var coordinator = new ChunkRollbackCoordinator(sm, bs, 6);
+        var manifest = new SnapshotManifest("S-20260908_120000", 1000L, "world");
+        var resolved = new ChunkRollbackSupport.ResolvedSnapshot(manifest, new RegionEntry(), null);
+
+        var result = coordinator.rollbackChunk(root.resolve("world/region"), 0, 0, "", resolved);
+        assertFalse(result.success());
+        assertTrue(result.message().contains("is empty in snapshot"), result.message());
+    }
+
+    @Test
+    void rollbackChunk_withPreResolvedChunk_doesNotReReadBlockBlob() throws IOException {
+        var root = createTempBackupRoot();
+        Path world = tempRoot.resolve("world");
+        Path regionDir = world.resolve("region");
+        byte[] oldChunk = "chunk-v1".getBytes(StandardCharsets.UTF_8);
+        Region v1 = new Region(0, 0, 1000);
+        v1.setChunk(0, new ChunkData(oldChunk, 0, 0));
+        AnvilTestSupport.writeRegionAnvil(regionDir.resolve("r.0.0.mca"), v1, 6);
+
+        var sm = new SnapshotStore(root);
+        var bs = new BlobStore(root, 6);
+        var scan = new RegionProcessor(bs, 6, new MetadataIndex()).scanWorld(world, null);
+        var manifest = new SnapshotManifest("S-20260908_120000", 1000L, "world");
+        scan.populateManifest(manifest);
+        sm.saveSnapshot(manifest);
+
+        Region v2 = new Region(0, 0, 2000);
+        v2.setChunk(0, new ChunkData("chunk-v2".getBytes(StandardCharsets.UTF_8), 0, 0));
+        AnvilTestSupport.writeRegionAnvil(regionDir.resolve("r.0.0.mca"), v2, 6);
+
+        var resolved = ChunkRollbackSupport.resolveChunk(sm, bs, 0, 0, 1000L, "");
+        assertNotNull(resolved.chunk());
+        // 删除原区块 .lrh blob，证明传入已解析快照不会再次流式读取与校验该 blob
+        Files.delete(bs.getRootDir().resolve(resolved.regionEntry().getBlobPath()));
+
+        var coordinator = new ChunkRollbackCoordinator(sm, bs, 6);
+        var result = coordinator.rollbackChunk(regionDir, 0, 0, "", resolved);
+        assertTrue(result.success(), result.message());
+        assertArrayEquals(oldChunk, AnvilTestSupport.readRegionAnvil(regionDir.resolve("r.0.0.mca"))
+                .getChunk(0).getRawChunk());
+    }
+
+    @Test
+    void rollbackChunk_mismatchedResolvedCoordinates_throws() throws IOException {
+        var root = createTempBackupRoot();
+        var coordinator = new ChunkRollbackCoordinator(new SnapshotStore(root), new BlobStore(root, 6), 6);
+        var manifest = new SnapshotManifest("S-20260908_120000", 1000L, "world");
+        var resolved = new ChunkRollbackSupport.ResolvedSnapshot(
+                manifest, new RegionEntry(), new ChunkData(new byte[] {1}, 1, 0));
+
+        assertThrows(IllegalArgumentException.class,
+                () -> coordinator.rollbackChunk(root.resolve("world/region"), 0, 0, "", resolved));
     }
 
     // ── 结果类型 ──

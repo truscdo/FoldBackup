@@ -8,7 +8,7 @@ import io.github.truscdo.foldbackup.core.format.ChunkData;
 import io.github.truscdo.foldbackup.core.format.Region;
 import io.github.truscdo.foldbackup.core.restore.RestoreOperation;
 import io.github.truscdo.foldbackup.core.restore.SnapshotRestoreSource;
-import io.github.truscdo.foldbackup.core.restore.WorldSaveLock;
+import io.github.truscdo.foldbackup.core.WorldSaveLock;
 import io.github.truscdo.foldbackup.core.store.BlobStore;
 import io.github.truscdo.foldbackup.core.store.SnapshotManifest;
 import io.github.truscdo.foldbackup.core.store.SnapshotStore;

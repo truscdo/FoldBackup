@@ -276,7 +276,7 @@ public class BackupCli {
         if (!Files.isDirectory(regionDir)) throw new IOException("Region directory not found: " + regionDir);
 
         var coordinator = new ChunkRollbackCoordinator(snapshots, blobs, ArchiveDefaults.EXPORT_LEVEL);
-        var result = coordinator.rollbackChunk(regionDir, chunkX, chunkZ, epoch, dimension);
+        var result = coordinator.rollbackChunk(regionDir, chunkX, chunkZ, dimension, requestedChunk);
         if (!result.success()) throw new IOException(result.message());
         System.out.println("Rollback complete: " + result.message());
     }

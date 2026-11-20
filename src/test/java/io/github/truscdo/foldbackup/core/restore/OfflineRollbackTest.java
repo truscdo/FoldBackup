@@ -1,5 +1,6 @@
 package io.github.truscdo.foldbackup.core.restore;
 
+import io.github.truscdo.foldbackup.core.WorldSaveLock;
 import io.github.truscdo.foldbackup.core.format.AnvilTestSupport;
 import io.github.truscdo.foldbackup.core.format.Region;
 import io.github.truscdo.foldbackup.core.store.BlobStore;

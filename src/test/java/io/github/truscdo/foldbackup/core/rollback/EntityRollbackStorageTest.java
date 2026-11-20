@@ -306,6 +306,10 @@ class EntityRollbackStorageTest {
                  var lock = channel.lock()) {
                 var result = coordinator.rollbackChunk(blocks.getParent(), 0, 0, snapshot.getEpochSeconds(), "");
                 assertFalse(result.success(), result.message());
+                if (lockPath.equals(world.resolve("session.lock"))) {
+                    assertTrue(result.message().contains("World is locked:"), result.message());
+                    assertTrue(result.message().contains("stop the server before rollback"), result.message());
+                }
             }
             assertArrayEquals(before, Files.readAllBytes(entities));
         }

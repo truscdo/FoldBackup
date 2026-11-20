@@ -105,6 +105,13 @@ class BackupCliRollbackTest {
         writeTwoChunks(world.resolve("poi/r.0.0.mca"),
                 "poi-0-v2".getBytes(StandardCharsets.UTF_8), poi1Keep);
 
+        // 空区块必须在提示确认前被拒绝
+        IOException emptyChunkErr = assertThrows(IOException.class, () -> BackupCli.execute(
+                "--snapshot-root", storeDir.toString(),
+                "snapshot", "rollback", snap1, "--world", world.toString(), "--chunk", "5", "5"));
+        assertTrue(emptyChunkErr.getMessage().contains("Requested chunk is empty in snapshot"),
+                emptyChunkErr.getMessage());
+
         // 非交互环境省略 --yes 必须被拒绝
         IOException rollbackConfirmErr = assertThrows(IOException.class, () -> BackupCli.execute(
                 "--snapshot-root", storeDir.toString(),

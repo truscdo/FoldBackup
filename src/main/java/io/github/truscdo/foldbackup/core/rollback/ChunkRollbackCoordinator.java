@@ -61,11 +61,6 @@ public class ChunkRollbackCoordinator {
     public ChunkRollbackResult rollbackChunk(Path regionDir, int chunkX, int chunkZ,
             Long epochSeconds,
             String dimensionSubPath) throws IOException {
-        // ── compute region coordinates and grid index ──
-        int regionX = ChunkCoordinates.chunkToRegion(chunkX);
-        int regionZ = ChunkCoordinates.chunkToRegion(chunkZ);
-        int gridIndex = ChunkCoordinates.slotIndex(chunkX, chunkZ);
-
         // ── resolve snapshot metadata and stream the requested chunk ──
         ChunkRollbackSupport.ResolvedSnapshot resolved;
         try {
@@ -74,6 +69,28 @@ public class ChunkRollbackCoordinator {
         } catch (IOException e) {
             return new ChunkRollbackResult(false, e.getMessage());
         }
+        return rollbackChunk(regionDir, chunkX, chunkZ, dimensionSubPath, resolved);
+    }
+
+    /**
+     * Roll back a single chunk using an already resolved snapshot chunk payload,
+     * avoiding a second stream-and-hash pass over the block region {@code .lrh} blob.
+     *
+     * @param regionDir        the {@code region/} subdirectory for this dimension
+     * @param chunkX           global chunk X coordinate
+     * @param chunkZ           global chunk Z coordinate
+     * @param dimensionSubPath dimension-relative path prefix for snapshot lookup
+     * @param resolved         pre-resolved snapshot metadata and target chunk payload
+     * @return result describing what happened
+     * @throws IOException on I/O failure
+     */
+    public ChunkRollbackResult rollbackChunk(Path regionDir, int chunkX, int chunkZ,
+            String dimensionSubPath,
+            ChunkRollbackSupport.ResolvedSnapshot resolved) throws IOException {
+        Objects.requireNonNull(regionDir, "regionDir");
+        Objects.requireNonNull(dimensionSubPath, "dimensionSubPath");
+        Objects.requireNonNull(resolved, "resolved");
+        Objects.requireNonNull(resolved.manifest(), "resolved.manifest");
 
         // ── check target chunk exists in the snapshot ──
         if (resolved.chunk() == null) {
@@ -81,6 +98,16 @@ public class ChunkRollbackCoordinator {
                     "Chunk [" + chunkX + ", " + chunkZ
                             + "] is empty in snapshot " + resolved.manifest().getSnapshotId());
         }
+        if (resolved.chunk().getX() != chunkX || resolved.chunk().getZ() != chunkZ) {
+            throw new IllegalArgumentException("Resolved chunk coordinates ["
+                    + resolved.chunk().getX() + ", " + resolved.chunk().getZ()
+                    + "] do not match target [" + chunkX + ", " + chunkZ + "]");
+        }
+
+        // ── compute region coordinates and grid index ──
+        int regionX = ChunkCoordinates.chunkToRegion(chunkX);
+        int regionZ = ChunkCoordinates.chunkToRegion(chunkZ);
+        int gridIndex = ChunkCoordinates.slotIndex(chunkX, chunkZ);
 
         // ── build region file path ──
         Path regionFile = regionDir.resolve("r." + regionX + "." + regionZ + ".mca");
