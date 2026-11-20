@@ -1,5 +1,6 @@
 package io.github.truscdo.foldbackup.core.archive;
 
+import io.github.truscdo.foldbackup.core.Rethrow;
 import io.github.truscdo.foldbackup.core.format.StreamIo;
 import java.io.IOException;
 import java.nio.file.Path;
@@ -119,8 +120,13 @@ final class ArchiveRestorePipeline {
                         try (var scope = io.enter()) {
                             StreamIo.checkCancelled();
                             Throwable earlier = fatal.get();
-                            if (earlier != null) throw new IOException("Archive region pipeline failed", earlier);
-                            value = task.run(index, region.source(staged));
+                            if (earlier != null) throw Rethrow.asIo(earlier, "Archive region pipeline failed");
+                            try {
+                                value = task.run(index, region.source(staged));
+                            } catch (Throwable own) {
+                                // Only this region's own failure carries its path; a re-thrown shared root does not.
+                                throw RegionContext.attach(own, region.path());
+                            }
                         } catch (Throwable e) {
                             failure = e;
                             fatal.compareAndSet(null, e);
@@ -129,7 +135,7 @@ final class ArchiveRestorePipeline {
                             if (staged != null) {
                                 try { staged.close(); }
                                 catch (Throwable cleanup) {
-                                    if (failure == null) failure = cleanup;
+                                    if (failure == null) failure = RegionContext.attach(cleanup, region.path());
                                     else failure.addSuppressed(cleanup);
                                     fatal.compareAndSet(null, cleanup);
                                 }
@@ -200,7 +206,7 @@ final class ArchiveRestorePipeline {
             while (finishedProducers < producerCount || finishedRegions < selectedCount) {
                 StreamIo.checkCancelled();
                 Throwable earlier = fatal.get();
-                if (earlier != null) throw asIOException("Archive restore pipeline failed", earlier);
+                if (earlier != null) throw Rethrow.asIo(earlier, "Archive restore pipeline failed");
                 long waitStart = System.nanoTime();
                 PipelineEvent<T> event;
                 try { event = events.poll(100, TimeUnit.MILLISECONDS); }
@@ -213,15 +219,20 @@ final class ArchiveRestorePipeline {
                 if (event instanceof RegionCompleted<?> raw) {
                     @SuppressWarnings("unchecked") var completed = (RegionCompleted<T>) raw;
                     permits.release(); inFlight.decrementAndGet(); finishedRegions++;
-                    if (completed.failure() != null)
-                        throw asIOException("Region task failed: " + regions.get(completed.index()).path(), completed.failure());
+                    if (completed.failure() != null) {
+                        Throwable root = fatal.get();
+                        throw Rethrow.asIo(root != null ? root : completed.failure(),
+                                "Region task failed: " + regions.get(completed.index()).path());
+                    }
                     values[completed.index()] = completed.value();
                     if (completionListener != null) completionListener.accept(completed.index());
                 } else if (event instanceof ProducerCompleted<?> raw) {
                     @SuppressWarnings("unchecked") var completed = (ProducerCompleted<T>) raw;
                     finishedProducers++;
-                    if (completed.failure() != null)
-                        throw asIOException("LRHD reader failed", completed.failure());
+                    if (completed.failure() != null) {
+                        Throwable root = fatal.get();
+                        throw Rethrow.asIo(root != null ? root : completed.failure(), "LRHD reader failed");
+                    }
                     if (finishedProducers == producerCount) tailStart = System.nanoTime();
                 }
             }
@@ -244,6 +255,21 @@ final class ArchiveRestorePipeline {
         return ordered;
     }
 
+    /**
+     * Stackless marker attached via {@link Throwable#addSuppressed} so a propagated region failure
+     * still names the Region file, without wrapping (and thus changing the type of) the original exception.
+     */
+    static final class RegionContext extends Exception {
+        private RegionContext(String path) {
+            super("Region task failed: " + path, null, false, false);
+        }
+
+        static Throwable attach(Throwable failure, String path) {
+            failure.addSuppressed(new RegionContext(path));
+            return failure;
+        }
+    }
+
     private static void reserve(Semaphore permits, AtomicInteger inFlight, AtomicInteger peakInFlight)
             throws IOException, InterruptedException {
         permits.acquire();
@@ -254,11 +280,7 @@ final class ArchiveRestorePipeline {
     private static void checkPipeline(AtomicReference<Throwable> fatal) throws IOException {
         StreamIo.checkCancelled();
         Throwable failure = fatal.get();
-        if (failure != null) throw asIOException("Archive restore pipeline failed", failure);
-    }
-
-    private static IOException asIOException(String message, Throwable cause) {
-        return cause instanceof IOException io ? io : new IOException(message, cause);
+        if (failure != null) throw Rethrow.asIo(failure, "Archive restore pipeline failed");
     }
 
     private static void stopPool(ExecutorService pool, boolean cancel) {

@@ -146,6 +146,7 @@ public final class RestoreChecker {
                     Thread.currentThread().interrupt();
                     throw new IllegalStateException("Interrupted while checking " + entries.get(i).path(), e);
                 } catch (ExecutionException e) {
+                    // Unlike Rethrow.awaitIo, RestoreChecker treats non-fatal target read failures as needing rewrite.
                     Throwable cause = e.getCause();
                     if (cause instanceof RuntimeException runtime) throw runtime;
                     if (cause instanceof Error error) throw error;

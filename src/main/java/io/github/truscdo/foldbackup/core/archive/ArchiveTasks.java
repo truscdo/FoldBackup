@@ -1,5 +1,6 @@
 package io.github.truscdo.foldbackup.core.archive;
 
+import io.github.truscdo.foldbackup.core.Rethrow;
 import io.github.truscdo.foldbackup.core.backup.BackupResourceBudget;
 import io.github.truscdo.foldbackup.core.format.LrhFormat;
 import io.github.truscdo.foldbackup.core.format.StreamIo;
@@ -74,7 +75,8 @@ final class ArchiveTasks {
                         peakActive.accumulateAndGet(active.incrementAndGet(), Math::max);
                         try (var scope = io.enter()) {
                             StreamIo.checkCancelled();
-                            if (failure.get() != null) throw new IOException("Archive task group failed", failure.get());
+                            Throwable earlier = failure.get();
+                            if (earlier != null) throw Rethrow.asIo(earlier, "Archive task group failed");
                             return new Completed<>(index, task.run(index));
                         } catch (Throwable e) { failure.compareAndSet(null, e); throw e; }
                         finally { active.decrementAndGet(); }
@@ -82,7 +84,8 @@ final class ArchiveTasks {
                     peakInFlight = Math.max(peakInFlight, pending.size());
                 }
                 StreamIo.checkCancelled();
-                if (failure.get() != null) throw new IOException("Archive task failed", failure.get());
+                Throwable earlier = failure.get();
+                if (earlier != null) throw Rethrow.asIo(earlier, "Archive task failed");
                 long waitStart = System.nanoTime();
                 Future<Completed<T>> future = completed.take();
                 waitNanos += System.nanoTime() - waitStart;
@@ -96,7 +99,8 @@ final class ArchiveTasks {
             Thread.currentThread().interrupt();
             throw new IOException("Archive tasks interrupted", e);
         } catch (ExecutionException e) {
-            throw new IOException("Archive task failed", failure.get() == null ? e.getCause() : failure.get());
+            Throwable root = failure.get();
+            throw Rethrow.asIo(root != null ? root : e.getCause(), "Archive task failed");
         } finally {
             for (var future : pending) future.cancel(true);
             pool.shutdownNow();

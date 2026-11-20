@@ -27,4 +27,30 @@ class BoundedWorkTest {
         }
         assertEquals(0,interrupted.getCount());
     }
+
+    @Test void propagatesIoRuntimeAndErrorCausesDirectly() {
+        IOException io = new IOException("disk failure");
+        try (var work = new BoundedWork<Integer>(1, value -> {})) {
+            assertSame(io, assertThrows(IOException.class, () -> {
+                work.submit(() -> { throw io; });
+                work.finish();
+            }));
+        }
+
+        IllegalStateException runtime = new IllegalStateException("bug");
+        try (var work = new BoundedWork<Integer>(1, value -> {})) {
+            assertSame(runtime, assertThrows(IllegalStateException.class, () -> {
+                work.submit(() -> { throw runtime; });
+                work.finish();
+            }));
+        }
+
+        AssertionError error = new AssertionError("oom-like error");
+        try (var work = new BoundedWork<Integer>(1, value -> {})) {
+            assertSame(error, assertThrows(AssertionError.class, () -> {
+                work.submit(() -> { throw error; });
+                work.finish();
+            }));
+        }
+    }
 }

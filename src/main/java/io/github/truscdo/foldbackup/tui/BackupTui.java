@@ -280,7 +280,7 @@ public class BackupTui {
                                     selected.id, zipTarget, threads, progress.onProgress());
                         }
                         System.out.println("Done: " + result.toAbsolutePath().normalize() + "\n");
-                    } catch (IOException e) {
+                    } catch (IOException | RuntimeException e) {
                         System.err.println("Export failed: " + e.getMessage() + "\n");
                     }
                     return;
@@ -493,7 +493,7 @@ public class BackupTui {
                 }
             }
             System.out.println("Done: " + result.toAbsolutePath().normalize() + "\n");
-        } catch (IOException e) {
+        } catch (IOException | RuntimeException e) {
             System.err.println("Archive creation failed: " + e.getMessage() + "\n");
         }
     }

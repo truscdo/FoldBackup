@@ -65,7 +65,7 @@ final class RestoreInteraction {
             RestoreOperation.Session session;
             try (var progress = new ProgressPrinter(System.out)) {
                 session = RestoreOperation.prepare(source, outputPath, 0, progress.onProgress());
-            } catch (IOException e) {
+            } catch (IOException | RuntimeException e) {
                 System.err.println(failurePrefix + e.getMessage() + "\n");
                 return Flow.CANCEL;
             }
@@ -93,7 +93,7 @@ final class RestoreInteraction {
                                     progress.onProgress());
                             System.out.println("Done: " + outcome.target().toAbsolutePath().normalize()
                                     + ", deleted extra: " + outcome.deleted() + "\n");
-                        } catch (IOException e) {
+                        } catch (IOException | RuntimeException e) {
                             System.err.println(failurePrefix + e.getMessage() + "\n");
                         }
                         return Flow.DONE;

@@ -2,13 +2,13 @@ package io.github.truscdo.foldbackup.core.archive;
 
 import io.github.truscdo.foldbackup.core.HashUtil;
 import io.github.truscdo.foldbackup.core.ProgressTracker;
+import io.github.truscdo.foldbackup.core.Rethrow;
 import io.github.truscdo.foldbackup.core.StreamingHash;
 import io.github.truscdo.foldbackup.core.format.*;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Objects;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -51,7 +51,8 @@ final class DiffRegionPipeline {
                     progress.current(task.label());
                 }
                 // The first baseline has no predecessor to overlap with, so it is decoded inline.
-                String[] baseline = pending == null ? baselineOf(task) : await(pending);
+                String[] baseline = pending == null ? baselineOf(task)
+                        : Rethrow.awaitIo(pending, "LRHD baseline prefetch interrupted", "LRHD baseline prefetch failed");
                 // Submit before decoding the target so the two run concurrently.
                 pending = null;
                 if (i + 1 < tasks.size()) {
@@ -83,21 +84,6 @@ final class DiffRegionPipeline {
             public void end() { if (length > 0) hashes[index] = HashUtil.bytesToHex(hash.digest()); }
         });
         return hashes;
-    }
-
-    private static String[] await(Future<String[]> pending) throws IOException {
-        try {
-            return pending.get();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new IOException("LRHD baseline prefetch interrupted", e);
-        } catch (ExecutionException e) {
-            Throwable cause = e.getCause();
-            if (cause instanceof IOException io) throw io;
-            if (cause instanceof RuntimeException runtime) throw runtime;
-            if (cause instanceof Error error) throw error;
-            throw new IOException("LRHD baseline prefetch failed", cause);
-        }
     }
 
     private static void produce(RegionTask task, String[] baseline, long chunkLimit, Path scratch,

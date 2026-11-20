@@ -57,7 +57,7 @@ public class ArchiveTui {
         try (var progress = new ProgressPrinter(System.out)) {
             result = new ArchiveVerifier().verifyLocated(
                     selected.fullTar(), selected.diffTar(), progress.onProgress());
-        } catch (IOException e) {
+        } catch (IOException | RuntimeException e) {
             System.err.println("Verify failed: " + e.getMessage() + "\n");
             return;
         }
@@ -88,7 +88,7 @@ public class ArchiveTui {
             int imported;
             try (var progress = new ProgressPrinter(System.out)) {
                 imported = new ArchiveImporter(archiveRoot, targetRoot, threads).importAll(progress.onProgress());
-            } catch (IOException e) {
+            } catch (IOException | RuntimeException e) {
                 System.err.println("Import failed: " + e.getMessage() + "\n");
                 return;
             }

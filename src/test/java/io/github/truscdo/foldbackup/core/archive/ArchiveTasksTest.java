@@ -63,8 +63,24 @@ class ArchiveTasksTest {
                 await(started);
                 throw cause;
             }));
-            assertSame(cause, failure.getCause());
+            assertSame(cause, failure);
             assertEquals(0, exited.getCount());
+        });
+    }
+
+    @Test void workerRuntimeExceptionAndErrorPropagateDirectlyWithoutWrapping() {
+        assertTimeoutPreemptively(Duration.ofSeconds(10), () -> {
+            IllegalStateException runtime = new IllegalStateException("bug in worker");
+            assertSame(runtime, assertThrows(IllegalStateException.class, () -> ArchiveTasks.run(4, 2, i -> {
+                if (i == 0) throw runtime;
+                return i;
+            })));
+
+            AssertionError error = new AssertionError("fatal worker error");
+            assertSame(error, assertThrows(AssertionError.class, () -> ArchiveTasks.run(4, 2, i -> {
+                if (i == 0) throw error;
+                return i;
+            })));
         });
     }
     @Test void callerCancellationJoinsRunningJobs() throws Exception {

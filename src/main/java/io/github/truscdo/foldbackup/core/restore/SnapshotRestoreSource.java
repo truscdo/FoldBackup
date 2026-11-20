@@ -1,5 +1,6 @@
 package io.github.truscdo.foldbackup.core.restore;
 
+import io.github.truscdo.foldbackup.core.Rethrow;
 import io.github.truscdo.foldbackup.core.format.AnvilFormat;
 import io.github.truscdo.foldbackup.core.format.LrhFormat;
 import io.github.truscdo.foldbackup.core.store.BlobStore;
@@ -14,7 +15,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -79,18 +79,7 @@ public final class SnapshotRestoreSource implements RestoreSource {
                 }));
             }
             for (Future<Void> future : futures) {
-                try {
-                    future.get();
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    throw new IOException("Interrupted while restoring regions", e);
-                } catch (ExecutionException e) {
-                    Throwable cause = e.getCause();
-                    if (cause instanceof IOException io) throw io;
-                    if (cause instanceof RuntimeException runtime) throw runtime;
-                    if (cause instanceof Error error) throw error;
-                    throw new IOException(cause);
-                }
+                Rethrow.awaitIo(future, "Interrupted while restoring regions", "Failed to restore region");
             }
         } finally {
             pool.shutdownNow();
