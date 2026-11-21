@@ -1,10 +1,15 @@
 # FoldBackup
 
+English | [简体中文](doc/readme/README.zh.md) | [Español](doc/readme/README.es.md) | [Português (Brasil)](doc/readme/README.pt-br.md) | [Русский](doc/readme/README.ru.md)
+
 FoldBackup is a world backup tool for Minecraft NeoForge servers. It supports automatic and manual snapshot backups, archive compression, historical chunk previews, and chunk rollback.
 
 Snapshots use a Git-like content deduplication scheme: each backup records only new and changed files. Region files are stored in LRH format. On a Minecraft 1.21.1 NeoForge survival server with more than 80 mods, an archive created at compression level 19 can be as small as one-third of the original world size.
 
 The same JAR can be installed as a NeoForge mod or run as a standalone tool. It provides a command-line interface (CLI) and an interactive menu (TUI), so you can use its features while the server is offline.
+
+- **Environment**: Minecraft `1.21.1`, NeoForge `21.1+`, Java `21+` (standalone CLI / TUI mode is not tied to a Minecraft version)
+- **Installation**: Only required on the **server** (or singleplayer client); players connecting to the server do **not** need to install this mod on their clients to use all features (including in-game historical chunk previews)
 
 ## Features
 
@@ -18,6 +23,12 @@ The same JAR can be installed as a NeoForge mod or run as a standalone tool. It 
 - **Archive compression**: Create full or differential archives, then restore an archive as a Minecraft world or import it into a snapshot repository.
 
     Archives are intended for storing and distributing worlds. After downloading a full archive once, later differential archives transfer only the changed data, so you can sync a server world to a local machine, edit it there, and sync it back. This saves bandwidth.
+
+> [!NOTE]
+> **Difference between Snapshots and Archives**:
+>
+> - **Snapshots**: Frequent automatic or manual backups stored with incremental deduplication in a local repository, used for quick rollback, world export, and single-chunk recovery.
+> - **Archives**: Standalone files optimized for high compression ratios (supporting full and differential archives), suitable for off-site cold backups, cross-machine syncing, or world distribution.
 
 ### LRH and Linear
 
@@ -48,21 +59,24 @@ Automatic backups are enabled by default. The interval counts accumulated time w
 
 You can restore an entire world through the TUI or CLI.
 
-From the world's repository directory (`foldbackups/` on a dedicated server, `foldbackups/<world-folder-name>` in singleplayer), run the following commands to export the bundled runtime libraries (this avoids dependency conflicts between the mod and the CLI), then open the menu:
+From the world's repository directory (`foldbackups/` on a dedicated server, `foldbackups/<world-folder-name>` in singleplayer), run the following commands to export the bundled runtime libraries (this avoids dependency conflicts between the mod and the CLI), then open the menu. Replace `<version>` with the actual JAR filename:
 
 ```bash
 # Dedicated server: foldbackups/
-java -jar ../mods/foldbackup-0.3.0.jar extract
-java -jar ../mods/foldbackup-0.3.0.jar tui
+java -jar ../mods/foldbackup-<version>.jar extract
+java -jar ../mods/foldbackup-<version>.jar tui
 
 # Singleplayer: foldbackups/<world-folder-name>
-java -jar ../../mods/foldbackup-0.3.0.jar extract
-java -jar ../../mods/foldbackup-0.3.0.jar tui
+java -jar ../../mods/foldbackup-<version>.jar extract
+java -jar ../../mods/foldbackup-<version>.jar tui
 ```
 
 In the menu, select "2. Export world files" and follow the prompts to choose a snapshot, a directory or a ZIP, and the output path. Press Enter to accept the default path (`world-export/<snapshot-id>`, or the same name with `.zip` for a ZIP).
 
-For a directory export, the target can be an existing game save: FoldBackup updates only the content that differs from the snapshot and never rewrites identical files. Stop the server before restoring. After the check, choose "1 = overwrite" to keep files in the target that the snapshot does not contain, or "2 = delete extra" to remove them so the target matches the snapshot exactly. The thread-count prompt can be accepted with Enter.
+> [!IMPORTANT]
+> **Stop the server first** before exporting into an active world directory to restore it.
+
+For a directory export, the target can be an existing game save: FoldBackup updates only the content that differs from the snapshot and never rewrites identical files. After the check, choose "1 = overwrite" to keep files in the target that the snapshot does not contain, or "2 = delete extra" to remove them so the target matches the snapshot exactly. The thread-count prompt can be accepted with Enter.
 
 The CLI can do the same export: `snapshot export <snapshot-id> --output <directory>`. `--zip` writes a ZIP; for a directory export, `--delete-extra` removes content that is not in the snapshot; `--dry-run` prints the statistics without writing or deleting.
 
@@ -70,7 +84,8 @@ The CLI can do the same export: `snapshot export <snapshot-id> --output <directo
 
 If you prefer a launcher, save one of the scripts below into the repository directory as `foldbackup-tui.bat` or `foldbackup-tui.sh` (then `chmod +x` it on Linux). The script looks for the JAR beside itself, then in `../mods`, then in `../../mods`, so the default server and singleplayer layouts work without edits.
 
-`foldbackup-tui.bat`:
+<details>
+<summary>Click to expand the Windows launcher script (<code>foldbackup-tui.bat</code>)</summary>
 
 ```bat
 @echo off
@@ -104,7 +119,10 @@ for %%f in ("%~1\foldbackup-*.jar") do if not defined JAR if exist "%%~ff" set "
 exit /b 0
 ```
 
-`foldbackup-tui.sh`:
+</details>
+
+<details>
+<summary>Click to expand the Linux / macOS launcher script (<code>foldbackup-tui.sh</code>)</summary>
 
 ```sh
 #!/bin/sh
@@ -136,6 +154,8 @@ java -jar "$JAR" extract --output "$SCRIPT_DIR/.foldbackup-cli" || {
 exec java -jar "$JAR" tui --snapshot-root "$SCRIPT_DIR" --archive-root "$SCRIPT_DIR" --lib "$SCRIPT_DIR/.foldbackup-cli"
 ```
 
+</details>
+
 ### Roll Back a Chunk
 
 You can preview and roll back a single chunk in game, or use the CLI to roll back a chunk directly in an offline world.
@@ -149,13 +169,13 @@ For the CLI examples below, assume the current directory is `foldbackups` and th
 List the snapshots:
 
 ```bash
-java -jar ../mods/foldbackup-0.3.0.jar snapshot list
+java -jar ../mods/foldbackup-<version>.jar snapshot list
 ```
 
 Copy the target snapshot ID from the list, then roll back the chunk. The following command restores chunk `[x, z]` in the Overworld directory `world` to its state in that snapshot:
 
 ```bash
-java -jar ../mods/foldbackup-0.3.0.jar snapshot rollback <snapshot-id> --world ../world --chunk <chunk-x> <chunk-z>
+java -jar ../mods/foldbackup-<version>.jar snapshot rollback <snapshot-id> --world ../world --chunk <chunk-x> <chunk-z>
 ```
 
 `--world` points to the target dimension directory: use the world root for the Overworld, `../world/DIM-1` for the Nether, `../world/DIM1` for the End, or the corresponding `dimensions/<namespace>/<path>` directory for a custom dimension. `--chunk` takes signed integer chunk coordinates, not block coordinates. For example, block coordinate `-1` belongs to chunk coordinate `-1`. The CLI asks for confirmation before proceeding; append `--yes` to skip the prompt.
@@ -189,7 +209,7 @@ The archive format is independent of the Minecraft version. You can use the CLI 
 
 ## Key Configuration Options
 
-Configuration is managed through NeoForge's SERVER configuration system. Names in the table use the form `group.key`.
+The configuration file is located at `config/foldbackup-server.toml` in the working directory by default. Names in the table use the form `group.key`.
 
 | Option | Default | Description |
 | --- | --- | --- |
@@ -211,15 +231,10 @@ Configuration is managed through NeoForge's SERVER configuration system. Names i
 | `localization.defaultLanguage` | `en_us` | Language used when player language detection is disabled or the reported language is unsupported; one of `zh_cn`, `en_us`, `es_es`, `pt_br`, `ru_ru` |
 | `localization.autoDetectPlayerLanguage` | `true` | Use each player's reported language when it is supported |
 
-**Automatic cleanup may delete all historical snapshots, including manually created backups.** The default limits bound only repository size (50 GiB) and free space (5 GiB); there is no age limit, so cleanup can delete recent snapshots to satisfy those targets. The free-space target does not mean space has been reserved for the next backup. Set all three cleanup limits to 0 to disable automatic deletion, or turn off automatic cleanup with `retention.enabled`.
+> [!WARNING]
+> **Automatic cleanup may delete all historical snapshots, including manually created backups.** The default limits bound only repository size (50 GiB) and free space (5 GiB); there is no age limit, so cleanup can delete recent snapshots to satisfy those targets. The free-space target does not mean space has been reserved for the next backup. Set all three cleanup limits to 0 to disable automatic deletion, or turn off automatic cleanup with `retention.enabled`.
 
 `general.excludePatterns` matches paths relative to the world directory, using `/` as the path separator. By default, it excludes `**/session.lock`, `**/backups`, `**/.backups`, `**/*.wip`, and `**/DistantHorizons.sqlite`. If a directory matches, its entire subtree is excluded.
-
-## Build from Source
-
-For environment setup, test commands, and report locations, see the [Build and Test Guide](doc/构建与测试指南.md) (Chinese).
-
-`./gradlew jar` produces `foldbackup-<version>.jar`. The JAR contains no TUI launcher script templates or script injection code, so it never writes launcher scripts into the repository directory.
 
 ## License and Acknowledgments
 

@@ -1,10 +1,15 @@
 # FoldBackup
 
+[English](../../README.md) | 简体中文 | [Español](README.es.md) | [Português (Brasil)](README.pt-br.md) | [Русский](README.ru.md)
+
 FoldBackup 是面向 Minecraft NeoForge 服务端的世界备份工具，支持自动与手动`快照备份`、`归档压缩`、`历史区块预览`和`区块回档`。
 
-快照的储存使用了与git类似的内容去重方案，每次备份仅记录更改和新增的文件，同时使用lrh格式储存Region文件，在1.21.1 neoforge 80+ mod 生存服中，压缩等级为19时的`归档`文件可以做到仅为原存档的三分之一大小。
+快照的储存使用了与 Git 类似的内容去重方案，每次备份仅记录更改和新增的文件，同时使用 LRH 格式储存 Region 文件。在 1.21.1 NeoForge 80+ Mod 生存服中，压缩等级为 19 时的`归档`文件可以做到仅为原存档的三分之一大小。
 
 同一个 JAR 既可以安装为 NeoForge 模组，也可以作为独立工具运行，提供独立命令行（CLI）和交互菜单（TUI），方便在服务器关闭时使用功能。
+
+- **运行环境**：Minecraft `1.21.1`、NeoForge `21.1+`、Java `21+`（独立 CLI / TUI 模式不受游戏版本限制）
+- **安装要求**：仅需安装在**服务端**（或单机客户端）；连入服务器的玩家客户端**无需**安装本模组即可使用全部功能（包括游戏内区块历史预览）
 
 ## 主要功能
 
@@ -13,11 +18,17 @@ FoldBackup 是面向 Minecraft NeoForge 服务端的世界备份工具，支持�
 - **快照管理**：支持查看快照链中每个快照占用的空间，以及可配置的自动清理
 - **区块预览与回档**：在游戏中预览区块历史景象，允许指定快照中的单个区块恢复到世界中
 
-    同时支持游戏内区块回档与游戏外CLI直接对存档进行区块回档，可以用于处理异常区块或者实体过多导致游戏崩溃的情况
+    同时支持游戏内区块回档与游戏外 CLI 直接对存档进行区块回档，可以用于处理异常区块或者实体过多导致游戏崩溃的情况
 - **存档导出**：将快照导出为 Minecraft 游戏存档
 - **归档压缩**：可以创建完整归档或差分归档，并使用归档文件恢复为游戏存档或导入到快照仓库
 
     归档用于储存和分发存档。下载一次完整归档后，后续差分归档只需传输更改部分，即可把服务器存档同步到本地，编辑后再同步回去，节约带宽
+
+> [!NOTE]
+> **快照（Snapshot）与归档（Archive）的区别**：
+>
+> - **快照**：日常高频自动/手动备份，增量去重存储在本地仓库中，用于快速回档、导出和单区块恢复。
+> - **归档**：面向高压缩率的独立压缩文件（支持完整归档与差分归档），适合异地冷备、跨机器同步或分发存档。
 
 ### LRH 与 Linear
 
@@ -46,31 +57,35 @@ FoldBackup 是面向 Minecraft NeoForge 服务端的世界备份工具，支持�
 
 ### 整体回档
 
-回档整个游戏存档可以使用TUI或者CLI。
+回档整个游戏存档可以使用 TUI 或者 CLI。
 
-在该世界的仓库目录（专用服务器为 `foldbackups/`，单机为 `foldbackups/<存档目录名>`）执行以下命令，先导出随 JAR 打包的运行库（这个设计是为了避免mod与CLI的依赖冲突），再启动菜单：
+在该世界的仓库目录（专用服务器为 `foldbackups/`，单机为 `foldbackups/<存档目录名>`）执行以下命令，先导出随 JAR 打包的运行库（这个设计是为了避免 Mod 与 CLI 的依赖冲突），再启动菜单。请将 `<版本>` 替换为实际 JAR 文件名：
 
 ```bash
 # 服务器 foldbackups/
-java -jar ../mods/foldbackup-0.3.0.jar extract
-java -jar ../mods/foldbackup-0.3.0.jar tui
+java -jar ../mods/foldbackup-<版本>.jar extract
+java -jar ../mods/foldbackup-<版本>.jar tui
 
 # 单机 foldbackups/<存档目录名>
-java -jar ../../mods/foldbackup-0.3.0.jar extract
-java -jar ../../mods/foldbackup-0.3.0.jar tui
+java -jar ../../mods/foldbackup-<版本>.jar extract
+java -jar ../../mods/foldbackup-<版本>.jar tui
 ```
 
 在菜单中选择“2. Export world files”（导出世界文件），按提示选择快照、导出为目录还是 ZIP，再输入输出路径。路径可以直接回车使用默认值（`world-export/<快照ID>`，ZIP 为同名 `.zip`）。
 
-导出为目录时，目标可以指向已有的游戏存档：程序只更新与快照不同的内容，相同的文件不会重写。回档前请先停止服务器。检查完成后选择“1 = overwrite”会保留存档中多出的文件，选择“2 = delete extra”会删除这些文件，使存档与快照完全一致。之后的线程数提示可以直接回车使用默认设置。
+> [!IMPORTANT]
+> 导出到正在使用的游戏存档目录进行回档前，**请先停止服务器**。
+
+导出为目录时，目标可以指向已有的游戏存档：程序只更新与快照不同的内容，相同的文件不会重写。检查完成后选择“1 = overwrite”会保留存档中多出的文件，选择“2 = delete extra”会删除这些文件，使存档与快照完全一致。之后的线程数提示可以直接回车使用默认设置。
 
 CLI 也可以完成同样的导出：`snapshot export <快照ID> --output <目录>`。`--zip` 导出 ZIP；目录导出可加 `--delete-extra` 删除多出的内容；`--dry-run` 只输出统计，不写入也不删除。
 
-### 快速启动TUI
+### 快速启动 TUI
 
 如果希望少敲命令，可以把下面的脚本另存到仓库目录，命名为 `foldbackup-tui.bat` 或 `foldbackup-tui.sh`（Linux 下需 `chmod +x`）。脚本会依次在自身所在目录、`../mods`、`../../mods` 中查找 JAR。
 
-`foldbackup-tui.bat`：
+<details>
+<summary>点击展开 Windows 启动脚本（<code>foldbackup-tui.bat</code>）</summary>
 
 ```bat
 @echo off
@@ -104,7 +119,10 @@ for %%f in ("%~1\foldbackup-*.jar") do if not defined JAR if exist "%%~ff" set "
 exit /b 0
 ```
 
-`foldbackup-tui.sh`：
+</details>
+
+<details>
+<summary>点击展开 Linux / macOS 启动脚本（<code>foldbackup-tui.sh</code>）</summary>
 
 ```sh
 #!/bin/sh
@@ -136,28 +154,30 @@ java -jar "$JAR" extract --output "$SCRIPT_DIR/.foldbackup-cli" || {
 exec java -jar "$JAR" tui --snapshot-root "$SCRIPT_DIR" --archive-root "$SCRIPT_DIR" --lib "$SCRIPT_DIR/.foldbackup-cli"
 ```
 
+</details>
+
 ### 区块回档
 
-支持游戏内使用命令预览与回档单个区块，同时也支持使用CLI直接操作游戏存档回档单个区块。
+支持游戏内使用命令预览与回档单个区块，同时也支持使用 CLI 直接操作游戏存档回档单个区块。
 
-在游戏中可以使用`/foldbackup preview <x> <z> [快照ID]`对目标快照和目标区块进行预览，这条命令会改变目标区块在客户端显示的内容，替换为目标快照时间的区块景象，不会真正的修改区块；
-`x`与`z`是区块坐标，可以通过F3信息显示，或者将方块坐标除以16并向下取整获得；
-预览时目标区块会显示蓝色粒子效果进行区分，使用`/foldbackup preview exit`即可退出预览。
+在游戏中可以使用 `/foldbackup preview <x> <z> [快照ID]` 对目标快照和目标区块进行预览，这条命令会改变目标区块在客户端显示的内容，替换为目标快照时间的区块景象，不会真正地修改区块；
+`x` 与 `z` 是区块坐标，可以通过 F3 信息显示，或者将方块坐标除以 16 并向下取整获得；
+预览时目标区块会显示蓝色粒子效果进行区分，使用 `/foldbackup preview exit` 即可退出预览。
 
-游戏内回档可使用`/foldbackup rollback chunk <x> <z> [快照ID]`，也可以用`/foldbackup rollback chunk in <维度> <x> <z> [快照ID]`指定维度。目标区块必须已经加载到内存中；未加载的区块请使用下面的CLI离线回档方式。省略快照ID时使用最新快照。
+游戏内回档可使用 `/foldbackup rollback chunk <x> <z> [快照ID]`，也可以用 `/foldbackup rollback chunk in <维度> <x> <z> [快照ID]` 指定维度。目标区块必须已经加载到内存中；未加载的区块请使用下面的 CLI 离线回档方式。省略快照 ID 时使用最新快照。
 
-当需要使用CLI回档时，以下示例假设当前目录为 `foldbackups`，且服务端存档目录为同级的 `world`。如果在其它目录执行，需要相应调整JAR、存档和快照目录路径；也可以用 `--snapshot-root <目录>` 指定快照目录。单机存档的仓库位于 `foldbackups/<存档目录名>`，需要把 `--snapshot-root` 指向该目录。离线回档前必须先关闭服务端。
+当需要使用 CLI 回档时，以下示例假设当前目录为 `foldbackups`，且服务端存档目录为同级的 `world`。如果在其它目录执行，需要相应调整 JAR、存档和快照目录路径；也可以用 `--snapshot-root <目录>` 指定快照目录。单机存档的仓库位于 `foldbackups/<存档目录名>`，需要把 `--snapshot-root` 指向该目录。**离线回档前必须先关闭服务端。**
 
 列出快照：
 
 ```bash
-java -jar ../mods/foldbackup-0.3.0.jar snapshot list
+java -jar ../mods/foldbackup-<版本>.jar snapshot list
 ```
 
-从列表中复制目标快照ID，然后执行区块回档。以下命令会将主世界 `world` 中区块 `[x, z]` 恢复到该快照的状态：
+从列表中复制目标快照 ID，然后执行区块回档。以下命令会将主世界 `world` 中区块 `[x, z]` 恢复到该快照的状态：
 
 ```bash
-java -jar ../mods/foldbackup-0.3.0.jar snapshot rollback <快照ID> --world ../world --chunk <区块X> <区块Z>
+java -jar ../mods/foldbackup-<版本>.jar snapshot rollback <快照ID> --world ../world --chunk <区块X> <区块Z>
 ```
 
 `--world` 指向目标维度目录：主世界使用存档根目录，下界使用 `../world/DIM-1`，末地使用 `../world/DIM1`，自定义维度使用其 `dimensions/<命名空间>/<路径>` 目录。`--chunk` 接收有符号整数区块坐标，不是方块坐标；例如方块坐标 `-1` 对应区块坐标 `-1`。CLI 会在执行前要求确认；可追加 `--yes` 跳过确认。
@@ -191,7 +211,7 @@ CLI会恢复目标区块的地形、方块实体、可恢复的实体数据，�
 
 ## 关键配置
 
-配置通过 NeoForge 的 SERVER 配置系统管理。下表中的名称使用“分组.键名”表示。
+配置文件默认位于运行目录下的 `config/foldbackup-server.toml`。下表中的名称使用“分组.键名”表示。
 
 | 配置 | 默认值 | 含义 |
 | --- | --- | --- |
@@ -213,15 +233,10 @@ CLI会恢复目标区块的地形、方块实体、可恢复的实体数据，�
 | `localization.defaultLanguage` | `en_us` | 未开启玩家语言检测或上报语言不受支持时使用的语言；可选 `zh_cn`、`en_us`、`es_es`、`pt_br`、`ru_ru` |
 | `localization.autoDetectPlayerLanguage` | `true` | 玩家上报的语言受支持时按其显示 |
 
-**自动清理可能删除包括手动备份在内的全部历史快照。** 默认只限制仓库容量（50 GiB）与剩余空间（5 GiB），不设保留天数上限，因此清理可能为满足这两个目标而删除较新的快照；剩余空间目标不代表已为下一次备份预留空间。三个清理限制均设为 0 时禁用自动删除，也可以通过 `retention.enabled` 关闭自动清理。
+> [!WARNING]
+> **自动清理可能删除包括手动备份在内的全部历史快照。** 默认只限制仓库容量（50 GiB）与剩余空间（5 GiB），不设保留天数上限，因此清理可能为满足这两个目标而删除较新的快照；剩余空间目标不代表已为下一次备份预留空间。三个清理限制均设为 0 时禁用自动删除，也可以通过 `retention.enabled` 关闭自动清理。
 
 `general.excludePatterns` 按世界目录内的相对路径匹配，路径分隔符使用 `/`。默认排除 `**/session.lock`、`**/backups`、`**/.backups`、`**/*.wip` 和 `**/DistantHorizons.sqlite`；匹配目录时会排除整个子目录树。
-
-## 从源码构建
-
-完整环境准备、测试命令及报告位置见 [构建与测试指南](../构建与测试指南.md)。
-
-`./gradlew jar` 产出 `foldbackup-<version>.jar`。该 JAR 不含 TUI 启动脚本模板或脚本注入实现，运行时不会向仓库目录写出任何启动脚本。
 
 ## 许可证与致谢
 
