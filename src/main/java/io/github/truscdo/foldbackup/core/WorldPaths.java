@@ -1,5 +1,6 @@
 package io.github.truscdo.foldbackup.core;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Set;
 
@@ -30,24 +31,53 @@ public final class WorldPaths {
 
     public static String dimensionSubPath(Path dimensionDirectory) {
         Path directory = dimensionDirectory.toAbsolutePath().normalize();
-        for (Path parent = directory; parent != null; parent = parent.getParent()) {
-            if (parent.getFileName() != null && parent.getFileName().toString().equals(CUSTOM_DIMENSIONS_DIR)) {
-                return parent.getParent().relativize(directory).toString().replace('\\', '/') + "/";
-            }
+        Path customRoot = findCustomDimensionsDir(directory);
+        if (customRoot != null) {
+            return customRoot.getParent().relativize(directory).toString().replace('\\', '/') + "/";
         }
-        return directory.getFileName() == null ? OVERWORLD_SUBPATH : dimensionSubPath(directory.getFileName().toString());
+        return directory.getFileName() == null
+                ? OVERWORLD_SUBPATH
+                : dimensionSubPath(directory.getFileName().toString());
     }
 
     public static Path worldRoot(Path dimensionDirectory) {
-        Path root = dimensionDirectory.toAbsolutePath().normalize();
-        if (root.getFileName() != null && BUILTIN_DIMENSION_DIRS.contains(root.getFileName().toString())) {
-            root = root.getParent();
+        Path directory = dimensionDirectory.toAbsolutePath().normalize();
+        Path customRoot = findCustomDimensionsDir(directory);
+        if (customRoot != null) {
+            return customRoot.getParent();
         }
-        for (Path p = dimensionDirectory.toAbsolutePath().normalize(); p != null; p = p.getParent()) {
-            if (p.getFileName() != null && p.getFileName().toString().equals(CUSTOM_DIMENSIONS_DIR)) {
-                return p.getParent();
+        if (directory.getFileName() != null
+                && BUILTIN_DIMENSION_DIRS.contains(directory.getFileName().toString())
+                && directory.getParent() != null) {
+            return directory.getParent();
+        }
+        return directory;
+    }
+
+    /**
+     * Locates the enclosing {@code <worldRoot>/dimensions} directory for a custom dimension path
+     * ({@code <worldRoot>/dimensions/<namespace>/<path...>}), stopping if an enclosing world root
+     * marker ({@code level.dat} or {@code session.lock}) is reached first.
+     */
+    private static Path findCustomDimensionsDir(Path directory) {
+        if (isWorldRootMarkerPresent(directory)) {
+            return null;
+        }
+        for (Path p = directory.getParent(); p != null; p = p.getParent()) {
+            if (isWorldRootMarkerPresent(p)) {
+                return null;
+            }
+            if (p.getFileName() != null
+                    && p.getFileName().toString().equals(CUSTOM_DIMENSIONS_DIR)
+                    && p.getParent() != null
+                    && p.relativize(directory).getNameCount() >= 2) {
+                return p;
             }
         }
-        return root;
+        return null;
+    }
+
+    private static boolean isWorldRootMarkerPresent(Path dir) {
+        return Files.exists(dir.resolve("level.dat")) || Files.exists(dir.resolve("session.lock"));
     }
 }

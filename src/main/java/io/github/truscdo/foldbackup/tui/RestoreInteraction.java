@@ -100,7 +100,7 @@ final class RestoreInteraction {
                     }
                 }
             }
-        } catch (IOException e) {
+        } catch (IOException | RuntimeException e) {
             System.err.println(failurePrefix + e.getMessage() + "\n");
             return Flow.CANCEL;
         }

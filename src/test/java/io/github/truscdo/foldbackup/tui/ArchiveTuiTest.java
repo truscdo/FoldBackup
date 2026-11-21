@@ -201,6 +201,26 @@ class ArchiveTuiTest {
         assertFalse(text.contains("OK — no errors"), text);
     }
 
+    @Test
+    void restoreInteractionCatchesRuntimeExceptionFromOpener() {
+        var err = new ByteArrayOutputStream();
+        PrintStream previousErr = System.err;
+        try {
+            System.setErr(new PrintStream(err, true));
+            var flow = RestoreInteraction.run(
+                    new ConsolePrompt(new StringReader(""), new PrintStream(new ByteArrayOutputStream(), true)),
+                    () -> { throw new IllegalArgumentException("corrupt metadata"); },
+                    archive.resolve("out"),
+                    3,
+                    "Restoring...",
+                    "Restore failed: ");
+            assertEquals(RestoreInteraction.Flow.CANCEL, flow);
+        } finally {
+            System.setErr(previousErr);
+        }
+        assertTrue(err.toString().contains("Restore failed: corrupt metadata"), err.toString());
+    }
+
     private void writeTar(String name, ArchiveSnapshot metadata) throws Exception {
         try (var output = Files.newOutputStream(archive.resolve(name));
                 var writer = new TarWriter(output)) {

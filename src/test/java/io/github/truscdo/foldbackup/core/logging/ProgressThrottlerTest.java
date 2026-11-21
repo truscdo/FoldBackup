@@ -48,4 +48,21 @@ class ProgressThrottlerTest {
         throttler.reset();
         assertTrue(throttler.allowMessage("Preparing snapshot", false));
     }
+
+    @Test
+    void progressThrottlingWithDeduplicationStillEmitsCompletionAndCountAdvances() {
+        var clock = new AtomicLong(1_000_000_000L);
+        var throttler = new ProgressThrottler(clock::get, 1_000_000_000L, true);
+
+        assertTrue(throttler.allowProgress(new ProgressEvent("Scan", 0, 1, "a.mca")));
+        assertTrue(throttler.allowProgress(new ProgressEvent("Scan", 1, 1, "a.mca")));
+        assertFalse(throttler.allowProgress(new ProgressEvent("Scan", 1, 1, "a.mca")));
+
+        assertTrue(throttler.allowProgress(new ProgressEvent("Count", 0, 3, "")));
+        clock.addAndGet(1_000_000_000L);
+        assertTrue(throttler.allowProgress(new ProgressEvent("Count", 1, 3, "")));
+        clock.addAndGet(1_000_000_000L);
+        assertFalse(throttler.allowProgress(new ProgressEvent("Count", 1, 3, "")));
+        assertTrue(throttler.allowProgress(new ProgressEvent("Count", 3, 3, "")));
+    }
 }

@@ -108,7 +108,7 @@ final class ArchiveLibrary {
      * 读取并解析一个归档的 {@code snapshot.bin}；不可导入时把原因记入 {@code errors} 并返回
      * {@code null}，扫描继续处理下一个归档。
      */
-    private static Scanned readArchive(Path tar, String fileName, ArchiveErrorCollector errors) throws IOException {
+    private static Scanned readArchive(Path tar, String fileName, ArchiveErrorCollector errors) {
         byte[] bytes;
         try {
             bytes = ArchiveFormatUtil.readSnapshotBytes(tar);
@@ -123,7 +123,7 @@ final class ArchiveLibrary {
         ArchiveSnapshot meta;
         try {
             meta = ArchiveSnapshotCodec.decode(bytes);
-        } catch (RuntimeException e) {
+        } catch (IOException | RuntimeException e) {
             errors.add(fileName, e.getMessage());
             return null;
         }

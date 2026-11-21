@@ -25,6 +25,8 @@ public final class ProgressThrottler {
     private String lastPhase;
     private boolean awaitingFirstItem;
     private String lastContent;
+    private long lastCompleted = Long.MIN_VALUE;
+    private long lastTotal = Long.MIN_VALUE;
 
     public ProgressThrottler(long intervalNanos, boolean deduplicateContent) {
         this(System::nanoTime, intervalNanos, deduplicateContent);
@@ -56,28 +58,28 @@ public final class ProgressThrottler {
         if (stageChanged) {
             lastPhase = event.phase();
             awaitingFirstItem = event.item().isEmpty();
-            recordEmit(now, event.item());
+            recordProgressEmit(now, event);
             return true;
         }
         if (completed) {
             awaitingFirstItem = false;
-            if (deduplicateContent && lastContent != null && lastContent.equals(event.item()) && hasEmitted) {
+            if (isSameProgress(event)) {
                 return false;
             }
-            recordEmit(now, event.item());
+            recordProgressEmit(now, event);
             return true;
         }
         if (awaitingFirstItem && !event.item().isEmpty()) {
             awaitingFirstItem = false;
-            recordEmit(now, event.item());
+            recordProgressEmit(now, event);
             return true;
         }
         if (!hasEmitted || now - lastEmitNanos >= defaultIntervalNanos) {
             awaitingFirstItem = event.item().isEmpty() && awaitingFirstItem;
-            if (deduplicateContent && event.item().equals(lastContent)) {
+            if (isSameProgress(event)) {
                 return false;
             }
-            recordEmit(now, event.item());
+            recordProgressEmit(now, event);
             return true;
         }
         return false;
@@ -138,11 +140,31 @@ public final class ProgressThrottler {
         this.lastPhase = null;
         this.awaitingFirstItem = false;
         this.lastContent = null;
+        this.lastCompleted = Long.MIN_VALUE;
+        this.lastTotal = Long.MIN_VALUE;
+    }
+
+    private boolean isSameProgress(ProgressEvent event) {
+        return deduplicateContent
+                && hasEmitted
+                && event.completed() == lastCompleted
+                && event.total() == lastTotal
+                && Objects.equals(event.item(), lastContent);
+    }
+
+    private void recordProgressEmit(long now, ProgressEvent event) {
+        this.lastEmitNanos = now;
+        this.hasEmitted = true;
+        this.lastContent = event.item();
+        this.lastCompleted = event.completed();
+        this.lastTotal = event.total();
     }
 
     private void recordEmit(long now, String content) {
         this.lastEmitNanos = now;
         this.hasEmitted = true;
         this.lastContent = content;
+        this.lastCompleted = Long.MIN_VALUE;
+        this.lastTotal = Long.MIN_VALUE;
     }
 }

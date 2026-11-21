@@ -256,4 +256,16 @@ class ArchiveImporterTest {
         assertEquals("world", new SnapshotStore(store).loadSnapshot(BASE_EPOCH).getWorldName(),
                 "the existing snapshot is untouched");
     }
+
+    @Test void corruptedSnapshotBinIsCollectedAsErrorWhileValidArchivesStillImport() throws Exception {
+        Path archive = diffArchive(), store = temp.resolve("store");
+        writeArchive(archive.resolve("corrupted.tar"), new byte[]{1, 2, 3, 4}, Map.of());
+        var failure = assertThrows(IOException.class, () -> new ArchiveImporter(archive, store, 4).importAll());
+        String msg = failure.getMessage();
+        assertTrue(msg.contains("2 snapshot(s) imported"), msg);
+        assertTrue(msg.contains("corrupted.tar:"), msg);
+        SnapshotStore snapshots = new SnapshotStore(store);
+        assertNotNull(snapshots.loadSnapshot(BASE_EPOCH));
+        assertNotNull(snapshots.loadSnapshot(TARGET_EPOCH));
+    }
 }

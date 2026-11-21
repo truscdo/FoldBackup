@@ -189,6 +189,22 @@ class SnapshotStoreTest {
                 () -> store.requireSnapshot(999_999L, "S-missing"));
     }
 
+    @Test
+    void summaryRejectsNegativeEntrySizesAndOverflow() {
+        RegionEntry negativeRegion = new RegionEntry("region/r.0.0.mca", "a".repeat(32), "blobs/r", -1L, 100L);
+        assertThrows(IllegalArgumentException.class,
+                () -> SnapshotManifest.Summary.summarize(List.of(negativeRegion), List.of()));
+
+        FileEntry negativeFile = new FileEntry("level.dat", "a".repeat(32), "blobs/f", 10L, -5L);
+        assertThrows(IllegalArgumentException.class,
+                () -> SnapshotManifest.Summary.summarize(List.of(), List.of(negativeFile)));
+
+        RegionEntry huge1 = new RegionEntry("region/r.0.0.mca", "a".repeat(32), "blobs/r1", Long.MAX_VALUE, 100L);
+        FileEntry huge2 = new FileEntry("level.dat", "a".repeat(32), "blobs/f1", 1L, 100L);
+        assertThrows(IllegalArgumentException.class,
+                () -> SnapshotManifest.Summary.summarize(List.of(huge1), List.of(huge2)));
+    }
+
     /** 创建用于测试的最小快照清单。 */
     private static SnapshotManifest snapshot(String id, long time) {
         return new SnapshotManifest(id, time, "world");

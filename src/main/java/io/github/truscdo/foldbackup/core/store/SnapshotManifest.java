@@ -135,14 +135,14 @@ public class SnapshotManifest {
             long uncompressed = 0;
             if (regions != null) {
                 for (RegionEntry r : regions) {
-                    compressed += r.getSizeCompressed();
-                    uncompressed += r.getSizeUncompressed();
+                    compressed = addNonNegativeSize(compressed, r.getSizeCompressed(), "region compressed size");
+                    uncompressed = addNonNegativeSize(uncompressed, r.getSizeUncompressed(), "region uncompressed size");
                 }
             }
             if (files != null) {
                 for (FileEntry f : files) {
-                    compressed += f.getSizeCompressed();
-                    uncompressed += f.getSizeUncompressed();
+                    compressed = addNonNegativeSize(compressed, f.getSizeCompressed(), "file compressed size");
+                    uncompressed = addNonNegativeSize(uncompressed, f.getSizeUncompressed(), "file uncompressed size");
                 }
             }
             Summary summary = new Summary();
@@ -154,6 +154,17 @@ public class SnapshotManifest {
             summary.setTotalUncompressedBytes(uncompressed);
             summary.setNewBlobBytes(newBlobBytes);
             return summary;
+        }
+
+        private static long addNonNegativeSize(long total, long size, String label) {
+            if (size < 0) {
+                throw new IllegalArgumentException(label + " must be non-negative: " + size);
+            }
+            try {
+                return Math.addExact(total, size);
+            } catch (ArithmeticException e) {
+                throw new IllegalArgumentException(label + " total overflow", e);
+            }
         }
 
         public int getRegionsTotal() { return regionsTotal; }
