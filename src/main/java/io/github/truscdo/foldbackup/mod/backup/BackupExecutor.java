@@ -123,12 +123,55 @@ public class BackupExecutor {
         this.coordinator = coordinator;
     }
 
+    /** 前置守卫与运行位抢占的结果：{@code run != null} 表示占槽成功，否则 {@code rejected} 为拒绝原因。 */
+    private record AcquireOutcome(Run run, BackupResult rejected) {
+        static AcquireOutcome accepted(Run run) {
+            return new AcquireOutcome(run, null);
+        }
+
+        static AcquireOutcome rejected(BackupResult reason) {
+            return new AcquireOutcome(null, reason);
+        }
+    }
+
     // --- 防护 ---
 
     private boolean minIntervalOk(boolean force) {
         if (force)
             return true;
-        return scheduler.isMinIntervalElapsed(clock.getAsLong());
+        return scheduler == null || scheduler.isMinIntervalElapsed(clock.getAsLong());
+    }
+
+    /**
+     * 统一前置守卫与运行位抢占：依次检查最小间隔、组件就绪与并发运行位。
+     * 先做 {@code currentRun.get() != null} 快速预检，避免在常规并发冲突时创建多余的失败 {@link TaskStatus}；
+     * 仅在预检通过后创建任务并用 CAS 抢占唯一运行位。
+     *
+     * @param force          是否跳过最小间隔检查
+     * @param runningOnStart 是否在抢占前将任务直接置为 RUNNING（阻塞路径使用）
+     */
+    private AcquireOutcome tryAcquireRun(boolean force, boolean runningOnStart) {
+        if (!minIntervalOk(force)) {
+            LOG.info("Backup skipped — minimum interval of {} min not elapsed",
+                    scheduler.getMinIntervalMinutes());
+            return AcquireOutcome.rejected(BackupResult.TOO_SOON);
+        }
+        if (worldAccessor == null || coordinator == null) {
+            return AcquireOutcome.rejected(BackupResult.NOT_INITIALIZED);
+        }
+        if (currentRun.get() != null) {
+            return AcquireOutcome.rejected(BackupResult.ALREADY_RUNNING);
+        }
+
+        TaskStatus status = taskRegistry.startTask(TaskType.BACKUP);
+        if (runningOnStart) {
+            status.setRunning();
+        }
+        Run run = claimRun(status);
+        if (run == null) {
+            return AcquireOutcome.rejected(BackupResult.ALREADY_RUNNING);
+        }
+        return AcquireOutcome.accepted(run);
     }
 
     /**
@@ -155,28 +198,16 @@ public class BackupExecutor {
     }
 
     /**
-     * 触发备份；仅在成功占用运行位、准备启动任务时调用 {@code onAccepted}。
+     * 触发备份；仅在通过前置校验并成功占用运行位、准备启动任务时同步调用 {@code onAccepted}。
      */
-    CompletableFuture<BackupResult> triggerBackup(boolean force, Runnable onAccepted) {
-        if (!minIntervalOk(force)) {
-            LOG.info("Backup skipped — minimum interval of {} min not elapsed",
-                    scheduler.getMinIntervalMinutes());
-            return CompletableFuture.completedFuture(BackupResult.TOO_SOON);
-        }
-        if (worldAccessor == null || coordinator == null) {
-            return CompletableFuture.completedFuture(BackupResult.NOT_INITIALIZED);
-        }
-        if (currentRun.get() != null)
-            return CompletableFuture.completedFuture(BackupResult.ALREADY_RUNNING);
-
-        TaskStatus status = taskRegistry.startTask(TaskType.BACKUP);
-        Run run = claimRun(status);
-        if (run == null)
-            return CompletableFuture.completedFuture(BackupResult.ALREADY_RUNNING);
+    public CompletableFuture<BackupResult> triggerBackup(boolean force, Runnable onAccepted) {
+        AcquireOutcome outcome = tryAcquireRun(force, false);
+        if (outcome.run() == null)
+            return CompletableFuture.completedFuture(outcome.rejected());
         if (onAccepted != null)
             onAccepted.run();
-        startAsync(run);
-        return run.future;
+        startAsync(outcome.run());
+        return outcome.run().future;
     }
 
     private void startAsync(Run run) {
@@ -329,20 +360,10 @@ public class BackupExecutor {
      * 自动创建新的 {@link TaskStatus}。
      */
     public BackupResult triggerBackupBlocking(boolean force) {
-        if (!minIntervalOk(force)) {
-            LOG.info("Backup skipped — minimum interval of {} min not elapsed",
-                    scheduler.getMinIntervalMinutes());
-            return BackupResult.TOO_SOON;
-        }
-        if (worldAccessor == null || coordinator == null)
-            return BackupResult.NOT_INITIALIZED;
-        if (currentRun.get() != null)
-            return BackupResult.ALREADY_RUNNING;
-
-        TaskStatus status = taskRegistry.startTask(TaskType.BACKUP).setRunning();
-        Run run = claimRun(status);
-        if (run == null)
-            return BackupResult.ALREADY_RUNNING;
+        AcquireOutcome outcome = tryAcquireRun(force, true);
+        if (outcome.run() == null)
+            return outcome.rejected();
+        Run run = outcome.run();
         try {
             prepareWorldForBackup();
             coordinator.runBackup(run.status, step -> onBlockingStep(step));

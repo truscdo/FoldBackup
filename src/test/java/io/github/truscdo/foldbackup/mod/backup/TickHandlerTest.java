@@ -50,7 +50,7 @@ class TickHandlerTest {
         try (var worker = Executors.newSingleThreadExecutor()) {
             var executor = new BackupExecutor(Runnable::run, (key, args) -> {}, world, coordinator,
                     scheduler, worker, tasks, () -> 0L, now::get) {
-                @Override CompletableFuture<BackupResult> triggerBackup(boolean force, Runnable onAccepted) {
+                @Override public CompletableFuture<BackupResult> triggerBackup(boolean force, Runnable onAccepted) {
                     var f = super.triggerBackup(force, onAccepted);
                     f.whenComplete((r, e) -> done.countDown());
                     return f;
@@ -142,7 +142,7 @@ class TickHandlerTest {
         try (var worker = Executors.newSingleThreadExecutor()) {
             var executor = new BackupExecutor(Runnable::run, (key, args) -> {}, world, coordinator,
                     scheduler, worker, tasks, () -> 0L) {
-                @Override CompletableFuture<BackupResult> triggerBackup(boolean force, Runnable onAccepted) {
+                @Override public CompletableFuture<BackupResult> triggerBackup(boolean force, Runnable onAccepted) {
                     var f = super.triggerBackup(force, onAccepted);
                     f.whenComplete((r, e) -> {
                         if (firstDone.getCount() > 0) firstDone.countDown();

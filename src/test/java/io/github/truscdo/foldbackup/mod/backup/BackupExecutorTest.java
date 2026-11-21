@@ -281,29 +281,35 @@ class BackupExecutorTest {
         var accepted = new AtomicInteger();
 
         try (var worker = Executors.newSingleThreadExecutor()) {
-            // 未初始化时不得触发 onAccepted
+            // 未初始化时不得触发 onAccepted，且异步与阻塞前置守卫一致、不污染 TaskRegistry
             var unready = new BackupExecutor(mainQueue::add, (key, args) -> {}, null, null,
                     scheduler, worker, tasks, () -> 0L);
             assertEquals(BackupResult.NOT_INITIALIZED,
                     unready.triggerBackup(true, accepted::incrementAndGet).getNow(null));
+            assertEquals(BackupResult.NOT_INITIALIZED, unready.triggerBackupBlocking(true));
             assertEquals(0, accepted.get());
+            assertTrue(tasks.getHistory().isEmpty());
 
             var executor = new BackupExecutor(mainQueue::add, (key, args) -> {}, world, coordinator,
                     scheduler, worker, tasks, () -> 0L);
 
-            // 最小间隔未到时不得触发 onAccepted
+            // 最小间隔未到时不得触发 onAccepted，且异步与阻塞均返回 TOO_SOON
             assertEquals(BackupResult.TOO_SOON,
                     executor.triggerBackup(false, accepted::incrementAndGet).getNow(null));
+            assertEquals(BackupResult.TOO_SOON, executor.triggerBackupBlocking(false));
             assertEquals(0, accepted.get());
+            assertTrue(tasks.getHistory().isEmpty());
 
             // 强制触发成功占槽：触发一次 onAccepted
             var future = executor.triggerBackup(true, accepted::incrementAndGet);
             assertEquals(1, accepted.get());
 
-            // 运行期间再次触发返回 ALREADY_RUNNING，不得再次触发 onAccepted
+            // 运行期间再次触发（异步与阻塞）均返回 ALREADY_RUNNING，不得再次触发 onAccepted，也不创建失败历史任务
             assertEquals(BackupResult.ALREADY_RUNNING,
                     executor.triggerBackup(true, accepted::incrementAndGet).getNow(null));
+            assertEquals(BackupResult.ALREADY_RUNNING, executor.triggerBackupBlocking(true));
             assertEquals(1, accepted.get());
+            assertTrue(tasks.getHistory().isEmpty());
 
             mainQueue.remove().run();
             assertTrue(started.await(5, TimeUnit.SECONDS));

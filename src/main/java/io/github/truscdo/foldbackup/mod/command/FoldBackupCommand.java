@@ -1,6 +1,7 @@
 package io.github.truscdo.foldbackup.mod.command;
 
 import io.github.truscdo.foldbackup.core.BackupExporter;
+import io.github.truscdo.foldbackup.core.BackupResult;
 import io.github.truscdo.foldbackup.core.FormatUtil;
 import io.github.truscdo.foldbackup.core.store.SnapshotManifest;
 import io.github.truscdo.foldbackup.core.store.SnapshotStore;
@@ -19,6 +20,8 @@ import net.minecraft.commands.Commands;
 import net.minecraft.server.level.ServerPlayer;
 
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /** {@code /foldbackup} command for backup management. */
 public class FoldBackupCommand {
@@ -94,45 +97,58 @@ public class FoldBackupCommand {
                         CommandFeedback.failure(source, mod, "foldbackup.command.backend_not_ready");
                         return 0;
                 }
-                if (executor.isBackupRunning()) {
-                        CommandFeedback.failure(source, mod, "foldbackup.command.backup.already_running");
+
+                AtomicBoolean accepted = new AtomicBoolean();
+                CompletableFuture<BackupResult> future = executor.triggerBackup(force, () -> {
+                        accepted.set(true);
+                        source.sendSuccess(() -> CommandFeedback.text(source, mod,
+                                        force ? "foldbackup.command.backup.start_forced"
+                                                        : "foldbackup.command.backup.start"),
+                                        false);
+                        if (source.getEntity() instanceof ServerPlayer player) {
+                                mod.getProgressNotifier().subscribe(player);
+                        }
+                });
+
+                if (!accepted.get()) {
+                        reportBackupOutcome(source, mod, future.getNow(BackupResult.FAILED), null);
                         return 0;
                 }
 
-                source.sendSuccess(() -> CommandFeedback.text(source, mod,
-                                force ? "foldbackup.command.backup.start_forced" : "foldbackup.command.backup.start"),
-                                false);
-                if (source.getEntity() instanceof ServerPlayer player) {
-                        mod.getProgressNotifier().subscribe(player);
-                }
-
-                executor.triggerBackup(force)
-                                .whenComplete((result, throwable) -> mod.getServer().execute(() -> {
-                                        if (source.getEntity() instanceof ServerPlayer player) {
-                                                mod.getProgressNotifier().unsubscribe(player.getUUID());
-                                        }
-                                        if (throwable != null) {
-                                                FoldBackupMod.LOG.error("Backup command failed", throwable);
-                                                reportBackupFailureToSource(source, mod);
-                                                return;
-                                        }
-
-                                        switch (result) {
-                                                case SUCCESS -> source.sendSuccess(
-                                                                () -> CommandFeedback.text(source, mod,
-                                                                                "foldbackup.command.backup.success"),
-                                                                false);
-                                                case TOO_SOON -> CommandFeedback.failure(source, mod,
-                                                                "foldbackup.command.backup.too_soon",
-                                                                mod.getConfig().getMinIntervalMinutes());
-                                                case ALREADY_RUNNING -> CommandFeedback.failure(source, mod,
-                                                                "foldbackup.command.backup.already_running");
-                                                case NOT_INITIALIZED -> CommandFeedback.failure(source, mod,
-                                                                "foldbackup.command.backend_not_ready");
-                                                case FAILED -> reportBackupFailureToSource(source, mod);
-                                        }
-                                }));
+                future.whenComplete((result, throwable) -> mod.getServer().execute(() -> {
+                        if (source.getEntity() instanceof ServerPlayer player) {
+                                mod.getProgressNotifier().unsubscribe(player.getUUID());
+                        }
+                        reportBackupOutcome(source, mod, result, throwable);
+                }));
                 return Command.SINGLE_SUCCESS;
+        }
+
+        private static void reportBackupOutcome(
+                        CommandSourceStack source, FoldBackupMod mod, BackupResult result, Throwable throwable) {
+                if (throwable != null) {
+                        FoldBackupMod.LOG.error("Backup command failed", throwable);
+                        reportBackupFailureToSource(source, mod);
+                        return;
+                }
+                if (result == null) {
+                        reportBackupFailureToSource(source, mod);
+                        return;
+                }
+                switch (result) {
+                        case SUCCESS -> source.sendSuccess(
+                                        () -> CommandFeedback.text(source, mod,
+                                                        "foldbackup.command.backup.success"),
+                                        false);
+                        case TOO_SOON -> CommandFeedback.failure(source, mod,
+                                        "foldbackup.command.backup.too_soon",
+                                        mod.getConfig().getMinIntervalMinutes());
+                        case ALREADY_RUNNING -> CommandFeedback.failure(source, mod,
+                                        "foldbackup.command.backup.already_running");
+                        case NOT_INITIALIZED -> CommandFeedback.failure(source, mod,
+                                        "foldbackup.command.backend_not_ready");
+                        case FAILED -> reportBackupFailureToSource(source, mod);
+                }
         }
 
         /** Player sources already receive the executor's server-wide failure notice. */
