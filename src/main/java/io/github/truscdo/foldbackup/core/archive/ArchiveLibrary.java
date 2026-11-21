@@ -1,7 +1,6 @@
 package io.github.truscdo.foldbackup.core.archive;
 
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -42,7 +41,7 @@ final class ArchiveLibrary {
     static ArchiveLibrary scan(Path root) throws IOException {
         var errors = new ArchiveErrorCollector();
         List<String> warnings = new ArrayList<>();
-        List<Path> tars = tarFiles(root);
+        List<Path> tars = ArchiveTarScanner.listTarFiles(root);
 
         Map<Long, List<ScannedEntry>> fullGroups = new LinkedHashMap<>();
         List<Entry> nonFullEntries = new ArrayList<>();
@@ -103,18 +102,6 @@ final class ArchiveLibrary {
         entries.sort(Comparator.comparingLong((Entry entry) -> entry.meta().epoch)
                 .thenComparing(Entry::fileName));
         return new ArchiveLibrary(entries, warnings, errors.list());
-    }
-
-    /** 目录内全部 {@code .tar}，按文件名排序：同 Epoch 去重时“保留第一份”才是确定的。 */
-    private static List<Path> tarFiles(Path root) throws IOException {
-        List<Path> tars = new ArrayList<>();
-        try (var stream = Files.list(root)) {
-            for (Path path : (Iterable<Path>) stream::iterator) {
-                if (path.getFileName().toString().endsWith(".tar")) tars.add(path);
-            }
-        }
-        tars.sort(Comparator.comparing(path -> path.getFileName().toString()));
-        return tars;
     }
 
     /**

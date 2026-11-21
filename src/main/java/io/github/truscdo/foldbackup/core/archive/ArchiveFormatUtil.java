@@ -32,7 +32,7 @@ public final class ArchiveFormatUtil {
         try {
             byte[] data = readSnapshotBytes(tar);
             return data == null ? null : ArchiveSnapshotCodec.decode(data);
-        } catch (IOException ignored) {
+        } catch (IOException | RuntimeException ignored) {
             // fall through
         }
         return null;

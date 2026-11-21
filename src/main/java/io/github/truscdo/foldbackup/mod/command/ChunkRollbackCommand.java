@@ -13,7 +13,6 @@ import net.minecraft.commands.arguments.DimensionArgument;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.ChunkPos;
-import net.minecraft.world.level.chunk.LevelChunk;
 
 /**
  * {@code /foldbackup rollback chunk <x> <z> [snapshotId]} — 从备份快照回滚单个区块。
@@ -77,14 +76,6 @@ public class ChunkRollbackCommand {
                         }
                 }
 
-                // ── 检查目标区块当前是否已加载到内存 ──
-                LevelChunk liveChunk = level.getChunkSource().getChunkNow(chunkX, chunkZ);
-                if (liveChunk == null) {
-                        CommandFeedback.failure(source, mod, "foldbackup.rollback.chunk_not_loaded_command",
-                                        chunkX, chunkZ);
-                        return 0;
-                }
-
                 // ── 执行内存回档 ──
                 InMemoryChunkRollbackHandler handler = new InMemoryChunkRollbackHandler(
                                 backend.store(), backend.blobs());
@@ -96,9 +87,10 @@ public class ChunkRollbackCommand {
 
                 if (result.success()) {
                         source.sendSuccess(() -> message, true);
+                        return Command.SINGLE_SUCCESS;
                 } else {
                         source.sendFailure(message);
+                        return 0;
                 }
-                return Command.SINGLE_SUCCESS;
         }
 }

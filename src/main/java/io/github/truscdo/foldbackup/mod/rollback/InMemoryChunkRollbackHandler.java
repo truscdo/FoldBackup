@@ -66,7 +66,14 @@ public class InMemoryChunkRollbackHandler {
     public RollbackOutcome rollbackChunk(
             ServerLevel level, int chunkX, int chunkZ, @Nullable Long epochSeconds) {
         if (!level.getServer().isSameThread()) return failure("foldbackup.rollback.failure.server_thread");
-        // ── 步骤 1-3：解析快照 + 区域条目 + 解析 .lrh 数据块 ──
+
+        // ── 步骤 1：确认目标区块已加载（游戏内仅支持加载区块；未加载区块应停服后使用 CLI） ──
+        LevelChunk liveChunk = level.getChunkSource().getChunkNow(chunkX, chunkZ);
+        if (liveChunk == null) {
+            return failure("foldbackup.rollback.failure.chunk_not_loaded", chunkX, chunkZ);
+        }
+
+        // ── 步骤 2-4：解析快照 + 区域条目 + 解析 .lrh 数据块 ──
         ChunkRollbackSupport.ResolvedSnapshot resolved;
         try {
             resolved = ChunkRollbackSupport.resolveChunk(snapshotManager, blobStore,
@@ -75,7 +82,7 @@ public class InMemoryChunkRollbackHandler {
             return failure("foldbackup.rollback.failure.snapshot_read", e);
         }
 
-        // ── 步骤 4：提取目标区块的 NBT ──
+        // ── 步骤 5：提取目标区块的 NBT ──
         ChunkData snapshotChunkData = resolved.chunk();
         if (snapshotChunkData == null) {
             return failure("foldbackup.rollback.failure.chunk_empty",
@@ -97,13 +104,6 @@ public class InMemoryChunkRollbackHandler {
             entities = new EntityRollbackBridge().prepare(level, new ChunkPos(chunkX, chunkZ), entitySnapshot);
         } catch (Exception e) {
             entities = EntityRollbackBridge.preserve(level, new ChunkPos(chunkX, chunkZ), e.getMessage());
-        }
-
-        // ── 步骤 5：确认目标区块已加载（在可能改动 POI 的反序列化之前） ──
-        LevelChunk liveChunk = level.getChunkSource().getChunkNow(chunkX, chunkZ);
-        if (liveChunk == null) {
-            // 游戏内仅支持加载区块；未加载区块应停服后使用 CLI。
-            return failure("foldbackup.rollback.failure.chunk_not_loaded", chunkX, chunkZ);
         }
 
         // ── 步骤 6：反序列化为临时 ChunkAccess ──

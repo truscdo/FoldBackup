@@ -167,4 +167,23 @@ class ArchiveVerifierTest {
         assertEquals(1, located.lrhChecked);
         assertEquals(1, located.lrhdChecked);
     }
+
+    @Test
+    void readSnapshotAndScannerTolerateCorruptedSnapshotBinAndIgnoreTarDirectories() throws IOException {
+        Path archives = Files.createDirectory(temp.resolve("scan-archives"));
+        Files.createDirectory(archives.resolve("00-directory.tar"));
+
+        Path corruptedTar = archives.resolve("bad-meta.tar");
+        try (var out = Files.newOutputStream(corruptedTar); var writer = new TarWriter(out)) {
+            writer.putEntry("snapshot.bin", new byte[] { 1, 2, 3 });
+        }
+
+        assertNull(ArchiveFormatUtil.readSnapshot(corruptedTar));
+        assertEquals(java.util.List.of(corruptedTar), ArchiveTarScanner.listTarFiles(archives));
+
+        var scanned = ArchiveTarScanner.scan(archives);
+        assertEquals(1, scanned.size());
+        assertEquals("bad-meta.tar", scanned.getFirst().fileName());
+        assertNull(scanned.getFirst().meta());
+    }
 }

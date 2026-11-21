@@ -175,11 +175,7 @@ public class ArchiveVerifier {
         Result combined = new Result();
         var collector = ArchiveErrorCollector.wrap(combined.errors);
         if (!Files.isDirectory(archiveRoot)) throw new IOException("Archive root not found: " + archiveRoot);
-        List<Path> archives;
-        try (var stream = Files.list(archiveRoot)) {
-            archives = stream.filter(path -> path.getFileName().toString().endsWith(".tar"))
-                    .sorted().toList();
-        }
+        List<Path> archives = ArchiveTarScanner.listTarFiles(archiveRoot);
         var scannedTars = new AtomicReference<List<ArchiveTarScanner.ArchiveTarInfo>>();
         Supplier<List<ArchiveTarScanner.ArchiveTarInfo>> tarCache = () -> {
             List<ArchiveTarScanner.ArchiveTarInfo> cached = scannedTars.get();

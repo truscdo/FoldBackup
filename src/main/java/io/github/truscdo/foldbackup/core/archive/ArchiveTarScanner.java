@@ -90,6 +90,22 @@ public final class ArchiveTarScanner {
     }
 
     /**
+     * 列出归档目录下的所有 {@code .tar} 常规文件，按文件名升序排列。
+     */
+    static List<Path> listTarFiles(Path archiveRoot) throws IOException {
+        List<Path> tars = new ArrayList<>();
+        try (var stream = Files.list(archiveRoot)) {
+            for (Path path : (Iterable<Path>) stream::iterator) {
+                if (path.getFileName().toString().endsWith(".tar") && Files.isRegularFile(path)) {
+                    tars.add(path);
+                }
+            }
+        }
+        tars.sort(Comparator.comparing(path -> path.getFileName().toString()));
+        return tars;
+    }
+
+    /**
      * 扫描归档根下所有 {@code .tar}，解析 snapshot.bin，按 Epoch 秒倒序（最新在前）。
      * 目录不存在或为空时返回空列表。
      */
@@ -98,12 +114,9 @@ public final class ArchiveTarScanner {
         if (!Files.isDirectory(archiveRoot)) {
             return tars;
         }
-        try (var stream = Files.list(archiveRoot)) {
-            for (Path p : (Iterable<Path>) stream::iterator) {
+        try {
+            for (Path p : listTarFiles(archiveRoot)) {
                 String name = p.getFileName().toString();
-                if (!name.endsWith(".tar")) {
-                    continue;
-                }
                 long size = 0;
                 try {
                     size = Files.size(p);
