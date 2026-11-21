@@ -62,7 +62,6 @@ public final class EntityRegionCodec {
                 EntityTag tree = entity(roots.get(i), new HashSet<>(), players);
                 if (players[0] != 0) throw new IOException("Player in entity tree");
                 checkChunk(tree, x, z);
-                rejectLeash(roots.get(i));
                 kept.add(tree);
             } catch (IOException e) {
                 skippedTrees++;
@@ -81,12 +80,6 @@ public final class EntityRegionCodec {
             catch (IOException e) { unknown[0] = true; }
             for (Tag child : compounds(fields.get("Passengers"), "Passengers")) gather(child, ids, counts, unknown);
         } catch (IOException e) { unknown[0] = true; }
-    }
-
-    private static void rejectLeash(Tag tree) throws IOException {
-        Map<String, Tag> fields = compound(tree);
-        if (fields.containsKey("Leash")) throw new IOException("Leashed entity rollback is not supported");
-        for (Tag child : compounds(fields.get("Passengers"), "Passengers")) rejectLeash(child);
     }
 
     public static Set<UUID> treeUuids(EntityTag tree) {

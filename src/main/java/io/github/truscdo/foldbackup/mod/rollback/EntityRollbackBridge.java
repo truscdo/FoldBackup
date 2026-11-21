@@ -131,8 +131,6 @@ public final class EntityRollbackBridge {
     private static Entity load(CompoundTag tag, ServerLevel level, ChunkPos chunk, Set<UUID> ids) throws IOException {
         String detail = tag.getString("id") + " UUID=" + tag.get("UUID") + " Pos=" + tag.get("Pos");
         if (tag.getString("id").equals("minecraft:player")) throw new IOException("Player in passenger tree: " + detail);
-        // 原版会延迟恢复拴绳，且可能静默丢失目标；因此在变更前直接失败。
-        if (tag.contains("Leash")) throw new IOException("Leashed entity rollback is not supported: " + detail);
         Entity entity;
         try {
             entity = EntityType.create(tag, level).orElseThrow(() -> new IOException("Unknown or invalid entity: " + detail));
