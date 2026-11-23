@@ -237,6 +237,45 @@ class BackupCliRollbackTest {
                 readChunk(diffRestored.resolve("region/r.0.0.mca"), 1));
     }
 
+    @Test
+    void cliSnapshotPinAndUnpinAreIdempotentAndProtectDelete() throws Exception {
+        Path world = temp.resolve("pin-world");
+        Files.createDirectories(world);
+        Files.writeString(world.resolve("level.dat"), "level-pin");
+
+        Path storeDir = temp.resolve("pin-snapshots");
+        BackupCli.execute("--snapshot-root", storeDir.toString(),
+                "snapshot", "create", "--world", world.toString(), "--threads", "1");
+        String snapId = new SnapshotStore(storeDir).loadLatestSnapshot().getSnapshotId();
+
+        String pinOut = captureStdout(() -> BackupCli.execute(
+                "--snapshot-root", storeDir.toString(), "snapshot", "pin", snapId));
+        assertTrue(pinOut.contains("Pinned snapshot " + snapId), pinOut);
+
+        String pinAgainOut = captureStdout(() -> BackupCli.execute(
+                "--snapshot-root", storeDir.toString(), "snapshot", "pin", snapId));
+        assertTrue(pinAgainOut.contains("Snapshot " + snapId + " is already pinned"), pinAgainOut);
+
+        String listOut = captureStdout(() -> BackupCli.execute(
+                "--snapshot-root", storeDir.toString(), "snapshot", "list"));
+        assertTrue(listOut.contains(snapId + " [PINNED]"), listOut);
+
+        IOException deleteErr = assertThrows(IOException.class, () -> BackupCli.execute(
+                "--snapshot-root", storeDir.toString(), "snapshot", "delete", snapId, "--yes"));
+        assertTrue(deleteErr.getMessage().contains("unpin"), deleteErr.getMessage());
+
+        String unpinOut = captureStdout(() -> BackupCli.execute(
+                "--snapshot-root", storeDir.toString(), "snapshot", "unpin", snapId));
+        assertTrue(unpinOut.contains("Unpinned snapshot " + snapId), unpinOut);
+
+        String unpinAgainOut = captureStdout(() -> BackupCli.execute(
+                "--snapshot-root", storeDir.toString(), "snapshot", "unpin", snapId));
+        assertTrue(unpinAgainOut.contains("Snapshot " + snapId + " is not pinned"), unpinAgainOut);
+
+        BackupCli.execute("--snapshot-root", storeDir.toString(), "snapshot", "delete", snapId, "--yes");
+        assertTrue(new SnapshotStore(storeDir).listSnapshots().isEmpty());
+    }
+
     private static void writeTwoChunks(Path mca, byte[] chunk0, byte[] chunk1) throws IOException {
         Region r = new Region(0, 0, System.currentTimeMillis());
         r.setChunk(0, new ChunkData(chunk0, 0, 0));

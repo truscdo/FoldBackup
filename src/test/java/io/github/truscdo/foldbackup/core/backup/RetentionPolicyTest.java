@@ -71,4 +71,32 @@ class RetentionPolicyTest {
                 List.of(snapshot("a", 1, Long.MAX_VALUE, "A"), snapshot("b", 2, 1, "B")),
                 Long.MAX_VALUE, 1));
     }
+
+    @Test void pinnedSnapshotsAreExemptFromAgeCapacityAndFreeSpaceCleanup() {
+        long now = 200_000;
+        var pinnedOld = snapshot("pinned-old", 1, 100, "A");
+        pinnedOld.setPinned(true);
+        var unpinnedOld = snapshot("unpinned-old", 2, 50, "B");
+        var unpinnedNew = snapshot("unpinned-new", now - 10, 50, "C");
+
+        var partialPlan = new RetentionPolicy()
+                .setMaxAgeDays(1)
+                .setMaxSizeBytes(150)
+                .setMinFreeSpaceBytes(100)
+                .plan(List.of(pinnedOld, unpinnedOld, unpinnedNew), 200, 50, now);
+
+        assertEquals(List.of(2L), partialPlan.snapshotEpochs());
+        assertFalse(partialPlan.snapshotEpochs().contains(1L));
+        assertTrue(partialPlan.targetSatisfied());
+
+        var unsatisfiedPlan = new RetentionPolicy()
+                .setMaxAgeDays(1)
+                .setMaxSizeBytes(50)
+                .setMinFreeSpaceBytes(200)
+                .plan(List.of(pinnedOld, unpinnedOld, unpinnedNew), 200, 50, now);
+
+        assertEquals(List.of(2L, now - 10), unsatisfiedPlan.snapshotEpochs());
+        assertFalse(unsatisfiedPlan.snapshotEpochs().contains(1L));
+        assertFalse(unsatisfiedPlan.targetSatisfied());
+    }
 }

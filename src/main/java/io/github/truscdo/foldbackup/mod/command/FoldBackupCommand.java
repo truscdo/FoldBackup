@@ -55,7 +55,58 @@ public class FoldBackupCommand {
                                                                                 .executes(ctx -> deleteSnapshot(ctx,
                                                                                                 mod,
                                                                                                 StringArgumentType
-                                                                                                                .getString(ctx, "id"))))));
+                                                                                                                .getString(ctx, "id")))))
+                                                .then(Commands.literal("pin")
+                                                                .then(Commands.argument("id",
+                                                                                StringArgumentType.greedyString())
+                                                                                .suggests(SnapshotIdSuggestions
+                                                                                                .suggestAll(mod::getSnapshotStore))
+                                                                                .executes(ctx -> setPinned(ctx,
+                                                                                                mod,
+                                                                                                StringArgumentType
+                                                                                                                .getString(ctx, "id"),
+                                                                                                true))))
+                                                .then(Commands.literal("unpin")
+                                                                .then(Commands.argument("id",
+                                                                                StringArgumentType.greedyString())
+                                                                                .suggests(SnapshotIdSuggestions
+                                                                                                .suggestAll(mod::getSnapshotStore))
+                                                                                .executes(ctx -> setPinned(ctx,
+                                                                                                mod,
+                                                                                                StringArgumentType
+                                                                                                                .getString(ctx, "id"),
+                                                                                                false)))));
+        }
+
+        private static int setPinned(CommandContext<CommandSourceStack> ctx, FoldBackupMod mod, String id,
+                        boolean pinned) {
+                CommandSourceStack source = ctx.getSource();
+                SnapshotStore store = BackendGuard.requireSnapshotStore(source, mod);
+                if (store == null) {
+                        return 0;
+                }
+                Long epochSeconds = BackendGuard.resolveEpoch(source, mod, store, id);
+                if (epochSeconds == null) {
+                        return 0;
+                }
+                String prefix = pinned ? "foldbackup.command.pin." : "foldbackup.command.unpin.";
+                mod.setPinnedAsync(epochSeconds, pinned)
+                                .whenComplete((changed, exception) -> mod.getServer().execute(() -> {
+                                        if (exception != null) {
+                                                Throwable cause = exception.getCause() == null ? exception
+                                                                : exception.getCause();
+                                                FoldBackupMod.LOG.error("Failed to {} snapshot {}",
+                                                                pinned ? "pin" : "unpin", id, cause);
+                                                CommandFeedback.failure(source, mod, prefix + "failed", id);
+                                        } else if (Boolean.TRUE.equals(changed)) {
+                                                source.sendSuccess(() -> CommandFeedback.text(source, mod,
+                                                                prefix + "success", id), true);
+                                        } else {
+                                                source.sendSuccess(() -> CommandFeedback.text(source, mod,
+                                                                prefix + "already", id), false);
+                                        }
+                                }));
+                return Command.SINGLE_SUCCESS;
         }
 
         private static int deleteSnapshot(CommandContext<CommandSourceStack> ctx, FoldBackupMod mod, String id) {
@@ -68,6 +119,11 @@ public class FoldBackupCommand {
                 if (epochSeconds == null) {
                         return 0;
                 }
+                SnapshotManifest manifest = store.loadSnapshot(epochSeconds);
+                if (manifest != null && manifest.isPinned()) {
+                        CommandFeedback.failure(source, mod, "foldbackup.command.delete.pinned", id, id);
+                        return 0;
+                }
                 source.sendSuccess(() -> CommandFeedback.text(source, mod, "foldbackup.command.delete.started", id),
                                 true);
                 mod.deleteSnapshotAsync(epochSeconds)
@@ -75,6 +131,11 @@ public class FoldBackupCommand {
                                         if (exception != null) {
                                                 Throwable cause = exception.getCause() == null ? exception
                                                                 : exception.getCause();
+                                                if (cause instanceof SnapshotStore.SnapshotPinnedException) {
+                                                        CommandFeedback.failure(source, mod,
+                                                                        "foldbackup.command.delete.pinned", id, id);
+                                                        return;
+                                                }
                                                 FoldBackupMod.LOG.error("Failed to delete snapshot {}", id, cause);
                                                 CommandFeedback.failure(source, mod, "foldbackup.command.delete.failed",
                                                                 id);
@@ -178,14 +239,17 @@ public class FoldBackupCommand {
                         source.sendSuccess(() -> CommandFeedback.text(source, mod, "foldbackup.command.list.header"),
                                         false);
                         for (BackupExporter.SnapshotInfo snapshot : snapshots) {
+                                String rowId = snapshot.pinned ? snapshot.id + " [PINNED]" : snapshot.id;
                                 String rowRegions = String.valueOf(snapshot.regions);
                                 String rowFiles = String.valueOf(snapshot.files);
                                 String rowCompressed = FormatUtil.formatSize(snapshot.compressedBytes);
                                 String rowUncompressed = FormatUtil.formatSize(snapshot.uncompressedBytes);
-                                String rowCumulativeSpace = FormatUtil.formatSize(snapshot.cumulativeSpaceBytes);
+                                String rowCumulativeSpace = snapshot.pinned
+                                                ? "-"
+                                                : FormatUtil.formatSize(snapshot.cumulativeSpaceBytes);
                                 source.sendSuccess(() -> CommandFeedback.text(source, mod,
                                                 "foldbackup.command.list.row",
-                                                snapshot.id, snapshot.date, rowRegions, rowFiles,
+                                                rowId, snapshot.date, rowRegions, rowFiles,
                                                 rowCompressed, rowUncompressed, rowCumulativeSpace), false);
                         }
                 } catch (Exception exception) {
@@ -257,6 +321,11 @@ public class FoldBackupCommand {
                                 snapshot.getSnapshotId()), false);
                 source.sendSuccess(() -> CommandFeedback.text(source, mod, "foldbackup.command.info.time",
                                 date), false);
+                source.sendSuccess(() -> CommandFeedback.text(source, mod,
+                                snapshot.isPinned()
+                                                ? "foldbackup.command.info.pinned_yes"
+                                                : "foldbackup.command.info.pinned_no"),
+                                false);
                 if (snapshot.getSummary() != null) {
                         var summary = snapshot.getSummary();
                         source.sendSuccess(() -> CommandFeedback.text(source, mod,

@@ -263,7 +263,9 @@ public class ArchiveCreator {
         meta.minecraftVersion = sn.getMinecraftVersion();
         meta.worldVersion = sn.getWorldVersion();
         if (sn.getTags() != null) {
-            meta.tags = sn.getTags();
+            meta.tags = sn.getTags().stream()
+                    .filter(tag -> !SnapshotManifest.PINNED_TAG.equals(tag))
+                    .toList();
         }
         meta.regionCount = sn.getRegions() != null ? sn.getRegions().size() : 0;
         meta.chunkCount = 0;

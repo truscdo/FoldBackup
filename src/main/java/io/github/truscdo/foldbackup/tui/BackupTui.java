@@ -112,11 +112,12 @@ public class BackupTui {
                 case 1 -> runStoreTask(this::listSnapshots);
                 case 2 -> runStoreTask(this::exportWorld);
                 case 3 -> runStoreTask(this::deleteSnapshot);
-                case 4 -> runStoreTask(this::createArchive);
-                case 5 -> createSnapshot();
-                case 6 -> archiveOperations.exportArchive();
-                case 7 -> archiveOperations.importArchives();
-                case 8 -> archiveOperations.verifyArchives();
+                case 4 -> runStoreTask(this::togglePinSnapshot);
+                case 5 -> runStoreTask(this::createArchive);
+                case 6 -> createSnapshot();
+                case 7 -> archiveOperations.exportArchive();
+                case 8 -> archiveOperations.importArchives();
+                case 9 -> archiveOperations.verifyArchives();
                 case 0 -> {
                     System.out.println("Goodbye!");
                     return;
@@ -136,15 +137,16 @@ public class BackupTui {
         System.out.println("  1. List snapshots");
         System.out.println("  2. Export world files");
         System.out.println("  3. Delete snapshot");
-        System.out.println("  4. Create archive");
-        System.out.println("  5. Create snapshot from world");
+        System.out.println("  4. Pin / unpin snapshot");
+        System.out.println("  5. Create archive");
+        System.out.println("  6. Create snapshot from world");
         System.out.println();
         System.out.println("----------------------------------------");
         System.out.println();
         System.out.println("Archive storage");
-        System.out.println("  6. Restore as world files");
-        System.out.println("  7. Import into online backup");
-        System.out.println("  8. Verify archives");
+        System.out.println("  7. Restore as world files");
+        System.out.println("  8. Import into online backup");
+        System.out.println("  9. Verify archives");
         System.out.println();
     }
 
@@ -355,6 +357,36 @@ public class BackupTui {
                 System.err.println("Delete failed: " + e.getMessage() + "\n");
             }
             return;
+        }
+    }
+
+    // ──────────────────────────────────────────────
+    // 保留 / 取消保留
+    // ──────────────────────────────────────────────
+
+    private void togglePinSnapshot(StoreContext store) {
+        List<BackupExporter.SnapshotInfo> snapshots = store.exporter().listSnapshots();
+        if (snapshots.isEmpty()) {
+            System.out.println("No snapshots found.\n");
+            return;
+        }
+
+        System.out.println();
+        SnapshotTablePrinter.printSelection(snapshots, System.out);
+        System.out.println();
+
+        int snapChoice = prompt.readInt(
+                "Select a snapshot to pin/unpin by number (0 = back): ", 0, snapshots.size());
+        if (snapChoice <= 0) {
+            return;
+        }
+        BackupExporter.SnapshotInfo selected = snapshots.get(snapChoice - 1);
+        boolean targetPinned = !selected.pinned;
+        try {
+            store.snapshotManager().setPinned(selected.epochSeconds, targetPinned);
+            System.out.println((targetPinned ? "Pinned snapshot " : "Unpinned snapshot ") + selected.id + "\n");
+        } catch (IOException e) {
+            System.err.println("Failed to update pin state: " + e.getMessage() + "\n");
         }
     }
 

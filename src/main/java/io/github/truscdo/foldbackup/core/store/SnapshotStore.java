@@ -41,6 +41,7 @@ public class SnapshotStore {
     private final BackupDirectoryLock directoryLock;
     private final long lockTimeoutMillis;
     private final ThreadLocal<Integer> writeDepth = ThreadLocal.withInitial(() -> 0);
+    private final ThreadLocal<SaveResult[]> pendingSaveResult = new ThreadLocal<>();
 
     public SnapshotStore(Path backupRoot) throws IOException {
         this(backupRoot, new IndexStore(backupRoot.resolve(RepositoryLayout.INDEX_FILE)));
@@ -122,6 +123,25 @@ public class SnapshotStore {
         }
     }
 
+    /** Thrown when attempting to delete a pinned snapshot without unpinning it first. */
+    public static final class SnapshotPinnedException extends IOException {
+        private final String snapshotId;
+
+        public SnapshotPinnedException(String snapshotId) {
+            super("Snapshot is pinned: " + snapshotId + " (unpin it before deleting)");
+            this.snapshotId = snapshotId;
+        }
+
+        public String snapshotId() {
+            return snapshotId;
+        }
+    }
+
+    /** Snapshot save outcome carrying soft-quota capacity overrun details caused by pinned snapshots. */
+    public record SaveResult(long capacityOverLimitBytes, int pinnedSnapshots) {
+        public static final SaveResult NONE = new SaveResult(0L, 0);
+    }
+
     /** Resolve a user-facing snapshot ID to its unique internal epoch identity. */
     public long resolveEpoch(String snapshotId) throws IOException {
         if (!isValidSnapshotId(snapshotId)) throw new IOException("Invalid snapshot ID: " + snapshotId);
@@ -154,13 +174,53 @@ public class SnapshotStore {
     /** 在副本上新增快照并应用保留策略，一次提交后回收 blob。 */
     public void saveSnapshot(SnapshotManifest manifest, RetentionPolicy retentionPolicy) throws IOException {
         try (WriteSession ignored = beginWrite()) {
-            saveSnapshotLocked(manifest.copy(), retentionPolicy);
+            SaveResult result = saveSnapshotLocked(manifest.copy(), retentionPolicy);
+            SaveResult[] holder = pendingSaveResult.get();
+            if (holder != null) {
+                holder[0] = result;
+            }
         } catch (IllegalArgumentException e) {
             throw new IOException("snapshot metadata: " + e.getMessage(), e);
         }
     }
 
-    private void saveSnapshotLocked(SnapshotManifest manifest, RetentionPolicy retentionPolicy) throws IOException {
+    /** 在副本上新增快照并应用保留策略，返回软配额超额告警信息（若有）。 */
+    public SaveResult saveSnapshotWithResult(SnapshotManifest manifest, RetentionPolicy retentionPolicy)
+            throws IOException {
+        SaveResult[] holder = new SaveResult[] { SaveResult.NONE };
+        SaveResult[] previous = pendingSaveResult.get();
+        pendingSaveResult.set(holder);
+        try {
+            saveSnapshot(manifest, retentionPolicy);
+            return holder[0];
+        } finally {
+            if (previous == null) {
+                pendingSaveResult.remove();
+            } else {
+                pendingSaveResult.set(previous);
+            }
+        }
+    }
+
+    /**
+     * 更新快照的保留状态（幂等）；状态未变时跳过写盘并返回 {@code false}。
+     */
+    public boolean setPinned(long epochSeconds, boolean pinned) throws IOException {
+        try (WriteSession ignored = beginWrite()) {
+            SnapshotManifest existing = metadataIndex.loadSnapshot(epochSeconds);
+            if (existing == null) {
+                throw new MissingSnapshotManifestException(String.valueOf(epochSeconds));
+            }
+            MetadataIndex next = metadataIndex.copy();
+            if (!next.setSnapshotPinned(epochSeconds, pinned)) {
+                return false;
+            }
+            commit(next, -1L);
+            return true;
+        }
+    }
+
+    private SaveResult saveSnapshotLocked(SnapshotManifest manifest, RetentionPolicy retentionPolicy) throws IOException {
         if (!isValidSnapshotId(manifest.getSnapshotId()))
             throw new IOException("Invalid snapshot ID: " + manifest.getSnapshotId());
         if (metadataIndex.loadSnapshot(manifest.getEpochSeconds()) != null)
@@ -215,15 +275,77 @@ public class SnapshotStore {
         }
         CleanupAssessment cleanup = planCleanup(next, retentionPolicy);
         SnapshotCleanupPlanner.Plan plan = cleanup != null ? cleanup.plan() : null;
-        if (plan != null && plan.snapshotEpochs().contains(manifest.getEpochSeconds()))
-            throw new IOException("Backup not committed: new snapshot cannot fit retention limits: "
-                    + manifest.getSnapshotId());
+        int pinnedCount = countPinnedSnapshots(next);
+        List<Long> expiredEpochs = List.of();
+        boolean allowCapacityOverLimit = false;
+        if (plan != null) {
+            SnapshotCleanupPlanner.Deletion newSnapshotDeletion = findDeletion(plan, manifest.getEpochSeconds());
+            if (newSnapshotDeletion != null) {
+                if (pinnedCount == 0 || newSnapshotDeletion.reasons().contains(SnapshotCleanupPlanner.Reason.AGE)) {
+                    throw new IOException("Backup not committed: new snapshot cannot fit retention limits: "
+                            + manifest.getSnapshotId());
+                }
+                long reclaimedWithoutNew = reclaimedBytesExcluding(plan, manifest.getEpochSeconds());
+                long estimatedFreeAfterOldDeletions = Math.addExact(cleanup.freeAfterCommit(), reclaimedWithoutNew);
+                if (retentionPolicy.freeSpaceDeficit(estimatedFreeAfterOldDeletions) > 0) {
+                    throw new IOException("Backup not committed: insufficient free space even after deleting all "
+                            + "unpinned snapshots (" + pinnedCount + " pinned snapshot(s) protected): "
+                            + manifest.getSnapshotId());
+                }
+                expiredEpochs = plan.snapshotEpochs().stream()
+                        .filter(epoch -> epoch != manifest.getEpochSeconds())
+                        .toList();
+                allowCapacityOverLimit = true;
+            } else {
+                expiredEpochs = plan.snapshotEpochs();
+                if (!plan.targetSatisfied() && pinnedCount > 0) {
+                    long estimatedFreeAfterDeletions = Math.addExact(cleanup.freeAfterCommit(), plan.reclaimedBytes());
+                    if (retentionPolicy.freeSpaceDeficit(estimatedFreeAfterDeletions) > 0) {
+                        throw new IOException("Backup not committed: insufficient free space even after deleting all "
+                                + "unpinned snapshots (" + pinnedCount + " pinned snapshot(s) protected): "
+                                + manifest.getSnapshotId());
+                    }
+                    allowCapacityOverLimit = true;
+                }
+            }
+        }
 
         // 4. Atomically persist to disk and collect unreferenced blobs
-        List<Long> expiredEpochs = plan != null ? plan.snapshotEpochs() : List.of();
         long precomputedSize = cleanup != null && expiredEpochs.isEmpty() ? cleanup.nextIndexBytes() : -1L;
+        SaveResult[] resultHolder = new SaveResult[] { SaveResult.NONE };
+        boolean softQuotaAllowed = allowCapacityOverLimit;
         removeAndCommit(next, expiredEpochs, manifest, precomputedSize,
-                plan != null ? gc -> verifyCleanup(retentionPolicy, plan, gc) : null);
+                plan != null ? gc -> resultHolder[0] = verifyCleanup(retentionPolicy, plan, gc, softQuotaAllowed) : null);
+        return resultHolder[0];
+    }
+
+    private static int countPinnedSnapshots(MetadataIndex index) {
+        int count = 0;
+        for (SnapshotManifest sn : index.getSnapshots()) {
+            if (sn.isPinned()) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private static SnapshotCleanupPlanner.Deletion findDeletion(SnapshotCleanupPlanner.Plan plan, long epochSeconds) {
+        for (SnapshotCleanupPlanner.Deletion deletion : plan.deletions()) {
+            if (deletion.epochSeconds() == epochSeconds) {
+                return deletion;
+            }
+        }
+        return null;
+    }
+
+    private static long reclaimedBytesExcluding(SnapshotCleanupPlanner.Plan plan, long excludedEpoch) {
+        long reclaimed = 0L;
+        for (SnapshotCleanupPlanner.Deletion deletion : plan.deletions()) {
+            if (deletion.epochSeconds() != excludedEpoch) {
+                reclaimed = deletion.cumulativeReclaimedBytes();
+            }
+        }
+        return reclaimed;
     }
 
     /** 明确区分快照已提交但回收未完成，调用者不可将其视为未生成备份立即重试。 */
@@ -248,7 +370,7 @@ public class SnapshotStore {
         }
     }
 
-    private record CleanupAssessment(SnapshotCleanupPlanner.Plan plan, long nextIndexBytes) {}
+    private record CleanupAssessment(SnapshotCleanupPlanner.Plan plan, long nextIndexBytes, long freeAfterCommit) {}
 
     private CleanupAssessment planCleanup(MetadataIndex next, RetentionPolicy policy) throws IOException {
         if (policy == null || !policy.isEnabled() || !policy.hasLimits()) return null;
@@ -259,12 +381,12 @@ public class SnapshotStore {
         long freeAfterCommit = Math.max(0, usage.usableBytes() - Math.max(0, nextIndexBytes - usage.indexBytes()));
         return new CleanupAssessment(
                 policy.plan(next.getSnapshots(), plannedBytes, freeAfterCommit, System.currentTimeMillis() / 1000L),
-                nextIndexBytes);
+                nextIndexBytes, freeAfterCommit);
     }
 
-    private void verifyCleanup(RetentionPolicy policy, SnapshotCleanupPlanner.Plan plan,
-                               BlobMaintenance.GcResult gc) throws IOException {
-        if (plan == null) return;
+    private SaveResult verifyCleanup(RetentionPolicy policy, SnapshotCleanupPlanner.Plan plan,
+                                     BlobMaintenance.GcResult gc, boolean allowCapacityOverLimit) throws IOException {
+        if (plan == null) return SaveResult.NONE;
         RepositoryUsage usage = RepositoryUsage.read(backupRoot, metadataIndex.getSnapshots());
         var snapshots = metadataIndex.getSnapshots();
         long oldest = snapshots.stream().mapToLong(SnapshotManifest::getEpochSeconds).min().orElse(0);
@@ -273,10 +395,23 @@ public class SnapshotStore {
                         + "remainingSnapshots={}, oldestEpochSeconds={}, newestEpochSeconds={}, gc={}",
                 plan.deletions(), plan.reclaimedBytes(), gc.reclaimedBytes(), usage.totalBytes(),
                 usage.usableBytes(), snapshots.size(), oldest, newest, gc);
-        if (policy.capacityDeficit(usage.totalBytes()) > 0 || policy.freeSpaceDeficit(usage.usableBytes()) > 0
-                || !gc.isClean())
-            throw new IOException("Cleanup incomplete: capacity deficit=" + policy.capacityDeficit(usage.totalBytes())
-                    + ", free-space deficit=" + policy.freeSpaceDeficit(usage.usableBytes()) + ", gc=" + gc);
+        long capacityDeficit = policy.capacityDeficit(usage.totalBytes());
+        long freeSpaceDeficit = policy.freeSpaceDeficit(usage.usableBytes());
+        if (!gc.isClean() || freeSpaceDeficit > 0) {
+            throw new IOException("Cleanup incomplete: capacity deficit=" + capacityDeficit
+                    + ", free-space deficit=" + freeSpaceDeficit + ", gc=" + gc);
+        }
+        if (capacityDeficit > 0) {
+            if (!allowCapacityOverLimit) {
+                throw new IOException("Cleanup incomplete: capacity deficit=" + capacityDeficit
+                        + ", free-space deficit=" + freeSpaceDeficit + ", gc=" + gc);
+            }
+            int pinnedSnapshots = (int) snapshots.stream().filter(SnapshotManifest::isPinned).count();
+            LOG.warn("Repository size exceeds maxSize limit by {} bytes after cleanup due to {} pinned snapshot(s); "
+                    + "snapshot committed under soft quota", capacityDeficit, pinnedSnapshots);
+            return new SaveResult(capacityDeficit, pinnedSnapshots);
+        }
+        return SaveResult.NONE;
     }
 
     @FunctionalInterface
@@ -315,6 +450,12 @@ public class SnapshotStore {
     /** 批量删除快照并执行一次 metadata 与 blob 垃圾回收；返回 GC 结果以暴露未清净状态。 */
     public BlobMaintenance.GcResult deleteSnapshots(Collection<Long> snapshotEpochs) throws IOException {
         try (WriteSession ignored = beginWrite()) {
+            for (long epoch : snapshotEpochs) {
+                SnapshotManifest manifest = metadataIndex.loadSnapshot(epoch);
+                if (manifest != null && manifest.isPinned()) {
+                    throw new SnapshotPinnedException(manifest.getSnapshotId());
+                }
+            }
             return removeAndCommit(metadataIndex.copy(), snapshotEpochs, null, -1L, null);
         }
     }

@@ -187,4 +187,41 @@ class SnapshotCleanupPlannerTest {
         assertThrows(IllegalArgumentException.class, () -> SnapshotCleanupPlanner.plan(List.of(), 0, -1));
         assertThrows(IllegalArgumentException.class, () -> SnapshotCleanupPlanner.plan(List.of(), -1, 0));
     }
+
+    @Test
+    void pinnedSnapshotKeepsSharedBlobReferencesAndIsExcludedFromDeletionChain() {
+        var sizes = Map.of("SHARED", 100L, "ONLY_B", 50L, "ONLY_C", 80L);
+        var a = snapshot("A", 1, sizes, "SHARED");
+        a.setPinned(true);
+        var b = snapshot("B", 2, sizes, "SHARED", "ONLY_B");
+        var c = snapshot("C", 3, sizes, "ONLY_C");
+
+        var chain = SnapshotReclamationEstimator.evaluateDeletionChain(List.of(c, a, b));
+        assertEquals(List.of(
+                new SnapshotReclamationEstimator.DeletionEstimate(2, "B", 50, 50),
+                new SnapshotReclamationEstimator.DeletionEstimate(3, "C", 80, 130)), chain);
+
+        var plan = SnapshotCleanupPlanner.plan(List.of(a, b, c), 230, 50);
+        assertEquals(List.of(2L), plan.snapshotEpochs());
+        assertEquals(50, plan.reclaimedBytes());
+        assertTrue(plan.targetSatisfied());
+    }
+
+    @Test
+    void allPinnedSnapshotsLeavePlanEmptyAndUnsatisfiedWhileValidatingTotalReferencedBytes() {
+        var sizes = Map.of("X", 100L, "Y", 200L);
+        var a = snapshot("A", 1, sizes, "X");
+        a.setPinned(true);
+        var b = snapshot("B", 2, sizes, "Y");
+        b.setPinned(true);
+
+        var plan = SnapshotCleanupPlanner.plan(List.of(a, b), 300, 100);
+        assertTrue(plan.deletions().isEmpty());
+        assertEquals(0, plan.reclaimedBytes());
+        assertEquals(300, plan.remainingBytes());
+        assertFalse(plan.targetSatisfied());
+
+        assertThrows(IllegalArgumentException.class,
+                () -> SnapshotCleanupPlanner.plan(List.of(a, b), 299, 100));
+    }
 }

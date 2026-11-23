@@ -324,6 +324,24 @@ public final class WorldRuntime {
     }
 
     /**
+     * 在备份执行器线程上异步更新快照的保留状态；与仓库读写串行化。
+     */
+    public CompletableFuture<Boolean> setPinnedAsync(long epochSeconds, boolean pinned) {
+        SnapshotStore store = snapshotStore;
+        ExecutorService pool = backupExecutor;
+        if (store == null || pool == null) {
+            return CompletableFuture.failedFuture(new IllegalStateException("Backend not initialized"));
+        }
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                return store.setPinned(epochSeconds, pinned);
+            } catch (IOException e) {
+                throw new CompletionException(e);
+            }
+        }, pool);
+    }
+
+    /**
      * 在备份执行器线程上读取预览数据；与快照清理/删除串行化。
      */
     public CompletableFuture<PreviewData.Raw> readPreviewAsync(ChunkPos pos, Long epochSeconds, String dimension) {

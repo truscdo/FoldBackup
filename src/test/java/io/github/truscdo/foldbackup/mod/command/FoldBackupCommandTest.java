@@ -2,6 +2,7 @@ package io.github.truscdo.foldbackup.mod.command;
 
 import io.github.truscdo.foldbackup.core.store.SnapshotManifest;
 import io.github.truscdo.foldbackup.core.store.SnapshotStore;
+import io.github.truscdo.foldbackup.mod.i18n.FoldBackupTranslations;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -50,5 +51,27 @@ class FoldBackupCommandTest {
         assertNull(FoldBackupCommand.loadSnapshotForInfo(
                 brokenStore, "S-20260902_120000", (key, args) -> failedReported.add(key + ":" + args[0])));
         assertEquals(List.of("foldbackup.command.info.failed:S-20260902_120000"), failedReported);
+    }
+
+    @Test
+    void pinTranslationsExistAcrossAllSupportedLanguages() {
+        List<String> keys = List.of(
+                "foldbackup.command.delete.pinned",
+                "foldbackup.command.pin.success",
+                "foldbackup.command.pin.already",
+                "foldbackup.command.pin.failed",
+                "foldbackup.command.unpin.success",
+                "foldbackup.command.unpin.already",
+                "foldbackup.command.unpin.failed",
+                "foldbackup.command.info.pinned_yes",
+                "foldbackup.command.info.pinned_no",
+                "foldbackup.backup.capacity_over_limit_pinned");
+        for (String lang : List.of("en_us", "zh_cn", "es_es", "pt_br", "ru_ru")) {
+            for (String key : keys) {
+                String value = FoldBackupTranslations.textForLanguage(lang, key, "S-20260902_120000", "1.0 MB", 2);
+                assertNotEquals(key, value, "Missing translation key " + key + " for language " + lang);
+                assertFalse(value.isBlank(), "Blank translation key " + key + " for language " + lang);
+            }
+        }
     }
 }

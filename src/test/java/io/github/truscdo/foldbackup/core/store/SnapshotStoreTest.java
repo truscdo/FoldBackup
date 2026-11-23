@@ -205,6 +205,46 @@ class SnapshotStoreTest {
                 () -> SnapshotManifest.Summary.summarize(List.of(huge1), List.of(huge2)));
     }
 
+    @Test
+    void setPinnedPersistsIdempotentlyAndProtectsAgainstManualDelete() throws Exception {
+        CountingIndexStore disk = new CountingIndexStore(tempDir.resolve("index.db"));
+        SnapshotStore store = new SnapshotStore(tempDir, disk);
+        SnapshotManifest manifest = withFile("S-20260902_120000", 1_000L, "keep");
+        manifest.setTags(List.of("manual", "milestone"));
+        store.saveSnapshot(manifest);
+        int savesAfterCreate = disk.saves;
+
+        assertTrue(store.setPinned(1_000L, true));
+        assertEquals(savesAfterCreate + 1, disk.saves);
+        assertFalse(store.setPinned(1_000L, true), "Idempotent pin must skip redundant disk save");
+        assertEquals(savesAfterCreate + 1, disk.saves);
+
+        SnapshotStore reloaded = new SnapshotStore(tempDir);
+        SnapshotManifest reloadedManifest = reloaded.loadSnapshot(1_000L);
+        assertNotNull(reloadedManifest);
+        assertTrue(reloadedManifest.isPinned());
+        assertEquals(List.of("manual", "milestone", SnapshotManifest.PINNED_TAG), reloadedManifest.getTags());
+
+        IOException deleteError = assertThrows(IOException.class, () -> store.deleteSnapshot(1_000L));
+        assertInstanceOf(SnapshotStore.SnapshotPinnedException.class, deleteError);
+        assertTrue(deleteError.getMessage().contains("unpin"));
+        assertTrue(Files.exists(tempDir.resolve("blobs/keep")));
+
+        assertTrue(store.setPinned(1_000L, false));
+        assertEquals(savesAfterCreate + 2, disk.saves);
+        assertFalse(store.setPinned(1_000L, false), "Idempotent unpin must skip redundant disk save");
+        assertEquals(savesAfterCreate + 2, disk.saves);
+
+        SnapshotManifest unpinnedReloaded = new SnapshotStore(tempDir).loadSnapshot(1_000L);
+        assertFalse(unpinnedReloaded.isPinned());
+        assertEquals(List.of("manual", "milestone"), unpinnedReloaded.getTags());
+
+        var gc = store.deleteSnapshot(1_000L);
+        assertTrue(gc.isClean());
+        assertFalse(Files.exists(tempDir.resolve("blobs/keep")));
+        assertTrue(new SnapshotStore(tempDir).listSnapshots().isEmpty());
+    }
+
     /** 创建用于测试的最小快照清单。 */
     private static SnapshotManifest snapshot(String id, long time) {
         return new SnapshotManifest(id, time, "world");

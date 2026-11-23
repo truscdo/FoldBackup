@@ -28,7 +28,7 @@ public final class SnapshotTablePrinter {
         int idx = 1;
         for (BackupExporter.SnapshotInfo sn : snapshots) {
             out.printf("%-4d %-36s %-22s %11s%n",
-                    idx, sn.id, sn.date, FormatUtil.formatSize(sn.compressedBytes));
+                    idx, formatId(sn), sn.date, FormatUtil.formatSize(sn.compressedBytes));
             idx++;
         }
     }
@@ -40,11 +40,16 @@ public final class SnapshotTablePrinter {
         out.println("-".repeat(115));
         int idx = 1;
         for (BackupExporter.SnapshotInfo sn : snapshots) {
+            String cumulativeSpace = sn.pinned ? "-" : FormatUtil.formatSize(sn.cumulativeSpaceBytes);
             out.printf("%-4d %-36s %-22s %8d %6d %11s %15s%n",
-                    idx, sn.id, sn.date, sn.regions, sn.files,
+                    idx, formatId(sn), sn.date, sn.regions, sn.files,
                     FormatUtil.formatSize(sn.compressedBytes),
-                    FormatUtil.formatSize(sn.cumulativeSpaceBytes));
+                    cumulativeSpace);
             idx++;
         }
+    }
+
+    private static String formatId(BackupExporter.SnapshotInfo sn) {
+        return sn.pinned ? sn.id + " [PINNED]" : sn.id;
     }
 }

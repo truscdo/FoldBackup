@@ -461,4 +461,30 @@ class BackupExecutorTest {
             assertEquals(0, scheduler2.getAccumulatedOnlineMinutes());
         }
     }
+
+    @Test void capacityOverLimitDueToPinnedSnapshotsNotifiesAdminsOnly() throws Exception {
+        var world = new WorldAccessorTest.World();
+        var tasks = new TaskRegistry();
+        var playerWarnings = new CopyOnWriteArrayList<String>();
+        var adminWarnings = new CopyOnWriteArrayList<String>();
+        var coordinator = new BackupCoordinator(null, null, null, null) {
+            @Override public SnapshotManifest runBackup(TaskStatus status, Consumer<BackupStep> listener) {
+                listener.accept(new BackupStep.Completed(
+                        1000L, "S-20260901_000000", null, 512L, 2048L, 2));
+                return null;
+            }
+        };
+        try (var worker = Executors.newSingleThreadExecutor()) {
+            var executor = new BackupExecutor(Runnable::run,
+                    (key, args) -> playerWarnings.add(key),
+                    (key, args) -> adminWarnings.add(key + ":" + args[0] + ":" + args[1] + ":" + args[2]),
+                    world, coordinator, new BackupScheduler(null), worker, tasks);
+            assertEquals(BackupResult.SUCCESS, executor.triggerBackup(true).get(2, TimeUnit.SECONDS));
+            assertTrue(playerWarnings.isEmpty(), "Regular players must not receive admin capacity warnings");
+            assertEquals(1, adminWarnings.size());
+            assertTrue(adminWarnings.getFirst().startsWith(
+                    "foldbackup.backup.capacity_over_limit_pinned:S-20260901_000000:"), adminWarnings.getFirst());
+            assertTrue(adminWarnings.getFirst().endsWith(":2"), adminWarnings.getFirst());
+        }
+    }
 }

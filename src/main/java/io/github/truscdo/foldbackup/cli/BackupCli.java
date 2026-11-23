@@ -80,6 +80,8 @@ public class BackupCli {
             case "import" -> runImport(invocation, args);
             case "export" -> runExport(invocation, args);
             case "delete" -> runDelete(invocation, args);
+            case "pin" -> runPin(invocation, args, true);
+            case "unpin" -> runPin(invocation, args, false);
             case "rollback" -> runRollback(invocation, args);
             default -> throw new IOException("Unknown snapshot subcommand: " + subcommand);
         }
@@ -214,6 +216,24 @@ public class BackupCli {
         if (!gc.isClean()) {
             System.err.println("Warning: snapshot deleted, but cleanup of unused backup files was incomplete (failed="
                     + gc.failedFiles() + ", scanComplete=" + gc.scanComplete() + ").");
+        }
+    }
+
+    private static void runPin(Invocation invocation, List<String> args, boolean pinned) throws IOException {
+        String action = pinned ? "pin" : "unpin";
+        if (args.size() != 3) throw new IOException("Usage: snapshot " + action + " <snapshot-id>");
+        String snapshotId = args.get(2);
+        SnapshotStore snapshots = snapshotStore(invocation.snapshotRoot());
+        long epoch = snapshots.resolveEpoch(snapshotId);
+        boolean changed = snapshots.setPinned(epoch, pinned);
+        if (pinned) {
+            System.out.println(changed
+                    ? "Pinned snapshot " + snapshotId
+                    : "Snapshot " + snapshotId + " is already pinned");
+        } else {
+            System.out.println(changed
+                    ? "Unpinned snapshot " + snapshotId
+                    : "Snapshot " + snapshotId + " is not pinned");
         }
     }
 

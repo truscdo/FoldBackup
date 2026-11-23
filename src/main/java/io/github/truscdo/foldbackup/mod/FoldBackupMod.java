@@ -198,6 +198,17 @@ public class FoldBackupMod {
         return current.deleteSnapshotAsync(epochSeconds);
     }
 
+    /**
+     * 在备份执行器线程上异步更新快照保留状态（pin / unpin）。
+     */
+    public CompletableFuture<Boolean> setPinnedAsync(long epochSeconds, boolean pinned) {
+        WorldRuntime current = runtime;
+        if (current == null) {
+            return CompletableFuture.failedFuture(new IllegalStateException("Backend not initialized"));
+        }
+        return current.setPinnedAsync(epochSeconds, pinned);
+    }
+
     public FoldBackupConfig getConfig() {
         return config;
     }

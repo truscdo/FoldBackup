@@ -33,19 +33,26 @@ public class BackupExporter {
         public final long uncompressedBytes;
         /** Cumulative deduplicated blob space through this snapshot in the deletion chain. */
         public final long cumulativeSpaceBytes;
+        /** Whether this snapshot is pinned (protected from cleanup and deletion). */
+        public final boolean pinned;
 
         public SnapshotInfo(String id, String date, int regions, int files,
                 long compressedBytes, long uncompressedBytes) {
-            this(0, id, date, regions, files, compressedBytes, uncompressedBytes, 0);
+            this(0, id, date, regions, files, compressedBytes, uncompressedBytes, 0, false);
         }
 
         public SnapshotInfo(String id, String date, int regions, int files,
                 long compressedBytes, long uncompressedBytes, long cumulativeSpaceBytes) {
-            this(0, id, date, regions, files, compressedBytes, uncompressedBytes, cumulativeSpaceBytes);
+            this(0, id, date, regions, files, compressedBytes, uncompressedBytes, cumulativeSpaceBytes, false);
         }
 
         public SnapshotInfo(long epochSeconds, String id, String date, int regions, int files,
                 long compressedBytes, long uncompressedBytes, long cumulativeSpaceBytes) {
+            this(epochSeconds, id, date, regions, files, compressedBytes, uncompressedBytes, cumulativeSpaceBytes, false);
+        }
+
+        public SnapshotInfo(long epochSeconds, String id, String date, int regions, int files,
+                long compressedBytes, long uncompressedBytes, long cumulativeSpaceBytes, boolean pinned) {
             this.epochSeconds = epochSeconds;
             this.id = id;
             this.date = date;
@@ -54,6 +61,7 @@ public class BackupExporter {
             this.compressedBytes = compressedBytes;
             this.uncompressedBytes = uncompressedBytes;
             this.cumulativeSpaceBytes = cumulativeSpaceBytes;
+            this.pinned = pinned;
         }
     }
 
@@ -91,7 +99,8 @@ public class BackupExporter {
             long compressed = (s != null) ? s.getTotalCompressedBytes() : 0;
             long uncompressed = (s != null) ? s.getTotalUncompressedBytes() : 0;
             result.add(new SnapshotInfo(sn.getEpochSeconds(), sn.getSnapshotId(), date, regions, files,
-                    compressed, uncompressed, cumulativeSpaceByEpoch.getOrDefault(sn.getEpochSeconds(), 0L)));
+                    compressed, uncompressed, cumulativeSpaceByEpoch.getOrDefault(sn.getEpochSeconds(), 0L),
+                    sn.isPinned()));
         }
         return result;
     }

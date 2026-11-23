@@ -24,7 +24,7 @@ class BackupTuiTest {
         PrintStream previous = System.out;
         try {
             System.setOut(new PrintStream(output, true));
-            String input = "1\n5\n" + world + "\n\n1\n0\n";
+            String input = "1\n6\n" + world + "\n\n1\n0\n";
             new BackupTui(store, store, new ConsolePrompt(new StringReader(input), System.out)).run();
         } finally { System.setOut(previous); }
         assertTrue(output.toString().contains("No snapshots found."));
@@ -35,7 +35,7 @@ class BackupTuiTest {
     @Test
     void cancellingSnapshotCreationDoesNotInitializeStore() throws Exception {
         Path store = root.resolve("store");
-        for (String input : new String[] {"5\n\n0\n", "5\n", "5\nworld\n0\n0\n", "5\nworld\n"}) {
+        for (String input : new String[] {"6\n\n0\n", "6\n", "6\nworld\n0\n0\n", "6\nworld\n"}) {
             new BackupTui(store, store, new ConsolePrompt(new StringReader(input), System.out)).run();
             assertFalse(Files.exists(store));
         }
@@ -49,7 +49,7 @@ class BackupTuiTest {
         store.saveSnapshot(new io.github.truscdo.foldbackup.core.store.SnapshotManifest("S-20260917_100000", 1000, "world"));
         store.saveSnapshot(new io.github.truscdo.foldbackup.core.store.SnapshotManifest("S-20260917_110000", 2000, "world"));
         // Newest target, diff, base, back from threads, base again, invalid values, two threads, confirm.
-        String input = "4\n1\n1\n1\n0\n1\nbad\n-1\n2\n1\n0\n";
+        String input = "5\n1\n1\n1\n0\n1\nbad\n-1\n2\n1\n0\n";
         var output = new ByteArrayOutputStream();
         PrintStream previous = System.out;
         try {
@@ -69,7 +69,7 @@ class BackupTuiTest {
         store.saveSnapshot(new io.github.truscdo.foldbackup.core.store.SnapshotManifest(
                 "S-20260914_120000", 1789358400L, "world"));
         // Create archive -> target -> full -> verbatim -> confirm -> exit.
-        String input = "4\n1\n2\n2\n\n1\n0\n";
+        String input = "5\n1\n2\n2\n\n1\n0\n";
         new BackupTui(online, archive, new ConsolePrompt(new StringReader(input), System.out)).run();
         assertEquals(1, io.github.truscdo.foldbackup.core.archive.ArchiveTarScanner.fulls(
                 io.github.truscdo.foldbackup.core.archive.ArchiveTarScanner.scan(archive)).size());
@@ -91,13 +91,14 @@ class BackupTuiTest {
         String text = output.toString();
         int onlineMenu = text.indexOf("Online backups");
         int menuSeparator = text.indexOf("----------------------------------------", onlineMenu);
-        int createArchive = text.indexOf("4. Create archive");
-        int createSnapshot = text.indexOf("5. Create snapshot from world");
-        assertTrue(onlineMenu >= 0 && createArchive > onlineMenu && createArchive < createSnapshot
-                && createSnapshot < menuSeparator,
-                "snapshot and archive creation belong to the online backups menu");
-        assertTrue(text.contains("7. Import into online backup"));
-        assertTrue(text.contains("8. Verify archives"));
+        int pinSnapshot = text.indexOf("4. Pin / unpin snapshot");
+        int createArchive = text.indexOf("5. Create archive");
+        int createSnapshot = text.indexOf("6. Create snapshot from world");
+        assertTrue(onlineMenu >= 0 && pinSnapshot > onlineMenu && pinSnapshot < createArchive
+                && createArchive < createSnapshot && createSnapshot < menuSeparator,
+                "pin, archive creation and snapshot creation belong to the online backups menu");
+        assertTrue(text.contains("8. Import into online backup"));
+        assertTrue(text.contains("9. Verify archives"));
         assertFalse(text.contains("[disabled]"), "both roots are always configured");
     }
 
@@ -106,8 +107,8 @@ class BackupTuiTest {
         Path online = Files.createDirectory(root.resolve("online"));
         Path archive = Files.createDirectory(root.resolve("archive"));
         // Import cancelled at the confirmation prompt; verify an empty archive root.
-        new BackupTui(online, archive, new ConsolePrompt(new StringReader("7\n0\n"), System.out)).run();
         new BackupTui(online, archive, new ConsolePrompt(new StringReader("8\n0\n"), System.out)).run();
+        new BackupTui(online, archive, new ConsolePrompt(new StringReader("9\n0\n"), System.out)).run();
         try (var entries = Files.list(online)) {
             assertEquals(0, entries.count());
         }
@@ -118,11 +119,26 @@ class BackupTuiTest {
 
     @Test
     void invalidInputAndExitDoNotInitializeStore() throws Exception {
-        var prompt = new ConsolePrompt(new StringReader("invalid\n9\n0\n"), System.out);
+        var prompt = new ConsolePrompt(new StringReader("invalid\n10\n0\n"), System.out);
         new BackupTui(root, root, prompt).run();
         try (var entries = Files.list(root)) {
             assertEquals(0, entries.count());
         }
+    }
+
+    @Test
+    void pinAndUnpinMenuTogglesSnapshotPinnedState() throws Exception {
+        Path store = createSnapshotStore();
+        String snapId = new io.github.truscdo.foldbackup.core.store.SnapshotStore(store)
+                .loadLatestSnapshot().getSnapshotId();
+
+        String text = runTui(store, "4\n1\n1\n4\n1\n0\n");
+
+        assertTrue(text.contains("Pinned snapshot " + snapId), text);
+        assertTrue(text.contains(snapId + " [PINNED]"), text);
+        assertTrue(text.contains("Unpinned snapshot " + snapId), text);
+        assertFalse(new io.github.truscdo.foldbackup.core.store.SnapshotStore(store)
+                .loadLatestSnapshot().isPinned());
     }
 
     @Test

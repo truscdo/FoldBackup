@@ -58,7 +58,11 @@ public sealed interface BackupStep extends StepProgress {
     }
 
     record Completed(long epochSeconds, String snapshotId, ScanStats scanStats,
-            long newBytes) implements BackupStep {
+            long newBytes, long capacityOverLimitBytes, int pinnedSnapshots) implements BackupStep {
+        public Completed(long epochSeconds, String snapshotId, ScanStats scanStats, long newBytes) {
+            this(epochSeconds, snapshotId, scanStats, newBytes, 0L, 0);
+        }
+
         @Override
         public String phase() {
             return "COMPLETED";

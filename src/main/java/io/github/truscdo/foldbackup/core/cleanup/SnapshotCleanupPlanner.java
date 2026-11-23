@@ -57,8 +57,10 @@ public final class SnapshotCleanupPlanner {
             throw new IllegalArgumentException("Byte counts must be nonnegative");
         List<SnapshotReclamationEstimator.DeletionEstimate> chain =
                 SnapshotReclamationEstimator.evaluateDeletionChain(snapshots);
-        long referencedBytes = chain.isEmpty() ? 0
-                : chain.getLast().cumulativeReclaimedBytes();
+        long referencedBytes = 0;
+        for (long size : SnapshotReclamationEstimator.collectBlobSizes(snapshots).values()) {
+            referencedBytes = Math.addExact(referencedBytes, size);
+        }
         if (referencedBytes > currentBytes)
             throw new IllegalArgumentException("Referenced blobs exceed current repository size");
         Map<Long, SnapshotManifest> snapshotsByEpoch = new HashMap<>();

@@ -67,6 +67,9 @@ public final class SnapshotReclamationEstimator {
         List<DeletionEstimate> estimates = new ArrayList<>(sorted.size());
         long reclaimed = 0;
         for (SnapshotManifest snapshot : sorted) {
+            if (snapshot.isPinned()) {
+                continue;
+            }
             long step = 0;
             long epochSeconds = snapshot.getEpochSeconds();
             for (String path : pathsBySnapshot.get(epochSeconds)) {

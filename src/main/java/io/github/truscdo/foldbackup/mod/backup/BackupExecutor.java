@@ -1,6 +1,7 @@
 package io.github.truscdo.foldbackup.mod.backup;
 
 import io.github.truscdo.foldbackup.core.BackupResult;
+import io.github.truscdo.foldbackup.core.FormatUtil;
 import io.github.truscdo.foldbackup.core.LogUtil;
 import io.github.truscdo.foldbackup.core.backup.BackupCoordinator;
 import io.github.truscdo.foldbackup.core.backup.BackupStep;
@@ -8,6 +9,7 @@ import io.github.truscdo.foldbackup.core.store.SnapshotStore;
 import io.github.truscdo.foldbackup.core.task.TaskRegistry;
 import io.github.truscdo.foldbackup.core.task.TaskStatus;
 import io.github.truscdo.foldbackup.core.task.TaskType;
+import io.github.truscdo.foldbackup.mod.command.CommandPermissions;
 import io.github.truscdo.foldbackup.mod.config.FoldBackupConfig;
 import io.github.truscdo.foldbackup.mod.i18n.BackupStepFormat;
 import io.github.truscdo.foldbackup.mod.i18n.FoldBackupTranslations;
@@ -56,6 +58,7 @@ public class BackupExecutor {
 
     private final java.util.concurrent.Executor mainThread;
     private final PlayerWarning playerWarning;
+    private final PlayerWarning adminWarning;
     private final WorldAccessor worldAccessor;
     /** 仓库延迟就绪时由 {@link #attachCoordinator} 补挂；挂上后不再变化。 */
     private volatile BackupCoordinator coordinator;
@@ -67,27 +70,38 @@ public class BackupExecutor {
     private final LongSupplier clock;
     private final AtomicReference<Run> currentRun = new AtomicReference<>();
 
+    private static final PlayerWarning NOOP_WARNING = (key, args) -> {};
+
     public BackupExecutor(MinecraftServer server, WorldAccessor worldAccessor,
             BackupCoordinator coordinator, FoldBackupConfig config,
             BackupScheduler scheduler, ExecutorService backupExecutor,
             TaskRegistry taskRegistry) {
-        this(server::execute, playersOf(server, config), worldAccessor, coordinator, scheduler,
-                backupExecutor, taskRegistry, () -> Math.max(0, config.getSavePauseStallSeconds()) * 1000L);
+        this(server::execute, playersOf(server, config), adminsOf(server, config), worldAccessor, coordinator,
+                scheduler, backupExecutor, taskRegistry,
+                () -> Math.max(0, config.getSavePauseStallSeconds()) * 1000L, System::currentTimeMillis);
     }
 
     /** 测试用：不启用看门狗。 */
     BackupExecutor(java.util.concurrent.Executor mainThread, PlayerWarning playerWarning,
             WorldAccessor worldAccessor, BackupCoordinator coordinator,
             BackupScheduler scheduler, ExecutorService backupExecutor, TaskRegistry taskRegistry) {
-        this(mainThread, playerWarning, worldAccessor, coordinator, scheduler, backupExecutor, taskRegistry,
-                () -> 0L);
+        this(mainThread, playerWarning, NOOP_WARNING, worldAccessor, coordinator, scheduler, backupExecutor,
+                taskRegistry, () -> 0L, System::currentTimeMillis);
+    }
+
+    /** 测试用：不启用看门狗，可独立注入管理员告警回调。 */
+    BackupExecutor(java.util.concurrent.Executor mainThread, PlayerWarning playerWarning,
+            PlayerWarning adminWarning, WorldAccessor worldAccessor, BackupCoordinator coordinator,
+            BackupScheduler scheduler, ExecutorService backupExecutor, TaskRegistry taskRegistry) {
+        this(mainThread, playerWarning, adminWarning, worldAccessor, coordinator, scheduler, backupExecutor,
+                taskRegistry, () -> 0L, System::currentTimeMillis);
     }
 
     BackupExecutor(java.util.concurrent.Executor mainThread, PlayerWarning playerWarning,
             WorldAccessor worldAccessor, BackupCoordinator coordinator,
             BackupScheduler scheduler, ExecutorService backupExecutor, TaskRegistry taskRegistry,
             LongSupplier savePauseTimeoutMillis) {
-        this(mainThread, playerWarning, worldAccessor, coordinator, scheduler, backupExecutor,
+        this(mainThread, playerWarning, NOOP_WARNING, worldAccessor, coordinator, scheduler, backupExecutor,
                 taskRegistry, savePauseTimeoutMillis, System::currentTimeMillis);
     }
 
@@ -95,8 +109,17 @@ public class BackupExecutor {
             WorldAccessor worldAccessor, BackupCoordinator coordinator,
             BackupScheduler scheduler, ExecutorService backupExecutor, TaskRegistry taskRegistry,
             LongSupplier savePauseTimeoutMillis, LongSupplier clock) {
+        this(mainThread, playerWarning, NOOP_WARNING, worldAccessor, coordinator, scheduler, backupExecutor,
+                taskRegistry, savePauseTimeoutMillis, clock);
+    }
+
+    BackupExecutor(java.util.concurrent.Executor mainThread, PlayerWarning playerWarning,
+            PlayerWarning adminWarning, WorldAccessor worldAccessor, BackupCoordinator coordinator,
+            BackupScheduler scheduler, ExecutorService backupExecutor, TaskRegistry taskRegistry,
+            LongSupplier savePauseTimeoutMillis, LongSupplier clock) {
         this.mainThread = mainThread;
         this.playerWarning = playerWarning;
+        this.adminWarning = adminWarning == null ? NOOP_WARNING : adminWarning;
         this.worldAccessor = worldAccessor;
         this.coordinator = coordinator;
         this.scheduler = scheduler;
@@ -110,6 +133,16 @@ public class BackupExecutor {
         return (key, args) -> {
             for (ServerPlayer player : server.getPlayerList().getPlayers()) {
                 player.sendSystemMessage(FoldBackupTranslations.componentForPlayer(player, config, key, args));
+            }
+        };
+    }
+
+    private static PlayerWarning adminsOf(MinecraftServer server, FoldBackupConfig config) {
+        return (key, args) -> {
+            for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+                if (CommandPermissions.canManageBackups(player)) {
+                    player.sendSystemMessage(FoldBackupTranslations.componentForPlayer(player, config, key, args));
+                }
             }
         };
     }
@@ -324,6 +357,7 @@ public class BackupExecutor {
             } else if (BackupResult.SUCCESS.equals(ok)) {
                 LOG.info("[{}] {}", run.status.taskId(), BackupStepFormat.format(run.status.stepProgress()));
                 taskRegistry.complete(run.status);
+                notifyAdminsIfCapacityOverLimit(run);
                 outcome = BackupResult.SUCCESS;
             } else {
                 taskRegistry.fail(run.status, "Backup failed with unexpected result");
@@ -366,7 +400,7 @@ public class BackupExecutor {
         Run run = outcome.run();
         try {
             prepareWorldForBackup();
-            coordinator.runBackup(run.status, step -> onBlockingStep(step));
+            coordinator.runBackup(run.status, step -> onBlockingStep(run, step));
             finishBackup(run, BackupResult.SUCCESS, null);
         } catch (Exception e) {
             finishBackup(run, BackupResult.FAILED, e);
@@ -375,7 +409,8 @@ public class BackupExecutor {
     }
 
     /** 阻塞路径在服务器线程上同步执行，可以直接在回调里恢复保存。 */
-    private void onBlockingStep(BackupStep step) {
+    private void onBlockingStep(Run run, BackupStep step) {
+        run.lastStep = step;
         if (isScanFinished(step))
             restoreSavingAfterScan();
     }
@@ -479,6 +514,25 @@ public class BackupExecutor {
     }
 
     // --- 内部方法 ---
+
+    /**
+     * 备份成功但因保留快照导致仓库超出容量上限时，向具备管理权限的在线玩家推送告警。
+     * 必须在服务器线程上调用。
+     */
+    private void notifyAdminsIfCapacityOverLimit(Run run) {
+        if (!(run.lastStep instanceof BackupStep.Completed completed)
+                || completed.capacityOverLimitBytes() <= 0) {
+            return;
+        }
+        try {
+            adminWarning.send("foldbackup.backup.capacity_over_limit_pinned",
+                    completed.snapshotId(),
+                    FormatUtil.formatSize(completed.capacityOverLimitBytes()),
+                    completed.pinnedSnapshots());
+        } catch (RuntimeException e) {
+            LOG.warn("Unable to warn administrators about repository capacity limit", e);
+        }
+    }
 
     /** 通知所有在线玩家备份失败；必须在服务器线程上调用。 */
     private void notifyPlayersOfBackupFailure() {

@@ -132,12 +132,12 @@ public class BackupCoordinator {
 
             // Commit the new snapshot and retention changes together, then GC.
             progress.accept(new BackupStep.CommittingSnapshot(snapshotId));
-            snapshotManager.saveSnapshot(manifest, retentionPolicy);
+            SnapshotStore.SaveResult saveResult = snapshotManager.saveSnapshotWithResult(manifest, retentionPolicy);
 
             // Final summary
             progress.accept(new BackupStep.Completed(
                     snapshotEpochSeconds, snapshotId, scanStats,
-                    scan.getNewBytes()));
+                    scan.getNewBytes(), saveResult.capacityOverLimitBytes(), saveResult.pinnedSnapshots()));
 
             return manifest;
 

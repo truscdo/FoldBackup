@@ -12,6 +12,9 @@ import java.util.List;
  */
 public class SnapshotManifest {
 
+    /** Tag marking a snapshot as pinned (exempt from automatic cleanup and manual deletion). */
+    public static final String PINNED_TAG = "pinned";
+
     private String snapshotId;
     /** Unix epoch timestamp in seconds; this is the internal snapshot identity. */
     private long epochSeconds;
@@ -90,6 +93,26 @@ public class SnapshotManifest {
 
     public List<String> getTags() { return tags; }
     public void setTags(List<String> tags) { this.tags = tags; }
+
+    public boolean isPinned() {
+        return tags != null && tags.contains(PINNED_TAG);
+    }
+
+    public void setPinned(boolean pinned) {
+        if (pinned) {
+            if (tags == null) {
+                tags = new ArrayList<>();
+            } else if (tags.contains(PINNED_TAG)) {
+                return;
+            } else {
+                tags = new ArrayList<>(tags);
+            }
+            tags.add(PINNED_TAG);
+        } else if (tags != null && tags.contains(PINNED_TAG)) {
+            tags = new ArrayList<>(tags);
+            tags.removeIf(PINNED_TAG::equals);
+        }
+    }
 
     public List<RegionEntry> getRegions() { return regions; }
     public void setRegions(List<RegionEntry> regions) { this.regions = regions; }

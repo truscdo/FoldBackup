@@ -268,4 +268,47 @@ class ArchiveImporterTest {
         assertNotNull(snapshots.loadSnapshot(BASE_EPOCH));
         assertNotNull(snapshots.loadSnapshot(TARGET_EPOCH));
     }
+
+    @Test void pinnedTagIsStrippedOnArchiveExportAndImport() throws Exception {
+        Path sourceStore = temp.resolve("source-store");
+        Path archiveDir = Files.createDirectory(temp.resolve("pinned-archive"));
+        var store = new SnapshotStore(sourceStore);
+        var blobs = new BlobStore(sourceStore, 6);
+        Region region = region(new byte[]{7});
+        String regionHash = hash(region);
+        byte[] lrhBytes = LrhTestSupport.writeRegionLinearBytes(region, 3);
+        String blobPath;
+        try (var session = blobs.newWriteSession()) {
+            session.output().write(lrhBytes);
+            blobPath = session.commit(regionHash, "lrh").path();
+        }
+
+        SnapshotManifest manifest = new SnapshotManifest(BASE, BASE_EPOCH, "world");
+        manifest.setTags(List.of("milestone", SnapshotManifest.PINNED_TAG));
+        manifest.addRegion(new RegionEntry("region/r.0.0.mca", regionHash, blobPath, lrhBytes.length, 8192));
+        store.saveSnapshot(manifest);
+        assertTrue(store.loadSnapshot(BASE_EPOCH).isPinned());
+
+        Path fullTar = new ArchiveCreator(store, blobs, 3).createFull(BASE_EPOCH, archiveDir, false, 1);
+
+        // Verify exported archive metadata stripped PINNED_TAG while preserving other tags.
+        try (var reader = new TarReader(Files.newInputStream(fullTar))) {
+            TarReader.Entry entry = reader.nextEntry();
+            assertNotNull(entry);
+            assertEquals("snapshot.bin", entry.name);
+            ArchiveSnapshot exportedMeta = ArchiveSnapshotCodec.decode(reader.readEntryData());
+            assertFalse(exportedMeta.tags.contains(SnapshotManifest.PINNED_TAG));
+            assertTrue(exportedMeta.tags.contains("milestone"));
+        }
+
+        // Also inject PINNED_TAG directly into the archive to verify importer-side stripping.
+        rewriteSnapshot(fullTar, meta -> meta.tags = List.of("milestone", SnapshotManifest.PINNED_TAG));
+
+        Path importedStore = temp.resolve("imported-store");
+        assertEquals(1, new ArchiveImporter(archiveDir, importedStore, 1).importAll());
+        SnapshotManifest imported = new SnapshotStore(importedStore).loadSnapshot(BASE_EPOCH);
+        assertNotNull(imported);
+        assertFalse(imported.isPinned(), "Imported snapshot must not inherit pinned tag");
+        assertEquals(List.of("milestone"), imported.getTags());
+    }
 }

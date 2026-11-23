@@ -4,7 +4,11 @@ import io.github.truscdo.foldbackup.core.cleanup.SnapshotCleanupPlanner;
 import io.github.truscdo.foldbackup.core.store.SnapshotManifest;
 import java.util.List;
 
-/** 容量优先的自动清理配置；天数不是最低保留承诺，标签不提供豁免。 */
+/**
+ * 容量优先的自动清理配置；天数不是最低保留承诺。
+ * 带有 {@link SnapshotManifest#PINNED_TAG} 的保留快照豁免自动清理；
+ * 普通标签不提供豁免。
+ */
 public final class RetentionPolicy {
     private boolean enabled = true;
     private long maxSizeBytes;

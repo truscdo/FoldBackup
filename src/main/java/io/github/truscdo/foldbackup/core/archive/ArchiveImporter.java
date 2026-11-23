@@ -414,7 +414,9 @@ public class ArchiveImporter {
         manifest.setMinecraftVersion(meta.minecraftVersion);
         manifest.setWorldVersion(meta.worldVersion);
         if (meta.tags != null) {
-            manifest.setTags(meta.tags);
+            manifest.setTags(new ArrayList<>(meta.tags.stream()
+                    .filter(tag -> !SnapshotManifest.PINNED_TAG.equals(tag))
+                    .toList()));
         }
         manifest.setRegions(regions);
         manifest.setExtraFiles(files);

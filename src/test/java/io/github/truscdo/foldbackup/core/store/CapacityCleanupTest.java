@@ -280,4 +280,72 @@ class CapacityCleanupTest {
         assertFalse(Files.exists(root.resolve(oldBlob)));
         assertTrue(Files.exists(root.resolve(liveBlob)));
     }
+
+    @Test void retentionSkipsPinnedOldSnapshotAndCleansNextUnpinnedSnapshot() throws Exception {
+        var store = new SnapshotStore(root);
+        String pinnedBlob = blob("pinned", 4096);
+        String sharedBlob = blob("shared", 2048);
+        var pinned = snapshot(OLD, 1, pinnedBlob);
+        pinned.addExtraFile(new FileEntry("shared.dat", "b".repeat(32), sharedBlob, 2048, 1));
+        store.saveSnapshot(pinned);
+        assertTrue(store.setPinned(1L, true));
+
+        String middleUnique = blob("middle", 8192);
+        var middle = snapshot(MIDDLE, 2, middleUnique);
+        middle.addExtraFile(new FileEntry("shared.dat", "b".repeat(32), sharedBlob, 2048, 1));
+        store.saveSnapshot(middle);
+
+        String freshBlob = blob("fresh", 4096);
+        long now = System.currentTimeMillis() / 1000L;
+        var result = store.saveSnapshotWithResult(snapshot(NEW, now, freshBlob),
+                new RetentionPolicy().setMaxAgeDays(1).setMaxSizeBytes(12_000));
+
+        assertEquals(0L, result.capacityOverLimitBytes());
+        assertEquals(List.of(NEW, OLD), store.listSnapshots());
+        assertTrue(Files.exists(root.resolve(pinnedBlob)));
+        assertTrue(Files.exists(root.resolve(sharedBlob)));
+        assertFalse(Files.exists(root.resolve(middleUnique)));
+        assertTrue(Files.exists(root.resolve(freshBlob)));
+    }
+
+    @Test void softQuotaAllowsNewSnapshotCommitWhenPinnedSnapshotsExceedMaxSize() throws Exception {
+        var store = new SnapshotStore(root);
+        String pinnedBlob = blob("pinned", 8192);
+        store.saveSnapshot(snapshot(OLD, 1, pinnedBlob));
+        assertTrue(store.setPinned(1L, true));
+
+        String unpinnedOldBlob = blob("middle", 4096);
+        store.saveSnapshot(snapshot(MIDDLE, 2, unpinnedOldBlob));
+
+        String freshBlob = blob("fresh", 4096);
+        var result = store.saveSnapshotWithResult(snapshot(NEW, 3, freshBlob),
+                new RetentionPolicy().setMaxSizeBytes(6000));
+
+        assertTrue(result.capacityOverLimitBytes() > 0, "Soft quota overrun should be reported");
+        assertEquals(1, result.pinnedSnapshots());
+        assertEquals(List.of(NEW, OLD), store.listSnapshots());
+        assertTrue(Files.exists(root.resolve(pinnedBlob)));
+        assertFalse(Files.exists(root.resolve(unpinnedOldBlob)));
+        assertTrue(Files.exists(root.resolve(freshBlob)));
+    }
+
+    @Test void hardFreeSpaceFloorStillRejectsCommitWhenPinnedSnapshotsBlockReclamation() throws Exception {
+        var store = new SnapshotStore(root);
+        String pinnedBlob = blob("pinned", 8192);
+        store.saveSnapshot(snapshot(OLD, 1, pinnedBlob));
+        assertTrue(store.setPinned(1L, true));
+        byte[] indexBefore = Files.readAllBytes(root.resolve("index.db"));
+
+        String freshBlob = blob("fresh", 4096);
+        long hugeMinFreeSpace = Long.MAX_VALUE / 2;
+        IOException error = assertThrows(IOException.class, () -> store.saveSnapshotWithResult(
+                snapshot(NEW, 2, freshBlob),
+                new RetentionPolicy().setMinFreeSpaceBytes(hugeMinFreeSpace)));
+
+        assertTrue(error.getMessage().contains("pinned"), error.getMessage());
+        assertArrayEquals(indexBefore, Files.readAllBytes(root.resolve("index.db")));
+        assertEquals(List.of(OLD), store.listSnapshots());
+        assertTrue(Files.exists(root.resolve(pinnedBlob)));
+        assertTrue(Files.exists(root.resolve(freshBlob)));
+    }
 }

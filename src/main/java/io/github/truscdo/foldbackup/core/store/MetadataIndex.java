@@ -110,6 +110,34 @@ public class MetadataIndex {
         }
     }
 
+    /**
+     * Update the pinned state of an existing snapshot.
+     * Copies the target manifest before mutating so frozen indexes remain untouched
+     * and {@link #sameContents(MetadataIndex)} detects the change.
+     *
+     * @return {@code true} if the pinned state changed, {@code false} if already in target state
+     */
+    public synchronized boolean setSnapshotPinned(long epochSeconds, boolean pinned) {
+        requireMutable();
+        SnapshotManifest existing = snapshotsByEpoch.get(epochSeconds);
+        if (existing == null) {
+            throw new IllegalArgumentException("Snapshot epoch not found: " + epochSeconds);
+        }
+        if (existing.isPinned() == pinned) {
+            return false;
+        }
+        SnapshotManifest updated = existing.copy();
+        updated.setPinned(pinned);
+        snapshotsByEpoch.put(epochSeconds, updated);
+        for (int i = 0; i < snapshots.size(); i++) {
+            if (snapshots.get(i).getEpochSeconds() == epochSeconds) {
+                snapshots.set(i, updated);
+                break;
+            }
+        }
+        return true;
+    }
+
     // ──────────────────────────────────────────────
     //  Queries
     // ──────────────────────────────────────────────
