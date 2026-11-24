@@ -162,7 +162,7 @@ You can preview and roll back a single chunk in game, or use the CLI to roll bac
 
 In game, use `/foldbackup preview <x> <z> [snapshot-id]` to preview a chunk from a snapshot. This changes how the target chunk appears on the client to show its state at the time of that snapshot; it does not modify the actual chunk. `x` and `z` are chunk coordinates. You can find them on the F3 screen, or divide the block coordinates by 16 and round down. A blue particle effect marks the previewed chunk. Use `/foldbackup preview exit` to end the preview.
 
-To roll back a chunk in game, use `/foldbackup rollback chunk <x> <z> [snapshot-id]`. You can specify a dimension with `/foldbackup rollback chunk in <dimension> <x> <z> [snapshot-id]`. The target chunk must already be loaded in memory. For an unloaded chunk, use the offline CLI method below. If you omit the snapshot ID, the latest snapshot is used.
+To roll back a chunk in game, use `/foldbackup rollback chunk <x> <z> [snapshot-id]`. You can specify a dimension with `/foldbackup rollback chunk in <dimension> <x> <z> [snapshot-id]`, or narrow the scope with `blocks` (terrain, block entities, and POI only, preserving current entities) or `entities` (entities only, leaving terrain and block entities untouched): e.g. `/foldbackup rollback chunk blocks <x> <z> [snapshot-id]` or `/foldbackup rollback chunk entities in <dimension> <x> <z> [snapshot-id]`. The target chunk must already be loaded in memory. For an unloaded chunk, use the offline CLI method below. If you omit the snapshot ID, the latest snapshot is used.
 
 For the CLI examples below, assume the current directory is `foldbackups` and the server world directory is its sibling, `world`. If you run the commands elsewhere, adjust the JAR, world, and snapshot paths accordingly. You can also specify the snapshot directory with `--snapshot-root <directory>`. In singleplayer the repository is `foldbackups/<world-folder-name>`, so point `--snapshot-root` at that directory. **Stop the server before performing an offline rollback.**
 
@@ -175,12 +175,12 @@ java -jar ../mods/foldbackup-<version>.jar snapshot list
 Copy the target snapshot ID from the list, then roll back the chunk. The following command restores chunk `[x, z]` in the Overworld directory `world` to its state in that snapshot:
 
 ```bash
-java -jar ../mods/foldbackup-<version>.jar snapshot rollback <snapshot-id> --world ../world --chunk <chunk-x> <chunk-z>
+java -jar ../mods/foldbackup-<version>.jar snapshot rollback <snapshot-id> --world ../world --chunk <chunk-x> <chunk-z> [--scope <all|blocks|entities>]
 ```
 
-`--world` points to the target dimension directory: use the world root for the Overworld, `../world/DIM-1` for the Nether, `../world/DIM1` for the End, or the corresponding `dimensions/<namespace>/<path>` directory for a custom dimension. `--chunk` takes signed integer chunk coordinates, not block coordinates. For example, block coordinate `-1` belongs to chunk coordinate `-1`. The CLI asks for confirmation before proceeding; append `--yes` to skip the prompt.
+`--world` points to the target dimension directory: use the world root for the Overworld, `../world/DIM-1` for the Nether, `../world/DIM1` for the End, or the corresponding `dimensions/<namespace>/<path>` directory for a custom dimension. `--chunk` takes signed integer chunk coordinates, not block coordinates. For example, block coordinate `-1` belongs to chunk coordinate `-1`. `--scope` defaults to `all`, or can be set to `blocks` (terrain, block entities, and POI only) or `entities` (entities only). The CLI asks for confirmation before proceeding; append `--yes` to skip the prompt.
 
-The CLI restores the target chunk's terrain, block entities, recoverable entity data, and that chunk's points of interest exactly as recorded in the snapshot, including ticket occupancy. It does not restore player data or world-level configuration.
+By default (`--scope all`), the CLI restores the target chunk's terrain, block entities, recoverable entity data, and that chunk's points of interest exactly as recorded in the snapshot, including ticket occupancy. It does not restore player data or world-level configuration.
 
 ### Full and Differential Archives
 
@@ -208,6 +208,8 @@ The archive format is independent of the Minecraft version. You can use the CLI 
 | `/foldbackup preview exit` | End the preview |
 | `/foldbackup rollback chunk <x> <z> [snapshot-id]` | Roll back a single chunk in the current dimension |
 | `/foldbackup rollback chunk in <dimension> <x> <z> [snapshot-id]` | Roll back a single chunk in a specified dimension |
+| `/foldbackup rollback chunk blocks [in <dimension>] <x> <z> [snapshot-id]` | Roll back only blocks, block entities, and POI of a chunk (preserving current entities) |
+| `/foldbackup rollback chunk entities [in <dimension>] <x> <z> [snapshot-id]` | Roll back only entities of a chunk (leaving blocks and block entities untouched) |
 
 ## Key Configuration Options
 

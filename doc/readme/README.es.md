@@ -162,7 +162,7 @@ Puedes previsualizar y restaurar un único chunk dentro del juego, o usar la CLI
 
 Dentro del juego, usa `/foldbackup preview <x> <z> [snapshot-id]` para obtener una vista previa de un chunk desde una instantánea. Esto cambia la apariencia del chunk de destino en el cliente para mostrar su estado en el momento de esa instantánea, sin modificar el chunk real. `x` y `z` son coordenadas de chunk; puedes verlas en la pantalla F3 o dividir las coordenadas de bloque entre 16 redondeando hacia abajo. Un efecto de partículas azules marca el chunk previsualizado. Usa `/foldbackup preview exit` para salir de la vista previa.
 
-Para restaurar un chunk dentro del juego, usa `/foldbackup rollback chunk <x> <z> [snapshot-id]`. Puedes especificar una dimensión con `/foldbackup rollback chunk in <dimensión> <x> <z> [snapshot-id]`. El chunk de destino debe estar cargado en memoria. Para un chunk no cargado, utiliza el método sin conexión mediante la CLI que se muestra a continuación. Si omites el ID de la instantánea, se utiliza la más reciente.
+Para restaurar un chunk dentro del juego, usa `/foldbackup rollback chunk <x> <z> [snapshot-id]`. Puedes especificar una dimensión con `/foldbackup rollback chunk in <dimensión> <x> <z> [snapshot-id]`, o limitar el alcance con `blocks` (solo terreno, entidades de bloque y POI, conservando las entidades actuales) o `entities` (solo entidades, sin tocar el terreno ni las entidades de bloque): por ejemplo, `/foldbackup rollback chunk blocks <x> <z> [snapshot-id]` o `/foldbackup rollback chunk entities in <dimensión> <x> <z> [snapshot-id]`. El chunk de destino debe estar cargado en memoria. Para un chunk no cargado, utiliza el método sin conexión mediante la CLI que se muestra a continuación. Si omites el ID de la instantánea, se utiliza la más reciente.
 
 Para los siguientes ejemplos con la CLI, se asume que el directorio actual es `foldbackups` y que el directorio del mundo del servidor está al mismo nivel y se llama `world`. Si ejecutas los comandos desde otro lugar, ajusta las rutas del JAR, del mundo y de las instantáneas según corresponda. También puedes indicar el directorio de instantáneas con `--snapshot-root <directorio>`. En modo de un jugador, el repositorio es `foldbackups/<nombre-de-carpeta-del-mundo>`, por lo que debes apuntar `--snapshot-root` a ese directorio. **Detén el servidor antes de realizar una restauración sin conexión.**
 
@@ -175,12 +175,12 @@ java -jar ../mods/foldbackup-<version>.jar snapshot list
 Copia el ID de la instantánea de destino de la lista y restaura el chunk. El siguiente comando restaura el chunk `[x, z]` en el directorio de la superficie (`world`) a su estado en dicha instantánea:
 
 ```bash
-java -jar ../mods/foldbackup-<version>.jar snapshot rollback <snapshot-id> --world ../world --chunk <chunk-x> <chunk-z>
+java -jar ../mods/foldbackup-<version>.jar snapshot rollback <snapshot-id> --world ../world --chunk <chunk-x> <chunk-z> [--scope <all|blocks|entities>]
 ```
 
-`--world` apunta al directorio de la dimensión de destino: usa la raíz del mundo para la superficie (Overworld), `../world/DIM-1` para el Nether, `../world/DIM1` para el End, o el directorio `dimensions/<namespace>/<path>` correspondiente para una dimensión personalizada. `--chunk` recibe coordenadas de chunk enteras con signo, no coordenadas de bloque. Por ejemplo, la coordenada de bloque `-1` pertenece a la coordenada de chunk `-1`. La CLI pide confirmación antes de continuar; añade `--yes` para omitir la confirmación.
+`--world` apunta al directorio de la dimensión de destino: usa la raíz del mundo para la superficie (Overworld), `../world/DIM-1` para el Nether, `../world/DIM1` para el End, o el directorio `dimensions/<namespace>/<path>` correspondiente para una dimensión personalizada. `--chunk` recibe coordenadas de chunk enteras con signo, no coordenadas de bloque. Por ejemplo, la coordenada de bloque `-1` pertenece a la coordenada de chunk `-1`. `--scope` usa `all` por defecto, o puede establecerse en `blocks` (solo terreno, entidades de bloque y POI) o `entities` (solo entidades). La CLI pide confirmación antes de continuar; añade `--yes` para omitir la confirmación.
 
-La CLI restaura el terreno del chunk de destino, las entidades de bloque, los datos de entidades recuperables y los puntos de interés (POI) de ese chunk tal como se registraron en la instantánea, incluido el estado de ocupación de tickets. No restaura datos de jugadores ni la configuración general del mundo.
+Por defecto (`--scope all`), la CLI restaura el terreno del chunk de destino, las entidades de bloque, los datos de entidades recuperables y los puntos de interés (POI) de ese chunk tal como se registraron en la instantánea, incluido el estado de ocupación de tickets. No restaura datos de jugadores ni la configuración general del mundo.
 
 ### Archivos completos y diferenciales
 
@@ -208,6 +208,8 @@ El formato de archivo es independiente de la versión de Minecraft. Puedes usar 
 | `/foldbackup preview exit` | Salir de la vista previa |
 | `/foldbackup rollback chunk <x> <z> [snapshot-id]` | Restaurar un único chunk en la dimensión actual |
 | `/foldbackup rollback chunk in <dimensión> <x> <z> [snapshot-id]` | Restaurar un único chunk en la dimensión especificada |
+| `/foldbackup rollback chunk blocks [in <dimensión>] <x> <z> [snapshot-id]` | Restaurar solo bloques, entidades de bloque y POI de un chunk (conservando las entidades actuales) |
+| `/foldbackup rollback chunk entities [in <dimensión>] <x> <z> [snapshot-id]` | Restaurar solo entidades de un chunk (sin modificar bloques ni entidades de bloque) |
 
 ## Opciones clave de configuración
 

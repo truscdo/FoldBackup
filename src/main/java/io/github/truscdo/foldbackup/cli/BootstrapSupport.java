@@ -184,7 +184,7 @@ final class BootstrapSupport {
                   java -jar foldbackup-<version>.jar snapshot delete <snapshot-id>... [--dry-run] [--yes]
                   java -jar foldbackup-<version>.jar snapshot pin <snapshot-id>
                   java -jar foldbackup-<version>.jar snapshot unpin <snapshot-id>
-                  java -jar foldbackup-<version>.jar snapshot rollback <snapshot-id> --world <dir> --chunk <x> <z> [--yes]
+                  java -jar foldbackup-<version>.jar snapshot rollback <snapshot-id> --world <dir> --chunk <x> <z> [--scope <all|blocks|entities>] [--yes]
                   java -jar foldbackup-<version>.jar archive create --snapshot <snapshot-id> [--base <snapshot-id>]
                   java -jar foldbackup-<version>.jar archive export <archive-file> --output <dir> [--delete-extra] [--dry-run] [--threads <N>]
                   java -jar foldbackup-<version>.jar archive verify [<archive-file>]
@@ -206,6 +206,7 @@ final class BootstrapSupport {
                   --threads <N>         archive create/export and snapshot create/export/import worker count
                   --delete-extra        Remove target content that is not in the restore list
                   --dry-run             Check only; print the statistics without writing or deleting
+                  --scope <mode>        Chunk rollback scope: all (default), blocks, or entities
                   --yes                 Skip delete/rollback confirmation
                   --lib <path>          Directory with the bundled runtime libraries
                                         (zstd-jni, zero-allocation-hashing)

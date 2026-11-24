@@ -16,7 +16,7 @@ foldbackup snapshot export <snapshot-id> --output <path> [--zip] [--delete-extra
 foldbackup snapshot delete <snapshot-id>... [--dry-run] [--yes]
 foldbackup snapshot pin <snapshot-id>
 foldbackup snapshot unpin <snapshot-id>
-foldbackup snapshot rollback <snapshot-id> --world <dir> --chunk <x> <z>
+foldbackup snapshot rollback <snapshot-id> --world <dir> --chunk <x> <z> [--scope <all|blocks|entities>] [--yes]
 
 foldbackup archive create --snapshot <snapshot-id> [--base <snapshot-id>]
 foldbackup archive export <archive-file> --output <dir> [--delete-extra] [--dry-run] [--threads <N>]
@@ -69,7 +69,11 @@ foldbackup tui
 
 - `--world <dir>` 指向目标维度目录：主世界使用 save 根目录，下界使用 `<save>/DIM-1`，末地使用 `<save>/DIM1`，自定义维度使用 `<save>/dimensions/<namespace>/<path>`。程序根据目录确定快照中的维度路径。
 - `--chunk <x> <z>` 接收有符号整数区块坐标，不是方块坐标。方块坐标换算为区块坐标时除以 16 并向下取整。
-- 恢复指定区块的地形、方块实体、可恢复的实体数据，以及该区块的 POI 列；实体冲突或跳过情况需在结果中报告。POI 按快照原样写回，包括每个记录的 `free_tickets` 与列的 `Valid` 标记。当前范围不包含玩家数据及世界级配置，也不保证与区块外的持票者一致；POI 的处理规则见[单区块回档方案](单区块回档方案.md)。
+- `--scope <all|blocks|entities>` 控制回档范围（默认 `all`）：
+  - `all`：恢复指定区块的地形、方块实体、可恢复的实体数据，以及该区块的 POI 列；实体冲突或跳过情况需在结果中报告。
+  - `blocks`：仅恢复地形、方块实体与 POI 列，保留目标世界当前实体（跳过全盘实体扫描）。
+  - `entities`：仅恢复目标区块实体（`entities/`），保持 `region/` 与 `poi/` 不变；确认前校验目标方块区块存在于快照且历史实体可恢复，交互摘要一并展示快照与当前槽位的实体计数（缺失实体列按空集处理，历史实体不可恢复时直接报错退出）。
+- POI 按快照原样写回（含 `free_tickets` 与列的 `Valid` 标记）。当前范围不包含玩家数据及世界级配置，也不保证与区块外的持票者一致；POI 的处理规则见[单区块回档方案](单区块回档方案.md)。
 - 目标世界必须停止运行，写入前检查世界锁；无法取得锁时终止回滚。
 
 ### 归档校验

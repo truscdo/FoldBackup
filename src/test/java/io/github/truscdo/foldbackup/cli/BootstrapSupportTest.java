@@ -155,6 +155,7 @@ class BootstrapSupportTest {
         assertTrue(usage.contains("--archive-root <dir>"), "TUI form takes explicit archive root");
         assertTrue(usage.contains("extract"), "extract command documented");
         assertTrue(usage.contains("--lib"), "--lib option documented");
+        assertTrue(usage.contains("--scope"), "--scope option documented");
         assertTrue(usage.contains("world-export"), "world file output default documented");
         assertFalse(usage.contains("--format"), "online export no longer exposes LRH format selection");
     }

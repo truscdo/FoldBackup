@@ -110,6 +110,22 @@ public class EntityRollbackIT extends IntegrationTestBase {
         assertEquals(id, command(dim, "data get entity @e[distance=0..,tag=rollback_cli,limit=1] UUID"));
         command(dim, "kill @e[distance=0..,tag=rollback_cli]");
         command(dim, "summon minecraft:marker 232 100 8 {Tags:[\"rollback_cli_new\"]}");
+
+        // Prepare two extra chunks so the same restart also verifies CLI --scope blocks and --scope entities.
+        load(dim, 384);
+        command(dim, "setblock 392 99 8 minecraft:gold_block");
+        command(dim, "summon minecraft:armor_stand 392 100 8 {Tags:[\"cli_blocks_old\"],NoGravity:1b}");
+        load(dim, 416);
+        command(dim, "setblock 424 99 8 minecraft:gold_block");
+        command(dim, "summon minecraft:armor_stand 424 100 8 {Tags:[\"cli_entities_old\"],NoGravity:1b}");
+        String scopeSnapshot = doBackup();
+        command(dim, "setblock 392 99 8 minecraft:diamond_block");
+        command(dim, "kill @e[distance=0..,tag=cli_blocks_old]");
+        command(dim, "summon minecraft:marker 392 100 8 {Tags:[\"cli_blocks_live\"]}");
+        command(dim, "setblock 424 99 8 minecraft:diamond_block");
+        command(dim, "kill @e[distance=0..,tag=cli_entities_old]");
+        command(dim, "summon minecraft:marker 424 100 8 {Tags:[\"cli_entities_live\"]}");
+
         Path root = runDir.resolve("foldbackups");
         assertEquals(0, cli("extract", "--output", root.resolve(".foldbackup-cli").toString()));
         String[] args = {"snapshot", "rollback", snapshot, "--world", worldDir.toString(),
@@ -118,11 +134,25 @@ public class EntityRollbackIT extends IntegrationTestBase {
         assertNotEquals(0, cli(args), "CLI must refuse a running world");
         rcon.close(); serverManager.close();
         assertEquals(0, cli(args), Files.readString(runDir.resolve("entity-cli-output.log")));
+        assertEquals(0, cli("snapshot", "rollback", scopeSnapshot, "--world", worldDir.toString(),
+                "--chunk", "24", "0", "--scope", "blocks", "--yes",
+                "--snapshot-root", root.toString(), "--lib", root.resolve(".foldbackup-cli").toString()),
+                Files.readString(runDir.resolve("entity-cli-output.log")));
+        assertEquals(0, cli("snapshot", "rollback", scopeSnapshot, "--world", worldDir.toString(),
+                "--chunk", "26", "0", "--scope", "entities", "--yes",
+                "--snapshot-root", root.toString(), "--lib", root.resolve(".foldbackup-cli").toString()),
+                Files.readString(runDir.resolve("entity-cli-output.log")));
         setupIntegrationTest();
         command(dim, "forceload add 224 0");
+        command(dim, "forceload add 384 0");
+        command(dim, "forceload add 416 0");
         Thread.sleep(1000);
         exists(dim, "rollback_cli", true); exists(dim, "rollback_cli_new", false);
         assertEquals(id, command(dim, "data get entity @e[distance=0..,tag=rollback_cli,limit=1] UUID"));
+        assertTrue(command(dim, "execute if block 392 99 8 minecraft:gold_block").toLowerCase().contains("passed"));
+        exists(dim, "cli_blocks_live", true); exists(dim, "cli_blocks_old", false);
+        assertTrue(command(dim, "execute if block 424 99 8 minecraft:diamond_block").toLowerCase().contains("passed"));
+        exists(dim, "cli_entities_old", true); exists(dim, "cli_entities_live", false);
     }
 
     private int cli(String... args) throws Exception {
@@ -162,6 +192,55 @@ public class EntityRollbackIT extends IntegrationTestBase {
             String block = command(dim, "execute if block 264 99 8 minecraft:gold_block");
             assertTrue(block.toLowerCase().contains("passed"), block);
         }
+
+        // In entities-only mode, an unrecoverable UUID snapshot (preserveAll=true) must fail without modifying entities or blocks.
+        command(dim, "setblock 264 99 8 minecraft:diamond_block");
+        command(dim, "summon minecraft:marker 264 100 8 {Tags:[\"rollback_entities_fail_live\"]}");
+        String entitiesFail = rcon.sendCommand(
+                "/foldbackup rollback chunk entities in " + dim + " 16 0 " + invalidSnapshots.get(1));
+        assertFalse(entitiesFail.contains("restored"), entitiesFail);
+        assertTrue(entitiesFail.contains("could not be recovered"), entitiesFail);
+        exists(dim, "rollback_invalid", true);
+        exists(dim, "rollback_entities_fail_live", true);
+        assertTrue(command(dim, "execute if block 264 99 8 minecraft:diamond_block").toLowerCase().contains("passed"));
+    }
+
+    @Test void blocksScopeRestoresBlocksAndPreservesLiveEntities() throws Exception {
+        String dim = "minecraft:overworld";
+        rcon.sendCommand("/gamerule doMobSpawning false");
+        load(dim, 320);
+        command(dim, "setblock 328 99 8 minecraft:gold_block");
+        command(dim, "summon minecraft:armor_stand 328 100 8 {Tags:[\"scope_blocks_old\"],NoGravity:1b}");
+        String snapshot = doBackup();
+
+        command(dim, "setblock 328 99 8 minecraft:diamond_block");
+        command(dim, "kill @e[distance=0..,tag=scope_blocks_old]");
+        command(dim, "summon minecraft:marker 328 100 8 {Tags:[\"scope_blocks_live\"]}");
+        String response = rcon.sendCommand("/foldbackup rollback chunk blocks in " + dim + " 20 0 " + snapshot);
+        assertTrue(response.contains("restored"), response);
+        assertTrue(response.contains("preserved"), response);
+        assertTrue(command(dim, "execute if block 328 99 8 minecraft:gold_block").toLowerCase().contains("passed"));
+        exists(dim, "scope_blocks_live", true);
+        exists(dim, "scope_blocks_old", false);
+    }
+
+    @Test void entitiesScopeRestoresEntitiesAndLeavesBlocksUntouched() throws Exception {
+        String dim = "minecraft:overworld";
+        rcon.sendCommand("/gamerule doMobSpawning false");
+        load(dim, 352);
+        command(dim, "setblock 360 99 8 minecraft:gold_block");
+        command(dim, "summon minecraft:armor_stand 360 100 8 {Tags:[\"scope_entities_old\"],NoGravity:1b}");
+        String snapshot = doBackup();
+
+        command(dim, "setblock 360 99 8 minecraft:diamond_block");
+        command(dim, "kill @e[distance=0..,tag=scope_entities_old]");
+        command(dim, "summon minecraft:marker 360 100 8 {Tags:[\"scope_entities_live\"]}");
+        String response = rcon.sendCommand("/foldbackup rollback chunk entities in " + dim + " 22 0 " + snapshot);
+        assertTrue(response.contains("restored"), response);
+        assertTrue(response.contains("blocks untouched"), response);
+        exists(dim, "scope_entities_old", true);
+        exists(dim, "scope_entities_live", false);
+        assertTrue(command(dim, "execute if block 360 99 8 minecraft:diamond_block").toLowerCase().contains("passed"));
     }
 
     private String invalidSnapshot(String original, String variant) throws Exception {

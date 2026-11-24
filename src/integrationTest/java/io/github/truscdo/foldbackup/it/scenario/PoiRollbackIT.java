@@ -176,6 +176,109 @@ public class PoiRollbackIT extends IntegrationTestBase {
         assertPoi(13, 0, 216, 64, 8, "minecraft:meeting", 32);
     }
 
+    @Test
+    void blocksScopeRebuildsPoiAndChargesLivePreservedVillager() throws Exception {
+        rcon.sendCommand("/gamerule doMobSpawning false");
+        loadChunk(16, 0);
+        rcon.sendCommand("/setblock 264 64 8 minecraft:bell");
+        Thread.sleep(500);
+        String snapshot = doBackup();
+
+        rcon.sendCommand("/setblock 264 64 8 minecraft:air");
+        rcon.sendCommand("/summon minecraft:villager 264 64 9 "
+                + "{Tags:[\"poi_blocks_live\"],NoAI:1b,NoGravity:1b,Silent:1b,Invulnerable:1b,PersistenceRequired:1b,"
+                + "Brain:{memories:{\"minecraft:meeting_point\":"
+                + "{value:{dimension:\"minecraft:overworld\",pos:[I;264,64,8]}}}}}");
+        assertTrue(awaitMemory("poi_blocks_live", "meeting_point"));
+
+        String response = rcon.sendCommand(
+                "/foldbackup rollback chunk blocks in minecraft:overworld 16 0 " + snapshot);
+        assertTrue(response.contains("restored"), response);
+        saveAndWait();
+
+        assertTrue(entityExists("poi_blocks_live"), "Live villager must be preserved in blocks mode");
+        assertBlock(264, 64, 8, "minecraft:bell");
+        assertPoi(16, 0, 264, 64, 8, "minecraft:meeting", 31);
+    }
+
+    @Test
+    void entitiesScopeRecomputesExistingPoiTicketsAndReleasesNeighborClaim() throws Exception {
+        rcon.sendCommand("/gamerule doMobSpawning false");
+        loadChunk(20, 0);
+        loadChunk(21, 0);
+
+        // Zone A (chunk [20, 0], X=327..334, Z=1..7): Bell A at 328,64,4.
+        rcon.sendCommand("/fill 327 63 1 334 63 7 minecraft:stone");
+        rcon.sendCommand("/fill 327 64 1 334 67 7 minecraft:air");
+        rcon.sendCommand("/setblock 328 64 4 minecraft:bell");
+        rcon.sendCommand("/summon minecraft:villager 328 64 5 "
+                + "{Tags:[\"poi_entities_old\"],NoAI:1b,NoGravity:1b,Silent:1b,Invulnerable:1b,"
+                + "PersistenceRequired:1b,Brain:{memories:{\"minecraft:meeting_point\":"
+                + "{value:{dimension:\"minecraft:overworld\",pos:[I;328,64,4]}}}}}");
+        assertTrue(awaitMemory("poi_entities_old", "meeting_point"));
+
+        // Room B (sealed room strictly inside chunk [20, 0], X=321..325, Z=1..5): Bell B at 323,64,3.
+        rcon.sendCommand("/fill 321 63 1 325 63 5 minecraft:stone");
+        rcon.sendCommand("/fill 322 64 2 324 66 4 minecraft:air");
+        rcon.sendCommand("/fill 321 64 1 325 67 1 minecraft:stone");
+        rcon.sendCommand("/fill 321 64 5 325 67 5 minecraft:stone");
+        rcon.sendCommand("/fill 321 64 1 321 67 5 minecraft:stone");
+        rcon.sendCommand("/fill 325 64 1 325 67 5 minecraft:stone");
+        rcon.sendCommand("/fill 321 67 1 325 67 5 minecraft:stone");
+        rcon.sendCommand("/setblock 323 64 3 minecraft:bell");
+
+        // Room 2 (sealed corridor spanning [20, 0] -> [21, 0], X=322..346, Z=10..14): Bell C at 344,64,12.
+        rcon.sendCommand("/fill 322 63 10 346 63 14 minecraft:stone");
+        rcon.sendCommand("/fill 322 64 10 346 67 14 minecraft:air");
+        rcon.sendCommand("/fill 322 64 10 346 67 10 minecraft:stone");
+        rcon.sendCommand("/fill 322 64 14 346 67 14 minecraft:stone");
+        rcon.sendCommand("/fill 322 64 10 322 67 14 minecraft:stone");
+        rcon.sendCommand("/fill 346 64 10 346 67 14 minecraft:stone");
+        rcon.sendCommand("/fill 322 67 10 346 67 14 minecraft:stone");
+        rcon.sendCommand("/setblock 344 64 12 minecraft:bell");
+        Thread.sleep(500);
+
+        String snapshot = doBackup();
+
+        // After snapshot: add a new POI block in Zone A, move poi_entities_old's memory to Bell B,
+        // summon a live villager in Room B to genuinely occupy Bell B's ticket, and summon a live
+        // villager in Room 2 (pinned inside chunk [20, 0] at X=326) to occupy Bell C in [21, 0].
+        rcon.sendCommand("/setblock 329 64 6 minecraft:cartography_table");
+        rcon.sendCommand("/data merge entity @e[tag=poi_entities_old,limit=1] "
+                + "{Brain:{memories:{\"minecraft:meeting_point\":"
+                + "{value:{dimension:\"minecraft:overworld\",pos:[I;323,64,3]}}}}}");
+        rcon.sendCommand("/summon minecraft:villager 323 64 4 "
+                + "{Tags:[\"poi_entities_bell_b\"],Silent:1b,Invulnerable:1b,PersistenceRequired:1b}");
+        assertTrue(awaitMemory("poi_entities_bell_b", "meeting_point"));
+        rcon.sendCommand("/data merge entity @e[tag=poi_entities_bell_b,limit=1] {NoAI:1b}");
+
+        rcon.sendCommand("/summon minecraft:villager 326 64 12 "
+                + "{Tags:[\"poi_entities_neighbor\"],Silent:1b,Invulnerable:1b,PersistenceRequired:1b}");
+        assertTrue(awaitMemory("poi_entities_neighbor", "meeting_point"));
+        rcon.sendCommand("/data merge entity @e[tag=poi_entities_neighbor,limit=1] {NoAI:1b}");
+        rcon.sendCommand("/tp @e[tag=poi_entities_neighbor,limit=1] 326 64 12");
+        saveAndWait();
+        assertPoi(20, 0, 323, 64, 3, "minecraft:meeting", 31);
+        assertPoi(21, 0, 344, 64, 12, "minecraft:meeting", 31);
+
+        String response = rcon.sendCommand(
+                "/foldbackup rollback chunk entities in minecraft:overworld 20 0 " + snapshot);
+        assertTrue(response.contains("restored"), response);
+        saveAndWait();
+
+        assertTrue(entityExists("poi_entities_old"));
+        assertFalse(entityExists("poi_entities_bell_b"));
+        assertFalse(entityExists("poi_entities_neighbor"));
+        // Post-snapshot block & its POI record must remain untouched.
+        assertBlock(329, 64, 6, "minecraft:cartography_table");
+        assertPoi(20, 0, 329, 64, 6, "minecraft:cartographer", 1);
+        // Existing bell tickets in [20, 0] are recomputed from the restored villager (Bell A charged, Bell B reset).
+        assertPoi(20, 0, 328, 64, 4, "minecraft:meeting", 31);
+        assertPoi(20, 0, 323, 64, 3, "minecraft:meeting", 32);
+        // Neighbor bell ticket held by the discarded villager is released.
+        assertPoi(21, 0, 344, 64, 12, "minecraft:meeting", 32);
+    }
+
     private void loadChunk(int chunkX, int chunkZ) throws Exception {
         int x = chunkX << 4, z = chunkZ << 4;
         rcon.sendCommand("/forceload add " + x + " " + z + " " + (x + 15) + " " + (z + 15));

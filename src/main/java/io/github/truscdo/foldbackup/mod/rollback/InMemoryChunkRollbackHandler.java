@@ -2,6 +2,7 @@ package io.github.truscdo.foldbackup.mod.rollback;
 
 import io.github.truscdo.foldbackup.core.LogUtil;
 import io.github.truscdo.foldbackup.core.rollback.ChunkRollbackSupport;
+import io.github.truscdo.foldbackup.core.rollback.RollbackScope;
 import io.github.truscdo.foldbackup.core.format.*;
 import io.github.truscdo.foldbackup.core.store.BlobStore;
 import io.github.truscdo.foldbackup.core.store.SnapshotStore;
@@ -30,6 +31,7 @@ import net.minecraft.world.level.chunk.storage.ChunkSerializer;
 
 import javax.annotation.Nullable;
 import java.io.IOException;
+import java.util.Objects;
 
 /**
  * 处理内存中区块回档（方案二），适用于当前已加载、无法通过文件替换方式
@@ -65,12 +67,33 @@ public class InMemoryChunkRollbackHandler {
      */
     public RollbackOutcome rollbackChunk(
             ServerLevel level, int chunkX, int chunkZ, @Nullable Long epochSeconds) {
+        return rollbackChunk(level, chunkX, chunkZ, epochSeconds, RollbackScope.ALL);
+    }
+
+    /**
+     * 通过替换内存数据来回滚单个已加载的区块，并按指定范围应用方块、实体或全部内容。
+     *
+     * @param level        区块所在的维度
+     * @param chunkX       全局区块 X 坐标
+     * @param chunkZ       全局区块 Z 坐标
+     * @param epochSeconds 要恢复的快照 Epoch，或 {@code null} 表示使用最新的
+     * @param scope        回档范围（{@link RollbackScope#ALL}、{@link RollbackScope#BLOCKS} 或 {@link RollbackScope#ENTITIES}）
+     * @return 操作结果
+     */
+    public RollbackOutcome rollbackChunk(
+            ServerLevel level, int chunkX, int chunkZ, @Nullable Long epochSeconds, RollbackScope scope) {
+        Objects.requireNonNull(scope, "scope");
         if (!level.getServer().isSameThread()) return failure("foldbackup.rollback.failure.server_thread");
 
         // ── 步骤 1：确认目标区块已加载（游戏内仅支持加载区块；未加载区块应停服后使用 CLI） ──
         LevelChunk liveChunk = level.getChunkSource().getChunkNow(chunkX, chunkZ);
         if (liveChunk == null) {
             return failure("foldbackup.rollback.failure.chunk_not_loaded", chunkX, chunkZ);
+        }
+
+        ChunkPos chunkPos = new ChunkPos(chunkX, chunkZ);
+        if (scope == RollbackScope.ENTITIES && !level.areEntitiesLoaded(chunkPos.toLong())) {
+            return failure("foldbackup.rollback.failure.entities_not_loaded", chunkX, chunkZ);
         }
 
         // ── 步骤 2-4：解析快照 + 区域条目 + 解析 .lrh 数据块 ──
@@ -82,11 +105,15 @@ public class InMemoryChunkRollbackHandler {
             return failure("foldbackup.rollback.failure.snapshot_read", e);
         }
 
-        // ── 步骤 5：提取目标区块的 NBT ──
+        // ── 步骤 5：确认目标区块在快照中存在 ──
         ChunkData snapshotChunkData = resolved.chunk();
+        String snapshotId = resolved.manifest().getSnapshotId();
         if (snapshotChunkData == null) {
-            return failure("foldbackup.rollback.failure.chunk_empty",
-                    chunkX, chunkZ, resolved.manifest().getSnapshotId());
+            return failure("foldbackup.rollback.failure.chunk_empty", chunkX, chunkZ, snapshotId);
+        }
+
+        if (scope == RollbackScope.ENTITIES) {
+            return rollbackEntitiesOnly(level, chunkPos, resolved.manifest(), snapshotId);
         }
 
         CompoundTag chunkNbt;
@@ -97,49 +124,29 @@ public class InMemoryChunkRollbackHandler {
         }
 
         // 在 ChunkSerializer.read 可能触及 POI 之前，完成全部实体校验。
-        EntityRollbackBridge.Prepared entities;
-        try {
-            var entitySnapshot = ChunkRollbackSupport.recoverEntities(resolved.manifest(), blobStore,
-                    chunkX, chunkZ, DimensionPath.forLevel(level));
-            entities = new EntityRollbackBridge().prepare(level, new ChunkPos(chunkX, chunkZ), entitySnapshot);
-        } catch (Exception e) {
-            entities = EntityRollbackBridge.preserve(level, new ChunkPos(chunkX, chunkZ), e.getMessage());
+        EntityRollbackBridge.Prepared entities = null;
+        if (scope.includesEntities()) {
+            try {
+                var entitySnapshot = ChunkRollbackSupport.recoverEntities(resolved.manifest(), blobStore,
+                        chunkX, chunkZ, DimensionPath.forLevel(level));
+                entities = new EntityRollbackBridge().prepare(level, chunkPos, entitySnapshot);
+            } catch (Exception e) {
+                entities = EntityRollbackBridge.preserve(level, chunkPos, e.getMessage());
+            }
         }
 
-        // ── 步骤 6：反序列化为临时 ChunkAccess ──
-        ChunkAccess sourceChunk;
-        try {
-            var chunkMap = level.getChunkSource().chunkMap;
-            sourceChunk = ChunkSerializer.read(level, level.getPoiManager(), chunkMap.storageInfo(),
-                    new ChunkPos(chunkX, chunkZ), chunkNbt);
-        } catch (Exception e) {
-            return failure("foldbackup.rollback.failure.chunk_deserialize", e);
-        }
-
-        // ── 步骤 7：替换 section ──
-        try {
-            replaceSections(liveChunk, sourceChunk, level);
-        } catch (Exception e) {
-            return failure("foldbackup.rollback.failure.sections", e);
-        }
-
-        // ── 步骤 8：替换方块实体 ──
-        // 注意：我们传入原始 chunkNbt，因为 ImposterProtoChunk 的
-        // getBlockEntitiesPos()/getBlockEntity() 无法正确委派到包装的
-        // ProtoChunk 的 BE 映射——直接从 NBT 读取是获取快照方块实体的
-        // 唯一可靠方式。
-        try {
-            replaceBlockEntities(liveChunk, sourceChunk, level, chunkNbt);
-            // 为所有 BE 注册刻更新和正确的生命周期——批量 BE 替换后的标准做法（见 §3.3）。
-            liveChunk.registerAllBlockEntitiesAfterLevelLoad();
-        } catch (Exception e) {
-            return failure("foldbackup.rollback.failure.block_entities", e);
+        // ── 步骤 6-8：反序列化并应用方块分区与方块实体 ──
+        RollbackOutcome blockFailure = applyBlocks(level, liveChunk, chunkPos, chunkNbt);
+        if (blockFailure != null) {
+            return blockFailure;
         }
 
         // ── 步骤 9：应用实体回档（POI 票据要按回档后的村民记忆计算） ──
         try {
             liveChunk.setUnsaved(true);
-            entities.apply();
+            if (entities != null) {
+                entities.apply();
+            }
         } catch (Exception e) {
             return failure("foldbackup.rollback.failure.entities", e);
         }
@@ -162,15 +169,88 @@ public class InMemoryChunkRollbackHandler {
             return failure("foldbackup.rollback.failure.environment", e);
         }
 
+        if (scope == RollbackScope.BLOCKS) {
+            return new RollbackOutcome(true, "foldbackup.rollback.success_blocks_only",
+                    new Object[] { chunkX, chunkZ, snapshotId });
+        }
+
         EntityRollbackBridge.Summary entitySummary = entities.summary();
         if (entitySummary.allPreserved()) {
             return new RollbackOutcome(true, "foldbackup.rollback.success_entities_preserved",
-                    new Object[] { chunkX, chunkZ, resolved.manifest().getSnapshotId(), entitySummary.removed() });
+                    new Object[] { chunkX, chunkZ, snapshotId, entitySummary.removed() });
         }
         return new RollbackOutcome(true, "foldbackup.rollback.success",
-                new Object[] { chunkX, chunkZ, resolved.manifest().getSnapshotId(),
+                new Object[] { chunkX, chunkZ, snapshotId,
                         entitySummary.restored(), entitySummary.removed(), entitySummary.skippedTrees(),
                         entitySummary.preserved() });
+    }
+
+    private RollbackOutcome rollbackEntitiesOnly(ServerLevel level, ChunkPos chunkPos,
+            io.github.truscdo.foldbackup.core.store.SnapshotManifest manifest, String snapshotId) {
+        EntityRollbackBridge.Prepared entities;
+        try {
+            var entitySnapshot = ChunkRollbackSupport.recoverEntities(manifest, blobStore,
+                    chunkPos.x, chunkPos.z, DimensionPath.forLevel(level));
+            entities = new EntityRollbackBridge().prepare(level, chunkPos, entitySnapshot);
+        } catch (Exception e) {
+            LOG.error("Entity-only rollback preparation failed for chunk [{}, {}] from {}",
+                    chunkPos.x, chunkPos.z, snapshotId, e);
+            return failure("foldbackup.rollback.failure.entities_unrecoverable",
+                    chunkPos.x, chunkPos.z, snapshotId);
+        }
+
+        if (entities.summary().allPreserved()) {
+            LOG.warn("Historical entities unrecoverable for chunk [{}, {}] in snapshot {}",
+                    chunkPos.x, chunkPos.z, snapshotId);
+            return failure("foldbackup.rollback.failure.entities_unrecoverable",
+                    chunkPos.x, chunkPos.z, snapshotId);
+        }
+
+        try {
+            entities.apply();
+        } catch (Exception e) {
+            return failure("foldbackup.rollback.failure.entities", e);
+        }
+
+        try {
+            PoiRollbackSupport.recomputeTickets(level, chunkPos);
+        } catch (Exception e) {
+            return failure("foldbackup.rollback.failure.poi", e);
+        }
+
+        EntityRollbackBridge.Summary summary = entities.summary();
+        return new RollbackOutcome(true, "foldbackup.rollback.success_entities_only",
+                new Object[] { chunkPos.x, chunkPos.z, snapshotId,
+                        summary.restored(), summary.removed(), summary.skippedTrees(), summary.preserved() });
+    }
+
+    @Nullable
+    private RollbackOutcome applyBlocks(ServerLevel level, LevelChunk liveChunk, ChunkPos chunkPos,
+            CompoundTag chunkNbt) {
+        ChunkAccess sourceChunk;
+        try {
+            var chunkMap = level.getChunkSource().chunkMap;
+            sourceChunk = ChunkSerializer.read(level, level.getPoiManager(), chunkMap.storageInfo(),
+                    chunkPos, chunkNbt);
+        } catch (Exception e) {
+            return failure("foldbackup.rollback.failure.chunk_deserialize", e);
+        }
+
+        try {
+            replaceSections(liveChunk, sourceChunk, level);
+        } catch (Exception e) {
+            return failure("foldbackup.rollback.failure.sections", e);
+        }
+
+        // 注意：传入原始 chunkNbt，因为 ImposterProtoChunk 的 getBlockEntitiesPos()/getBlockEntity()
+        // 无法正确委派到包装的 ProtoChunk 的 BE 映射——直接从 NBT 读取是获取快照方块实体的唯一可靠方式。
+        try {
+            replaceBlockEntities(liveChunk, sourceChunk, level, chunkNbt);
+            liveChunk.registerAllBlockEntitiesAfterLevelLoad();
+        } catch (Exception e) {
+            return failure("foldbackup.rollback.failure.block_entities", e);
+        }
+        return null;
     }
 
     // ── section 替换（写时复制） ──

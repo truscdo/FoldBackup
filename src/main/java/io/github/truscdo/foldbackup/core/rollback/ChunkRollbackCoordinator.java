@@ -5,6 +5,7 @@ import io.github.truscdo.foldbackup.core.format.ChunkCoordinates;
 import io.github.truscdo.foldbackup.core.format.ChunkData;
 import io.github.truscdo.foldbackup.core.format.EntityRegionCodec;
 import io.github.truscdo.foldbackup.core.store.BlobStore;
+import io.github.truscdo.foldbackup.core.store.SnapshotManifest;
 import io.github.truscdo.foldbackup.core.store.SnapshotStore;
 
 import java.io.IOException;
@@ -61,6 +62,14 @@ public class ChunkRollbackCoordinator {
     public ChunkRollbackResult rollbackChunk(Path regionDir, int chunkX, int chunkZ,
             Long epochSeconds,
             String dimensionSubPath) throws IOException {
+        return rollbackChunk(regionDir, chunkX, chunkZ, epochSeconds, dimensionSubPath, RollbackScope.ALL);
+    }
+
+    public ChunkRollbackResult rollbackChunk(Path regionDir, int chunkX, int chunkZ,
+            Long epochSeconds,
+            String dimensionSubPath,
+            RollbackScope scope) throws IOException {
+        Objects.requireNonNull(scope, "scope");
         // ── resolve snapshot metadata and stream the requested chunk ──
         ChunkRollbackSupport.ResolvedSnapshot resolved;
         try {
@@ -69,7 +78,7 @@ public class ChunkRollbackCoordinator {
         } catch (IOException e) {
             return new ChunkRollbackResult(false, e.getMessage());
         }
-        return rollbackChunk(regionDir, chunkX, chunkZ, dimensionSubPath, resolved);
+        return rollbackChunk(regionDir, chunkX, chunkZ, dimensionSubPath, resolved, scope);
     }
 
     /**
@@ -87,10 +96,18 @@ public class ChunkRollbackCoordinator {
     public ChunkRollbackResult rollbackChunk(Path regionDir, int chunkX, int chunkZ,
             String dimensionSubPath,
             ChunkRollbackSupport.ResolvedSnapshot resolved) throws IOException {
+        return rollbackChunk(regionDir, chunkX, chunkZ, dimensionSubPath, resolved, RollbackScope.ALL);
+    }
+
+    public ChunkRollbackResult rollbackChunk(Path regionDir, int chunkX, int chunkZ,
+            String dimensionSubPath,
+            ChunkRollbackSupport.ResolvedSnapshot resolved,
+            RollbackScope scope) throws IOException {
         Objects.requireNonNull(regionDir, "regionDir");
         Objects.requireNonNull(dimensionSubPath, "dimensionSubPath");
         Objects.requireNonNull(resolved, "resolved");
         Objects.requireNonNull(resolved.manifest(), "resolved.manifest");
+        Objects.requireNonNull(scope, "scope");
 
         // ── check target chunk exists in the snapshot ──
         if (resolved.chunk() == null) {
@@ -114,96 +131,144 @@ public class ChunkRollbackCoordinator {
         Path entityFile = regionDir.resolveSibling("entities").resolve(regionFile.getFileName());
         Path poiFile = regionDir.resolveSibling("poi").resolve(regionFile.getFileName());
 
-        ChunkData poiChunk;
-        try {
-            poiChunk = ChunkRollbackSupport.resolvePoiChunk(
-                    resolved.manifest(), blobStore, chunkX, chunkZ, dimensionSubPath);
-        } catch (IOException e) {
-            return new ChunkRollbackResult(false, "POI data read failed: " + e.getMessage());
+        ChunkData poiChunk = null;
+        if (scope.includesBlocks()) {
+            try {
+                poiChunk = ChunkRollbackSupport.resolvePoiChunk(
+                        resolved.manifest(), blobStore, chunkX, chunkZ, dimensionSubPath);
+            } catch (IOException e) {
+                return new ChunkRollbackResult(false, "POI data read failed: " + e.getMessage());
+            }
         }
 
         boolean existed = Files.exists(regionFile);
         // 快照没有该列、目标也没有 poi 文件时没有内容可写、也没有记录可清；跳过整个单元，
         // 避免给从未有过 POI 的存档新建目录与空文件。
-        boolean poiStaged = poiChunk != null || Files.exists(poiFile);
+        boolean poiStaged = scope.includesBlocks() && (poiChunk != null || Files.exists(poiFile));
         String entityReport;
         try (var writer = new OfflineRollbackWriter(regionDir)) {
-            // 取得 session.lock 后先做 fail-fast 预检：避免跑完实体全盘扫描（L117）与 staging 后
+            // 取得 session.lock 后先做 fail-fast 预检：避免跑完实体全盘扫描与 staging 后
             // 才在 writer.commit 内发现目标 .mca 被占用；writer 侧仍会统一校验含 .mcc 的 affected 集合。
-            if (!ChunkRollbackSupport.tryLockRegionFile(regionFile)
-                    || !ChunkRollbackSupport.tryLockRegionFile(entityFile)
-                    || !ChunkRollbackSupport.tryLockRegionFile(poiFile))
+            if ((scope.includesBlocks() && (!ChunkRollbackSupport.tryLockRegionFile(regionFile)
+                    || !ChunkRollbackSupport.tryLockRegionFile(poiFile)))
+                    || (scope.includesEntities() && !ChunkRollbackSupport.tryLockRegionFile(entityFile)))
                 return new ChunkRollbackResult(false, "Region, entity, or POI file is locked; stop the server before rollback");
-            McaRegionUpdate currentRegion = new McaRegionUpdate(regionFile, regionX, regionZ,
-                    McaRegionUpdate.mtime(regionFile), gridIndex, resolved.chunk().getRawChunk(),
-                    (int) (System.currentTimeMillis() / 1000L));
+
+            int nowSeconds = (int) (System.currentTimeMillis() / 1000L);
+            McaRegionUpdate currentRegion = scope.includesBlocks()
+                    ? new McaRegionUpdate(regionFile, regionX, regionZ,
+                            McaRegionUpdate.mtime(regionFile), gridIndex, resolved.chunk().getRawChunk(), nowSeconds)
+                    : null;
+
             McaRegionUpdate currentEntities = null;
-            try {
-                var recovery = ChunkRollbackSupport.recoverEntities(resolved.manifest(), blobStore, chunkX, chunkZ, dimensionSubPath);
-                if (recovery.preserveAll()) throw new IOException("Entity identity could not be determined; " + recovery.issues());
-                var snapshot = recovery.snapshot();
-                List<String> issues = new ArrayList<>(recovery.issues());
-                Set<UUID> protectedIds = new HashSet<>(recovery.skippedIds());
-                var scan = writer.scanEntityRegions(snapshot, entityFile, gridIndex, issues);
-                protectedIds.addAll(scan.conflicts());
-                var old = scan.targetChunk() == null ? EntityRegionCodec.empty(chunkX, chunkZ)
-                        : EntityRegionCodec.read(scan.targetChunk(), chunkX, chunkZ);
-                long oldCount = old.entities().stream()
-                        .mapToLong(tree -> EntityRegionCodec.treeUuids(tree).size()).sum();
-                List<EntityRegionCodec.EntityTag> incoming = new ArrayList<>(snapshot.entities());
-                List<EntityRegionCodec.EntityTag> preserved = new ArrayList<>();
-                int skipped = recovery.skippedTrees();
-                boolean changed;
-                do {
-                    changed = false;
-                    for (var tree : old.entities()) {
-                        Set<UUID> ids = EntityRegionCodec.treeUuids(tree);
-                        if (!Collections.disjoint(ids, protectedIds) && !preserved.contains(tree)) {
-                            preserved.add(tree); changed |= protectedIds.addAll(ids);
-                        }
-                    }
-                    for (var it = incoming.iterator(); it.hasNext();) {
-                        var tree = it.next();
-                        Set<UUID> ids = EntityRegionCodec.treeUuids(tree);
-                        if (!Collections.disjoint(ids, protectedIds)) {
-                            changed |= protectedIds.addAll(ids); it.remove(); skipped++;
-                            issues.add("Skipped entity tree " + ids);
-                        }
-                    }
-                } while (changed);
-                long restored = incoming.stream().mapToLong(t -> EntityRegionCodec.treeUuids(t).size()).sum();
-                long preservedCount = preserved.stream()
-                        .mapToLong(tree -> EntityRegionCodec.treeUuids(tree).size()).sum();
-                long removed = oldCount - preservedCount;
-                incoming.addAll(preserved);
-                var merged = EntityRegionCodec.withEntities(snapshot, incoming);
-                currentEntities = new McaRegionUpdate(entityFile, regionX, regionZ,
-                        McaRegionUpdate.mtime(entityFile), gridIndex,
-                        merged.isEmpty() ? null : merged.nbt(), (int) (System.currentTimeMillis() / 1000L));
-                entityReport = "entities restored=" + restored + ", removed=" + removed + ", skipped trees=" + skipped
-                        + ", preserved=" + preservedCount;
-                if (!issues.isEmpty()) entityReport += "; " + String.join("; ", issues);
-            } catch (IOException | java.io.UncheckedIOException e) {
-                entityReport = "entities restored=0, removed=0, skipped=all (count unknown), current entity files preserved: " + e.getMessage();
+            if (scope.includesEntities()) {
+                EntityPlan entityPlan = prepareEntityUpdate(writer, resolved.manifest(),
+                        chunkX, chunkZ, dimensionSubPath, entityFile, regionX, regionZ, gridIndex, nowSeconds, scope);
+                if (entityPlan.failed()) {
+                    LogUtil.getLogger("foldbackup-entities").warn("Chunk [{}, {}]: {}",
+                            chunkX, chunkZ, entityPlan.failureMessage());
+                    return new ChunkRollbackResult(false, entityPlan.failureMessage());
+                }
+                currentEntities = entityPlan.update();
+                entityReport = entityPlan.report();
+                LogUtil.getLogger("foldbackup-entities").info("Chunk [{}, {}]: {}", chunkX, chunkZ, entityReport);
+            } else {
+                entityReport = "entities skipped (current entities preserved)";
             }
-            LogUtil.getLogger("foldbackup-entities").info("Chunk [{}, {}]: {}", chunkX, chunkZ, entityReport);
+
             McaRegionUpdate currentPoi = poiStaged
                     ? new McaRegionUpdate(poiFile, regionX, regionZ,
                             McaRegionUpdate.mtime(poiFile), gridIndex,
                             poiChunk == null ? null : poiChunk.getRawChunk(),
-                            (int) (System.currentTimeMillis() / 1000L))
+                            nowSeconds)
                     : null;
             writer.write(currentRegion, currentEntities, currentPoi, compressionLevel);
         } catch (IOException e) {
             return new ChunkRollbackResult(false, e.getMessage());
         }
 
-        String detail = "Chunk [" + chunkX + ", " + chunkZ
-                + "] restored from " + resolved.manifest().getSnapshotId()
+        String detail = formatDetail(scope, chunkX, chunkZ, resolved.manifest().getSnapshotId(),
+                regionX, regionZ, existed, entityReport, poiChunk, poiStaged);
+        return new ChunkRollbackResult(true, detail);
+    }
+
+    private record EntityPlan(McaRegionUpdate update, String report, boolean failed, String failureMessage) {}
+
+    private EntityPlan prepareEntityUpdate(OfflineRollbackWriter writer, SnapshotManifest manifest,
+            int chunkX, int chunkZ, String dimensionSubPath, Path entityFile,
+            int regionX, int regionZ, int gridIndex, int nowSeconds, RollbackScope scope) {
+        try {
+            var recovery = ChunkRollbackSupport.recoverEntities(manifest, blobStore, chunkX, chunkZ, dimensionSubPath);
+            if (recovery.preserveAll()) throw new IOException("Entity identity could not be determined; " + recovery.issues());
+            var snapshot = recovery.snapshot();
+            List<String> issues = new ArrayList<>(recovery.issues());
+            Set<UUID> protectedIds = new HashSet<>(recovery.skippedIds());
+            var scan = writer.scanEntityRegions(snapshot, entityFile, gridIndex, issues);
+            protectedIds.addAll(scan.conflicts());
+            var old = scan.targetChunk() == null ? EntityRegionCodec.empty(chunkX, chunkZ)
+                    : EntityRegionCodec.read(scan.targetChunk(), chunkX, chunkZ);
+            long oldCount = old.entities().stream()
+                    .mapToLong(tree -> EntityRegionCodec.treeUuids(tree).size()).sum();
+            List<EntityRegionCodec.EntityTag> incoming = new ArrayList<>(snapshot.entities());
+            List<EntityRegionCodec.EntityTag> preserved = new ArrayList<>();
+            int skipped = recovery.skippedTrees();
+            boolean changed;
+            do {
+                changed = false;
+                for (var tree : old.entities()) {
+                    Set<UUID> ids = EntityRegionCodec.treeUuids(tree);
+                    if (!Collections.disjoint(ids, protectedIds) && !preserved.contains(tree)) {
+                        preserved.add(tree); changed |= protectedIds.addAll(ids);
+                    }
+                }
+                for (var it = incoming.iterator(); it.hasNext();) {
+                    var tree = it.next();
+                    Set<UUID> ids = EntityRegionCodec.treeUuids(tree);
+                    if (!Collections.disjoint(ids, protectedIds)) {
+                        changed |= protectedIds.addAll(ids); it.remove(); skipped++;
+                        issues.add("Skipped entity tree " + ids);
+                    }
+                }
+            } while (changed);
+            long restored = incoming.stream().mapToLong(t -> EntityRegionCodec.treeUuids(t).size()).sum();
+            long preservedCount = preserved.stream()
+                    .mapToLong(tree -> EntityRegionCodec.treeUuids(tree).size()).sum();
+            long removed = oldCount - preservedCount;
+            incoming.addAll(preserved);
+            var merged = EntityRegionCodec.withEntities(snapshot, incoming);
+            McaRegionUpdate update = (scope == RollbackScope.ENTITIES && merged.isEmpty() && !Files.exists(entityFile))
+                    ? null
+                    : new McaRegionUpdate(entityFile, regionX, regionZ,
+                            McaRegionUpdate.mtime(entityFile), gridIndex,
+                            merged.isEmpty() ? null : merged.nbt(), nowSeconds);
+            String report = "entities restored=" + restored + ", removed=" + removed + ", skipped trees=" + skipped
+                    + ", preserved=" + preservedCount;
+            if (!issues.isEmpty()) report += "; " + String.join("; ", issues);
+            return new EntityPlan(update, report, false, null);
+        } catch (IOException | java.io.UncheckedIOException e) {
+            String reason = ChunkRollbackSupport.describeError(e);
+            if (scope == RollbackScope.ENTITIES) {
+                return new EntityPlan(null, "", true, "Entity rollback failed: " + reason);
+            }
+            String report = "entities restored=0, removed=0, skipped=all (count unknown), current entity files preserved: " + reason;
+            return new EntityPlan(null, report, false, null);
+        }
+    }
+
+    private static String formatDetail(RollbackScope scope, int chunkX, int chunkZ, String snapshotId,
+            int regionX, int regionZ, boolean existed, String entityReport, ChunkData poiChunk, boolean poiStaged) {
+        if (scope == RollbackScope.ENTITIES) {
+            return "Chunk [" + chunkX + ", " + chunkZ
+                    + "] entities restored from " + snapshotId
+                    + " (entities/r." + regionX + "." + regionZ + ".mca); " + entityReport
+                    + "; blocks and POI untouched";
+        }
+        String targetPrefix = scope == RollbackScope.BLOCKS ? "] blocks restored from " : "] restored from ";
+        return "Chunk [" + chunkX + ", " + chunkZ
+                + targetPrefix + snapshotId
                 + " (r." + regionX + "." + regionZ + ".mca)"
                 + (existed ? "" : ", region file was created") + "; " + entityReport
                 + "; POI " + (poiChunk != null ? "column restored"
                         : poiStaged ? "column cleared" : "column absent in snapshot and target");
-        return new ChunkRollbackResult(true, detail);
     }
 }

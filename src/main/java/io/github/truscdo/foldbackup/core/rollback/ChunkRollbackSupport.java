@@ -8,6 +8,7 @@ import io.github.truscdo.foldbackup.core.store.SnapshotManifest;
 import io.github.truscdo.foldbackup.core.store.SnapshotStore;
 import io.github.truscdo.foldbackup.core.format.LrhFormat;
 import io.github.truscdo.foldbackup.core.format.ChunkData;
+import io.github.truscdo.foldbackup.core.format.McaStream;
 import io.github.truscdo.foldbackup.core.format.RegionStream;
 import java.io.ByteArrayOutputStream;
 import io.github.truscdo.foldbackup.core.format.EntityRegionCodec;
@@ -33,6 +34,88 @@ public class ChunkRollbackSupport {
 
     public record ResolvedEntitySnapshot(EntitySnapshotState state,
             EntityRegionCodec.EntityChunkSnapshot snapshot) {}
+
+    public record EntityCountPreview(
+            @Nullable Long snapshotCount,
+            int snapshotSkippedTrees,
+            @Nullable EntitySnapshotState snapshotState,
+            boolean snapshotUnrecoverable,
+            @Nullable String snapshotError,
+            @Nullable Long currentCount,
+            @Nullable String currentError) {}
+
+    /**
+     * Reads recoverable non-player entity counts for the target chunk from the snapshot
+     * and the local dimension's {@code entities/} region file without scanning other files.
+     */
+    public static EntityCountPreview previewEntities(SnapshotManifest manifest, BlobStore blobs,
+            Path dimensionDir, int chunkX, int chunkZ, String dimensionSubPath) {
+        int regionX = ChunkCoordinates.chunkToRegion(chunkX);
+        int regionZ = ChunkCoordinates.chunkToRegion(chunkZ);
+        Long snapshotCount = null;
+        int snapshotSkippedTrees = 0;
+        EntitySnapshotState snapshotState = null;
+        boolean snapshotUnrecoverable = false;
+        String snapshotError = null;
+        try {
+            ColumnData column = readColumn(manifest, blobs,
+                    entityRegionFilename(dimensionSubPath, regionX, regionZ), chunkX, chunkZ);
+            if (!column.regionPresent()) {
+                snapshotState = EntitySnapshotState.REGION_MISSING;
+                snapshotCount = 0L;
+            } else if (column.chunk() == null) {
+                snapshotState = EntitySnapshotState.CHUNK_MISSING;
+                snapshotCount = 0L;
+            } else {
+                snapshotState = EntitySnapshotState.PRESENT;
+                EntityRegionCodec.Recovery recovery = EntityRegionCodec.recover(
+                        column.chunk().getRawChunk(), chunkX, chunkZ);
+                if (recovery.preserveAll()) {
+                    snapshotUnrecoverable = true;
+                    snapshotError = "Entity identity could not be determined; " + recovery.issues();
+                } else {
+                    snapshotSkippedTrees = recovery.skippedTrees();
+                    snapshotCount = recovery.snapshot().entities().stream()
+                            .mapToLong(tree -> EntityRegionCodec.treeUuids(tree).size())
+                            .sum();
+                }
+            }
+        } catch (IOException | RuntimeException e) {
+            snapshotUnrecoverable = true;
+            snapshotError = describeError(e);
+        }
+
+        Long currentCount = null;
+        String currentError = null;
+        Path entityFile = dimensionDir.toAbsolutePath().normalize()
+                .resolve("entities")
+                .resolve("r." + regionX + "." + regionZ + ".mca");
+        try {
+            if (!Files.exists(entityFile) || Files.size(entityFile) == 0) {
+                currentCount = 0L;
+            } else {
+                byte[] raw = McaStream.readSlot(entityFile, ChunkCoordinates.slotIndex(chunkX, chunkZ));
+                if (raw == null) {
+                    currentCount = 0L;
+                } else {
+                    var current = EntityRegionCodec.read(raw, chunkX, chunkZ);
+                    currentCount = current.entities().stream()
+                            .mapToLong(tree -> EntityRegionCodec.treeUuids(tree).size())
+                            .sum();
+                }
+            }
+        } catch (IOException | RuntimeException e) {
+            currentError = describeError(e);
+        }
+
+        return new EntityCountPreview(snapshotCount, snapshotSkippedTrees, snapshotState,
+                snapshotUnrecoverable, snapshotError, currentCount, currentError);
+    }
+
+    static String describeError(Throwable e) {
+        String message = e.getMessage();
+        return (message == null || message.isBlank()) ? e.getClass().getSimpleName() : message;
+    }
 
     public static String entityRegionFilename(String dimensionSubPath, int regionX, int regionZ) {
         return dimensionSubPath + "entities/r." + regionX + "." + regionZ + ".mca";

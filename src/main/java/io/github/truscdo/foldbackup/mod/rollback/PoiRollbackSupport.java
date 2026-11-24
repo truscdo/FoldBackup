@@ -62,6 +62,41 @@ final class PoiRollbackSupport {
                 chunkPos.x, chunkPos.z, removed, added, holders.size(), occupied);
     }
 
+    /**
+     * Recomputes ticket occupancy on the target chunk's existing POI records without
+     * rebuilding records from block states. Used when rolling back entities only.
+     */
+    static void recomputeTickets(ServerLevel level, ChunkPos chunkPos) {
+        PoiManager poiManager = level.getPoiManager();
+        List<PoiRecord> records = poiManager
+                .getInChunk(type -> true, chunkPos, PoiManager.Occupancy.ANY)
+                .toList();
+        if (records.isEmpty()) {
+            LOG.info("Chunk [{}, {}]: POI tickets recomputed (records=0, holderPositions=0, tickets=0)",
+                    chunkPos.x, chunkPos.z);
+            return;
+        }
+        for (PoiRecord record : records) {
+            if (!record.isOccupied()) continue;
+            BlockPos pos = record.getPos();
+            while (poiManager.release(pos)) {
+                // Release occupied tickets in-place without deleting the POI record.
+            }
+            if (record.isOccupied()) {
+                // Fallback for corrupted records whose free_tickets exceeded maxTickets.
+                Holder<PoiType> type = record.getPoiType();
+                poiManager.remove(pos);
+                poiManager.add(pos, type);
+            }
+        }
+
+        Map<BlockPos, Integer> holders = countHolders(level, chunkPos, poiManager);
+        int occupied = takeTickets(poiManager, chunkPos, holders);
+
+        LOG.info("Chunk [{}, {}]: POI tickets recomputed (records={}, holderPositions={}, tickets={})",
+                chunkPos.x, chunkPos.z, records.size(), holders.size(), occupied);
+    }
+
     private static int removeExistingRecords(PoiManager poiManager, ChunkPos chunkPos) {
         List<BlockPos> positions = poiManager
                 .getInChunk(type -> true, chunkPos, PoiManager.Occupancy.ANY)

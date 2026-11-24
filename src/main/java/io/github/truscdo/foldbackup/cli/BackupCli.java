@@ -12,6 +12,7 @@ import io.github.truscdo.foldbackup.core.export.SnapshotZipExport;
 import io.github.truscdo.foldbackup.core.format.ChunkCoordinates;
 import io.github.truscdo.foldbackup.core.rollback.ChunkRollbackCoordinator;
 import io.github.truscdo.foldbackup.core.rollback.ChunkRollbackSupport;
+import io.github.truscdo.foldbackup.core.rollback.RollbackScope;
 import io.github.truscdo.foldbackup.core.restore.SnapshotRestoreSource;
 import io.github.truscdo.foldbackup.core.store.BlobMaintenance;
 import io.github.truscdo.foldbackup.core.store.BlobStore;
@@ -291,14 +292,16 @@ public class BackupCli {
 
     private static void runRollback(Invocation invocation, List<String> args) throws IOException {
         if (args.size() < 3) throw new IOException(
-                "Usage: snapshot rollback <snapshot-id> --world <dir> --chunk <x> <z> [--yes]");
+                "Usage: snapshot rollback <snapshot-id> --world <dir> --chunk <x> <z> [--scope <all|blocks|entities>] [--yes]");
         String snapshotId = args.get(2);
         Path world = null;
         Integer chunkX = null;
         Integer chunkZ = null;
+        RollbackScope scope = RollbackScope.ALL;
         boolean yes = false;
         boolean worldSeen = false;
         boolean chunkSeen = false;
+        boolean scopeSeen = false;
         for (int i = 3; i < args.size(); i++) {
             switch (args.get(i)) {
                 case "--world" -> {
@@ -311,6 +314,11 @@ public class BackupCli {
                     chunkX = parseCoordinate(CliArgs.requireValue(args, ++i, "--chunk"));
                     chunkZ = parseCoordinate(CliArgs.requireValue(args, ++i, "--chunk"));
                     chunkSeen = true;
+                }
+                case "--scope" -> {
+                    if (scopeSeen) throw new IOException("Duplicate --scope");
+                    scope = RollbackScope.parse(CliArgs.requireValue(args, ++i, "--scope"));
+                    scopeSeen = true;
                 }
                 case "--yes" -> {
                     if (yes) throw new IOException("Duplicate --yes");
@@ -331,26 +339,73 @@ public class BackupCli {
                 snapshots, blobs, chunkX, chunkZ, epoch, dimension);
         if (requestedChunk.chunk() == null)
             throw new IOException("Requested chunk is empty in snapshot " + snapshotId);
+
+        ChunkRollbackSupport.EntityCountPreview entityPreview = null;
+        if (scope.includesEntities()) {
+            entityPreview = ChunkRollbackSupport.previewEntities(
+                    requestedChunk.manifest(), blobs, world, chunkX, chunkZ, dimension);
+            if (scope == RollbackScope.ENTITIES && entityPreview.snapshotUnrecoverable()) {
+                throw new IOException("Historical entities cannot be recovered for chunk ["
+                        + chunkX + ", " + chunkZ + "]: " + entityPreview.snapshotError());
+            }
+        }
+
         System.out.println("Rollback target:");
         System.out.println("  Snapshot:  " + snapshotId);
         System.out.println("  Dimension: " + (dimension.isEmpty() ? "overworld" : dimension));
         System.out.println("  Chunk:     [" + chunkX + ", " + chunkZ + "]");
         System.out.println("  Region:    r." + ChunkCoordinates.chunkToRegion(chunkX)
                 + "." + ChunkCoordinates.chunkToRegion(chunkZ) + ".mca");
-        System.out.println("  Scope:     terrain, block entities, entity data, and this chunk's POI column");
-        System.out.println("  Excludes:  player data and world-level configuration");
+        printRollbackScopeSummary(scope, entityPreview);
         if (!confirm("Apply this chunk rollback?", yes)) {
             System.out.println("Rollback cancelled.");
             return;
         }
 
         Path regionDir = world.resolve("region");
-        if (!Files.isDirectory(regionDir)) throw new IOException("Region directory not found: " + regionDir);
+        if (scope.includesBlocks() && !Files.isDirectory(regionDir))
+            throw new IOException("Region directory not found: " + regionDir);
 
         var coordinator = new ChunkRollbackCoordinator(snapshots, blobs, ArchiveDefaults.EXPORT_LEVEL);
-        var result = coordinator.rollbackChunk(regionDir, chunkX, chunkZ, dimension, requestedChunk);
+        var result = coordinator.rollbackChunk(regionDir, chunkX, chunkZ, dimension, requestedChunk, scope);
         if (!result.success()) throw new IOException(result.message());
         System.out.println("Rollback complete: " + result.message());
+    }
+
+    private static void printRollbackScopeSummary(
+            RollbackScope scope, ChunkRollbackSupport.EntityCountPreview entityPreview) {
+        switch (scope) {
+            case ALL -> {
+                System.out.println("  Scope:     terrain, block entities, entity data, and this chunk's POI column");
+                System.out.println("  Excludes:  player data and world-level configuration");
+            }
+            case BLOCKS -> {
+                System.out.println("  Scope:     terrain, block entities, and this chunk's POI column");
+                System.out.println("  Excludes:  entities, player data, and world-level configuration");
+            }
+            case ENTITIES -> {
+                System.out.println("  Scope:     entity data only");
+                System.out.println("  Excludes:  terrain, block entities, POI, player data, and world-level configuration");
+            }
+        }
+        if (entityPreview != null) {
+            String snapshotText;
+            if (entityPreview.snapshotUnrecoverable()) {
+                snapshotText = "unrecoverable (" + entityPreview.snapshotError()
+                        + "; current entities will be preserved)";
+            } else if (entityPreview.snapshotState() != ChunkRollbackSupport.EntitySnapshotState.PRESENT) {
+                snapshotText = "0 in snapshot (missing entity column treated as empty)";
+            } else {
+                snapshotText = entityPreview.snapshotCount() + " in snapshot"
+                        + (entityPreview.snapshotSkippedTrees() > 0
+                                ? " (" + entityPreview.snapshotSkippedTrees() + " skipped)"
+                                : "");
+            }
+            String currentText = entityPreview.currentError() != null
+                    ? "current count unreadable (" + entityPreview.currentError() + ")"
+                    : entityPreview.currentCount() + " currently in chunk";
+            System.out.println("  Entities:  " + snapshotText + "; " + currentText);
+        }
     }
 
     private static void runVerify(Path archiveRoot, List<String> args) throws IOException {

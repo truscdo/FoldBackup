@@ -319,4 +319,125 @@ class EntityRollbackStorageTest {
         assertEquals(ChunkRollbackSupport.EntitySnapshotState.CHUNK_MISSING,
                 ChunkRollbackSupport.resolveEntities(second, blobs, 0, 0, "").state());
     }
+
+    @Test void blocksScopePreservesEntitiesAndSkipsEntityConflictScan() throws Exception {
+        Path world = temp.resolve("world-blocks");
+        Path blocks = world.resolve("region/r.0.0.mca");
+        Path entities = world.resolve("entities/r.0.0.mca");
+        Path poi = world.resolve("poi/r.0.0.mca");
+        UUID id = UUID.randomUUID();
+        write(blocks, new byte[]{1}, new byte[]{10});
+        write(entities, chunk(0, 0, entity(id, 8, 8)), null);
+        write(poi, new byte[]{5}, null);
+        var snapshot = backup(world);
+
+        // 修改目标方块与 POI，同时在邻居实体槽位写入损坏数据，验证 blocks 模式完全不触及且不扫描实体文件
+        write(blocks, new byte[]{2}, new byte[]{10});
+        write(poi, new byte[]{9}, null);
+        write(entities, chunk(0, 0, entity(UUID.randomUUID(), 8, 8)), new byte[0]);
+        byte[] entitiesBefore = Files.readAllBytes(entities);
+
+        var result = new ChunkRollbackCoordinator(snapshots, blobs, 6)
+                .rollbackChunk(blocks.getParent(), 0, 0, snapshot.getEpochSeconds(), "", RollbackScope.BLOCKS);
+        assertTrue(result.success(), result.message());
+        assertTrue(result.message().contains("blocks restored from"), result.message());
+        assertTrue(result.message().contains("entities skipped"), result.message());
+        assertArrayEquals(new byte[]{1}, read(blocks, 0));
+        assertArrayEquals(new byte[]{10}, read(blocks, 1));
+        assertArrayEquals(new byte[]{5}, read(poi, 0));
+        assertArrayEquals(entitiesBefore, Files.readAllBytes(entities));
+    }
+
+    @Test void entitiesScopeRestoresEntitiesOnlyAndFailsWhenUnrecoverable() throws Exception {
+        Path world = temp.resolve("world-entities");
+        Path blocks = world.resolve("region/r.0.0.mca");
+        Path entities = world.resolve("entities/r.0.0.mca");
+        Path poi = world.resolve("poi/r.0.0.mca");
+        byte[] oldEntity = chunk(0, 0, entity(UUID.randomUUID(), 8, 8));
+        write(blocks, new byte[]{1}, null);
+        write(entities, oldEntity, null);
+        write(poi, new byte[]{5}, null);
+        var validSnapshot = backup(world);
+
+        // 修改方块、实体、POI 与邻居实体
+        byte[] neighborEntity = chunk(1, 0, entity(UUID.randomUUID(), 24, 8));
+        write(blocks, new byte[]{2}, new byte[]{3});
+        write(entities, chunk(0, 0), neighborEntity);
+        write(poi, new byte[]{9}, null);
+        byte[] blocksBefore = Files.readAllBytes(blocks);
+        byte[] poiBefore = Files.readAllBytes(poi);
+
+        var coordinator = new ChunkRollbackCoordinator(snapshots, blobs, 6);
+        var ok = coordinator.rollbackChunk(blocks.getParent(), 0, 0,
+                validSnapshot.getEpochSeconds(), "", RollbackScope.ENTITIES);
+        assertTrue(ok.success(), ok.message());
+        assertTrue(ok.message().contains("entities restored from"), ok.message());
+        assertTrue(ok.message().contains("blocks and POI untouched"), ok.message());
+        assertArrayEquals(oldEntity, read(entities, 0));
+        assertArrayEquals(neighborEntity, read(entities, 1));
+        assertArrayEquals(blocksBefore, Files.readAllBytes(blocks));
+        assertArrayEquals(poiBefore, Files.readAllBytes(poi));
+
+        // 快照实体损坏时，ENTITIES 模式必须直接失败且不改动任何文件
+        write(entities, new byte[]{10, 0}, null);
+        var malformedSnapshot = backup(world);
+        write(entities, chunk(0, 0), neighborEntity);
+        byte[] entitiesBeforeFailure = Files.readAllBytes(entities);
+
+        var failed = coordinator.rollbackChunk(blocks.getParent(), 0, 0,
+                malformedSnapshot.getEpochSeconds(), "", RollbackScope.ENTITIES);
+        assertFalse(failed.success(), failed.message());
+        assertArrayEquals(entitiesBeforeFailure, Files.readAllBytes(entities));
+        assertArrayEquals(blocksBefore, Files.readAllBytes(blocks));
+        assertArrayEquals(poiBefore, Files.readAllBytes(poi));
+
+        // 快照无实体且本地无 entities/ 文件时，ENTITIES 模式不应新建空的 entities 文件
+        Path cleanWorld = temp.resolve("world-no-entities");
+        Path cleanBlocks = cleanWorld.resolve("region/r.0.0.mca");
+        write(cleanBlocks, new byte[]{1}, null);
+        var emptyEntitySnapshot = backup(cleanWorld);
+        var noOp = new ChunkRollbackCoordinator(snapshots, blobs, 6)
+                .rollbackChunk(cleanBlocks.getParent(), 0, 0,
+                        emptyEntitySnapshot.getEpochSeconds(), "", RollbackScope.ENTITIES);
+        assertTrue(noOp.success(), noOp.message());
+        assertFalse(Files.exists(cleanWorld.resolve("entities/r.0.0.mca")));
+    }
+
+    @Test void entityOnlyWriteRecoversOnFailureAndEmptyWriteIsNoOp() throws Exception {
+        Path world = temp.resolve("world-writer-entities");
+        Path regionDir = world.resolve("region");
+        Path entities = world.resolve("entities/r.0.0.mca");
+        Files.createDirectories(regionDir);
+        write(entities, chunk(0, 0), null);
+        byte[] oldEntities = Files.readAllBytes(entities);
+
+        // 空更新不得创建 .wip 目录
+        try (var writer = new OfflineRollbackWriter(regionDir)) {
+            writer.write(null, null, null, 6);
+        }
+        try (var pending = Files.newDirectoryStream(world, ".foldbackup-rollback-*.wip")) {
+            assertFalse(pending.iterator().hasNext());
+        }
+
+        // 即使本次没有任何写入，存在未清理的 .wip 残留目录时也必须拒绝继续
+        Path leftover = Files.createDirectory(world.resolve(".foldbackup-rollback-leftover.wip"));
+        try (var writer = new OfflineRollbackWriter(regionDir)) {
+            var blocked = assertThrows(java.io.IOException.class,
+                    () -> writer.write(null, null, null, 6));
+            assertTrue(blocked.getMessage().contains("Previous rollback files require inspection"),
+                    blocked.getMessage());
+        }
+        Files.delete(leftover);
+
+        // blocks == null 时正常替换实体并在失败时回滚
+        var nextEntities = new McaRegionUpdate(entities, 0, 0, 1000, 0, chunk(0, 0, entity(UUID.randomUUID(), 8, 8)), 0);
+        try (var writer = new OfflineRollbackWriter(regionDir, (source, target) -> {
+            throw new java.io.IOException("injected entity-only failure");
+        })) {
+            var failure = assertThrows(java.io.IOException.class,
+                    () -> writer.write(null, nextEntities, null, 6));
+            assertTrue(failure.getMessage().contains("previous files restored"));
+        }
+        assertArrayEquals(oldEntities, Files.readAllBytes(entities));
+    }
 }
