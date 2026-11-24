@@ -25,6 +25,8 @@ import net.neoforged.neoforge.common.NeoForge;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Collection;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -65,6 +67,11 @@ public class FoldBackupMod {
         gameBus.register(new TickHandler(this));
         gameBus.register(new CommandRegistrationHandler(this));
         gameBus.register(previewManager);
+    }
+
+    /** 仅用于单元测试子类，跳过事件总线与配置注册。 */
+    protected FoldBackupMod(FoldBackupConfig config) {
+        this.config = config;
     }
 
     // --- 基路径 ---
@@ -185,17 +192,25 @@ public class FoldBackupMod {
     }
 
     /**
-     * 在备份执行器线程上异步删除快照。
-     * 进度通过 {@link TaskRegistry} 追踪。
+     * 在备份执行器线程上异步删除单个快照；委托给 {@link #deleteSnapshotsAsync(Collection)}。
      *
      * @return 删除和 GC 完成时返回的 future，携带本次 GC 结果
      */
     public CompletableFuture<BlobMaintenance.GcResult> deleteSnapshotAsync(long epochSeconds) {
+        return deleteSnapshotsAsync(List.of(epochSeconds));
+    }
+
+    /**
+     * 在备份执行器线程上批量异步删除快照；进度通过 {@link TaskRegistry} 追踪。
+     *
+     * @return 删除和 GC 完成时返回的 future，携带本次 GC 结果
+     */
+    public CompletableFuture<BlobMaintenance.GcResult> deleteSnapshotsAsync(Collection<Long> epochSeconds) {
         WorldRuntime current = runtime;
         if (current == null) {
             return CompletableFuture.failedFuture(new IllegalStateException("Backend not initialized"));
         }
-        return current.deleteSnapshotAsync(epochSeconds);
+        return current.deleteSnapshotsAsync(epochSeconds);
     }
 
     /**
@@ -215,6 +230,11 @@ public class FoldBackupMod {
 
     public MinecraftServer getServer() {
         return server;
+    }
+
+    /** 在服务器主线程上调度任务（测试子类可覆写以同步执行）。 */
+    public void executeOnServer(Runnable task) {
+        server.execute(task);
     }
 
     public PreviewManager getPreviewManager() {

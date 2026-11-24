@@ -7,6 +7,7 @@ import io.github.truscdo.foldbackup.core.cleanup.SnapshotCleanupPlanner;
 import io.github.truscdo.foldbackup.core.cleanup.WriteSpaceBudget;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.time.ZoneId;
@@ -550,5 +551,15 @@ public class SnapshotStore {
     /** 返回当前已提交的只读稳定索引；长期使用者应在每次查询时重新获取。 */
     public MetadataIndex getIndex() {
         return metadataIndex;
+    }
+
+    /** 返回 {@code index.db} 的单文件字节大小（不扫描 {@code blobs/}）；文件不存在或读取异常时计 0。 */
+    public long indexFileSizeBytes() {
+        Path indexFile = backupRoot.resolve(RepositoryLayout.INDEX_FILE);
+        try {
+            return Files.exists(indexFile) ? Files.size(indexFile) : 0L;
+        } catch (IOException e) {
+            return 0L;
+        }
     }
 }

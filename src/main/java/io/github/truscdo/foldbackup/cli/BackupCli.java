@@ -1,6 +1,7 @@
 package io.github.truscdo.foldbackup.cli;
 
 import io.github.truscdo.foldbackup.core.BackupExporter;
+import io.github.truscdo.foldbackup.core.FormatUtil;
 import io.github.truscdo.foldbackup.core.LogUtil;
 import io.github.truscdo.foldbackup.core.console.ArchiveVerifyReporter;
 import io.github.truscdo.foldbackup.core.console.ProgressPrinter;
@@ -15,6 +16,7 @@ import io.github.truscdo.foldbackup.core.restore.SnapshotRestoreSource;
 import io.github.truscdo.foldbackup.core.store.BlobMaintenance;
 import io.github.truscdo.foldbackup.core.store.BlobStore;
 import io.github.truscdo.foldbackup.core.store.SnapshotManifest;
+import io.github.truscdo.foldbackup.core.store.SnapshotReclamationEstimator;
 import io.github.truscdo.foldbackup.core.store.SnapshotStore;
 import io.github.truscdo.foldbackup.tui.BackupTui;
 
@@ -22,7 +24,9 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 /** Offline command-line entry point for snapshot and archive management. */
 public class BackupCli {
@@ -193,26 +197,74 @@ public class BackupCli {
     }
 
     private static void runDelete(Invocation invocation, List<String> args) throws IOException {
-        if (args.size() < 3) throw new IOException("Usage: snapshot delete <snapshot-id> [--yes]");
-        String snapshotId = args.get(2);
+        boolean dryRun = false;
         boolean yes = false;
-        for (int i = 3; i < args.size(); i++) {
-            if ("--yes".equals(args.get(i)) && !yes) yes = true;
-            else throw new IOException("Unknown or duplicate snapshot delete option: " + args.get(i));
+        Set<String> idSet = new LinkedHashSet<>();
+        for (int i = 2; i < args.size(); i++) {
+            String arg = args.get(i);
+            if ("--dry-run".equals(arg)) {
+                if (dryRun) throw new IOException("Duplicate --dry-run");
+                dryRun = true;
+            } else if ("--yes".equals(arg)) {
+                if (yes) throw new IOException("Duplicate --yes");
+                yes = true;
+            } else if (arg.startsWith("--")) {
+                throw new IOException("Unknown snapshot delete option: " + arg);
+            } else {
+                idSet.add(arg);
+            }
         }
+        if (idSet.isEmpty()) {
+            throw new IOException("Usage: snapshot delete <snapshot-id>... [--dry-run] [--yes]");
+        }
+
         SnapshotStore snapshots = snapshotStore(invocation.snapshotRoot());
-        SnapshotManifest snapshot = snapshots.requireSnapshot(snapshotId);
-        long epoch = snapshot.getEpochSeconds();
-        System.out.println("Snapshot to delete: " + snapshotId);
-        System.out.println("  Regions: " + (snapshot.getRegions() == null ? 0 : snapshot.getRegions().size()));
-        System.out.println("  Files:   " + (snapshot.getExtraFiles() == null ? 0 : snapshot.getExtraFiles().size()));
-        System.out.println("  Effect:  remove snapshot metadata and reclaim blobs no longer referenced by any snapshot");
-        if (!confirm("Delete this snapshot?", yes)) {
+        List<String> ids = new ArrayList<>(idSet);
+        List<Long> epochs = new ArrayList<>(ids.size());
+        for (String snapshotId : ids) {
+            SnapshotManifest snapshot = snapshots.requireSnapshot(snapshotId);
+            if (snapshot.isPinned()) {
+                throw new SnapshotStore.SnapshotPinnedException(snapshotId);
+            }
+            epochs.add(snapshot.getEpochSeconds());
+        }
+
+        SnapshotReclamationEstimator.SubsetDeletionEstimate estimate =
+                SnapshotReclamationEstimator.estimateSubsetDeletion(
+                        snapshots.loadAllSnapshots(), epochs, snapshots.indexFileSizeBytes());
+
+        String header = dryRun
+                ? "Dry-run: snapshots to delete (" + estimate.snapshots().size() + "):"
+                : "Snapshots to delete (" + estimate.snapshots().size() + "):";
+        System.out.println(header);
+        for (SnapshotReclamationEstimator.SnapshotDeletionItem item : estimate.snapshots()) {
+            System.out.println("  - " + item.snapshotId()
+                    + " (" + item.regions() + " regions, " + item.files() + " files, unique: "
+                    + FormatUtil.formatSize(item.uniqueBytes()) + ")");
+        }
+        System.out.println("  Individual unique sum:      " + FormatUtil.formatSize(estimate.individualUniqueSumBytes()));
+        System.out.println("  Shared only among selected: " + FormatUtil.formatSize(estimate.sharedOnlyAmongSelectedBytes()));
+        System.out.println("  Estimated space to reclaim: " + FormatUtil.formatSize(estimate.totalReclaimBytes())
+                + " (Repository: " + FormatUtil.formatSize(estimate.repositoryBeforeBytes())
+                + " -> " + FormatUtil.formatSize(estimate.repositoryAfterBytes()) + ")");
+
+        if (dryRun) {
+            return;
+        }
+
+        String promptText = ids.size() == 1
+                ? "Delete this snapshot?"
+                : "Delete these " + ids.size() + " snapshots?";
+        if (!confirm(promptText, yes)) {
             System.out.println("Delete cancelled.");
             return;
         }
-        BlobMaintenance.GcResult gc = snapshots.deleteSnapshot(epoch);
-        System.out.println("Snapshot deleted: " + snapshotId);
+        BlobMaintenance.GcResult gc = snapshots.deleteSnapshots(epochs);
+        if (ids.size() == 1) {
+            System.out.println("Snapshot deleted: " + ids.getFirst());
+        } else {
+            System.out.println("Deleted " + ids.size() + " snapshot(s): " + String.join(", ", ids));
+        }
         if (!gc.isClean()) {
             System.err.println("Warning: snapshot deleted, but cleanup of unused backup files was incomplete (failed="
                     + gc.failedFiles() + ", scanComplete=" + gc.scanComplete() + ").");
@@ -317,12 +369,15 @@ public class BackupCli {
     }
 
     private static void runList(BackupExporter exporter) {
-        List<BackupExporter.SnapshotInfo> snapshots = exporter.listSnapshotsWithCumulativeSpace();
+        BackupExporter.SnapshotListView view = exporter.listSnapshotsWithSummary();
+        List<BackupExporter.SnapshotInfo> snapshots = view.snapshots();
         if (snapshots.isEmpty()) {
             System.out.println("No snapshots found.");
             return;
         }
         System.out.println("Snapshots (" + snapshots.size() + "):");
+        SnapshotTablePrinter.printSummary(view.summary(), System.out);
+        System.out.println();
         SnapshotTablePrinter.printList(snapshots, System.out);
     }
 

@@ -245,6 +245,58 @@ class SnapshotStoreTest {
         assertTrue(new SnapshotStore(tempDir).listSnapshots().isEmpty());
     }
 
+    @Test
+    void deleteSnapshotsWithPinnedMemberRejectsEntireBatchWithoutPartialDeletion() throws Exception {
+        CountingIndexStore disk = new CountingIndexStore(tempDir.resolve("index.db"));
+        SnapshotStore store = new SnapshotStore(tempDir, disk);
+        Files.createDirectories(tempDir.resolve("blobs"));
+
+        Files.writeString(tempDir.resolve("blobs/u1"), "u1");
+        Files.writeString(tempDir.resolve("blobs/sh"), "sh");
+        SnapshotManifest s1 = snapshot("S-20260902_100000", 1_000L);
+        s1.addExtraFile(new FileEntry("u1.dat", "1".repeat(32), "blobs/u1", 2, 2));
+        s1.addExtraFile(new FileEntry("sh.dat", "s".repeat(32), "blobs/sh", 2, 2));
+        store.saveSnapshot(s1);
+
+        Files.writeString(tempDir.resolve("blobs/u2"), "u2");
+        SnapshotManifest s2 = snapshot("S-20260902_110000", 2_000L);
+        s2.addExtraFile(new FileEntry("u2.dat", "2".repeat(32), "blobs/u2", 2, 2));
+        s2.addExtraFile(new FileEntry("sh.dat", "s".repeat(32), "blobs/sh", 2, 2));
+        store.saveSnapshot(s2);
+
+        Files.writeString(tempDir.resolve("blobs/u3"), "u3");
+        SnapshotManifest s3 = snapshot("S-20260902_120000", 3_000L);
+        s3.addExtraFile(new FileEntry("u3.dat", "3".repeat(32), "blobs/u3", 2, 2));
+        store.saveSnapshot(s3);
+        assertTrue(store.setPinned(2_000L, true));
+        int savesBeforeDelete = disk.saves;
+
+        // Place unpinned epochs before and after the pinned epoch to verify atomic pre-check
+        SnapshotStore.SnapshotPinnedException error = assertThrows(
+                SnapshotStore.SnapshotPinnedException.class,
+                () -> store.deleteSnapshots(List.of(1_000L, 2_000L, 3_000L)));
+        assertEquals("S-20260902_110000", error.snapshotId());
+        assertEquals(savesBeforeDelete, disk.saves, "Rejected batch delete must not write index");
+
+        SnapshotStore reloaded = new SnapshotStore(tempDir);
+        assertEquals(List.of("S-20260902_120000", "S-20260902_110000", "S-20260902_100000"),
+                reloaded.listSnapshots());
+        assertTrue(Files.exists(tempDir.resolve("blobs/u1")));
+        assertTrue(Files.exists(tempDir.resolve("blobs/u2")));
+        assertTrue(Files.exists(tempDir.resolve("blobs/u3")));
+        assertTrue(Files.exists(tempDir.resolve("blobs/sh")));
+
+        // Unpin then batch-delete s1 + s2: shared blob sh is reclaimed while s3/u3 stay intact
+        assertTrue(store.setPinned(2_000L, false));
+        var gc = store.deleteSnapshots(List.of(1_000L, 2_000L));
+        assertTrue(gc.isClean());
+        assertFalse(Files.exists(tempDir.resolve("blobs/u1")));
+        assertFalse(Files.exists(tempDir.resolve("blobs/u2")));
+        assertFalse(Files.exists(tempDir.resolve("blobs/sh")));
+        assertTrue(Files.exists(tempDir.resolve("blobs/u3")));
+        assertEquals(List.of("S-20260902_120000"), new SnapshotStore(tempDir).listSnapshots());
+    }
+
     /** 创建用于测试的最小快照清单。 */
     private static SnapshotManifest snapshot(String id, long time) {
         return new SnapshotManifest(id, time, "world");

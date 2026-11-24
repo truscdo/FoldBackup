@@ -61,35 +61,69 @@ class ConsoleReporterTest {
     // ── SnapshotTablePrinter ──
 
     @Test
-    void selectionTable_hasIdDateSizeColumns() {
+    void selectionTable_hasIdDateSizeUniqueColumnsAndDynamicWidth() {
         var c = capture();
         var snaps = List.of(new BackupExporter.SnapshotInfo(
-                "snap-1", "2026-08-28 10:00:00", 5, 2, 1000, 4000));
+                1000L, "S-20260828_100000", "2026-08-28 10:00:00", 5, 2, 1000, 4000, 250, 1000, true));
 
         SnapshotTablePrinter.printSelection(snaps, c.stream());
         String out = c.output();
-        assertTrue(out.contains("#"));
-        assertTrue(out.contains("ID"));
-        assertTrue(out.contains("Date"));
-        assertTrue(out.contains("Size"));
-        assertTrue(out.contains("snap-1"));
-        assertTrue(out.contains("1000B"));
+        String[] lines = out.strip().split("\\R");
+        assertEquals(3, lines.length);
+        assertEquals(lines[0].length(), lines[1].length(), "separator must match header width");
+        assertTrue(lines[0].contains("#"));
+        assertTrue(lines[0].contains("ID"));
+        assertTrue(lines[0].contains("Date"));
+        assertTrue(lines[0].contains("Size"));
+        assertTrue(lines[0].contains("Unique"));
+        assertTrue(lines[2].contains("S-20260828_100000 [PIN]"));
+        assertTrue(lines[2].contains("1000B"));
+        assertTrue(lines[2].contains("250B"));
         assertFalse(out.contains("Regions"), "selection table must not have Regions column");
+        assertFalse(out.contains("[PINNED]"), "selection table must use compact [PIN] tag");
     }
 
     @Test
-    void listTable_hasRegionsFilesColumns() {
+    void listTable_hasRegionsFilesUniqueReclaimColumnsAndDynamicWidth() {
         var c = capture();
-        var snaps = List.of(new BackupExporter.SnapshotInfo(
-                "snap-1", "2026-08-28 10:00:00", 5, 2, 1000, 4000));
+        var snaps = List.of(
+                new BackupExporter.SnapshotInfo(
+                        2000L, "S-20260828_110000", "2026-08-28 11:00:00", 5, 2, 1000, 4000, 200, 600, false),
+                new BackupExporter.SnapshotInfo(
+                        1000L, "S-20260828_100000", "2026-08-28 10:00:00", 5, 2, 1000, 4000, 300, 0, true));
 
         SnapshotTablePrinter.printList(snaps, c.stream());
         String out = c.output();
-        assertTrue(out.contains("Regions"));
-        assertTrue(out.contains("Files"));
-        assertTrue(out.contains("Cumulative Space"));
-        assertTrue(out.contains("snap-1"));
-        assertTrue(out.contains("1000B"));
-        assertTrue(out.contains("0B"));
+        String[] lines = out.strip().split("\\R");
+        assertEquals(4, lines.length);
+        assertEquals(lines[0].length(), lines[1].length(), "separator must match header width");
+        assertTrue(lines[0].contains("Regions"));
+        assertTrue(lines[0].contains("Files"));
+        assertTrue(lines[0].contains("Unique"));
+        assertTrue(lines[0].contains("Reclaim"));
+        assertFalse(out.contains("Cumulative Space"));
+        assertTrue(lines[2].contains("200B"));
+        assertTrue(lines[2].contains("600B"));
+        assertTrue(lines[3].contains("S-20260828_100000 [PIN]"));
+        assertTrue(lines[3].endsWith("-"));
+    }
+
+    @Test
+    void printSummary_formatsPinnedAndUnpinnedVariants() {
+        var c1 = capture();
+        var withPin = new io.github.truscdo.foldbackup.core.store.SnapshotReclamationEstimator.RepositorySpaceSummary(
+                1024L * 1024 * 100, 1024L * 128, 1024L * 1024 * 20, 1024L * 1024 * 80,
+                1024L * 1024 * 70, 1024L * 1024 * 10, 1024L * 1024 * 200, 1, 1024L * 1024 * 15);
+        SnapshotTablePrinter.printSummary(withPin, c1.stream());
+        assertTrue(c1.output().contains("Pinned: 1 (Held: 15.0M)"), c1.output());
+        assertTrue(c1.output().contains("[All: 70.0M]"), c1.output());
+        assertTrue(c1.output().contains("saved 50.0%"), c1.output());
+
+        var c2 = capture();
+        var withoutPin = new io.github.truscdo.foldbackup.core.store.SnapshotReclamationEstimator.RepositorySpaceSummary(
+                1024L * 1024 * 100, 0L, 1024L * 1024 * 20, 1024L * 1024 * 80,
+                1024L * 1024 * 70, 1024L * 1024 * 10, 1024L * 1024 * 200, 0, 0L);
+        SnapshotTablePrinter.printSummary(withoutPin, c2.stream());
+        assertTrue(c2.output().trim().endsWith("Pinned: 0"), c2.output());
     }
 }

@@ -135,7 +135,7 @@ class BackupTuiTest {
         String text = runTui(store, "4\n1\n1\n4\n1\n0\n");
 
         assertTrue(text.contains("Pinned snapshot " + snapId), text);
-        assertTrue(text.contains(snapId + " [PINNED]"), text);
+        assertTrue(text.contains(snapId + " [PIN]"), text);
         assertTrue(text.contains("Unpinned snapshot " + snapId), text);
         assertFalse(new io.github.truscdo.foldbackup.core.store.SnapshotStore(store)
                 .loadLatestSnapshot().isPinned());
@@ -229,5 +229,42 @@ class BackupTuiTest {
         String keeping = runTui(store, "2\n1\n2\n" + output + "\n1\n\n0\n");
         assertTrue(Files.exists(kept), keeping);
         assertTrue(keeping.contains("deleted extra: false"), keeping);
+    }
+
+    @Test
+    void deleteMenuSupportsMultiSelectWithPinInterceptionAndReclamationEstimate() throws Exception {
+        Path online = Files.createDirectory(root.resolve("online-multi-delete"));
+        var store = new io.github.truscdo.foldbackup.core.store.SnapshotStore(online);
+        long mb = 1024L * 1024L;
+        var s1 = new io.github.truscdo.foldbackup.core.store.SnapshotManifest("S-20260917_100000", 1000L, "world");
+        s1.addExtraFile(new io.github.truscdo.foldbackup.core.store.FileEntry("a", "h1", "b1", 10 * mb, 20 * mb));
+        s1.addExtraFile(new io.github.truscdo.foldbackup.core.store.FileEntry("shared", "hs", "bs", 15 * mb, 30 * mb));
+        s1.getSummary().setExtraFilesTotal(2);
+        s1.getSummary().setTotalCompressedBytes(25 * mb);
+        var s2 = new io.github.truscdo.foldbackup.core.store.SnapshotManifest("S-20260917_110000", 2000L, "world");
+        s2.addExtraFile(new io.github.truscdo.foldbackup.core.store.FileEntry("b", "h2", "b2", 5 * mb, 10 * mb));
+        s2.addExtraFile(new io.github.truscdo.foldbackup.core.store.FileEntry("shared", "hs", "bs", 15 * mb, 30 * mb));
+        s2.getSummary().setExtraFilesTotal(2);
+        s2.getSummary().setTotalCompressedBytes(20 * mb);
+        var s3 = new io.github.truscdo.foldbackup.core.store.SnapshotManifest("S-20260917_120000", 3000L, "world");
+        s3.addExtraFile(new io.github.truscdo.foldbackup.core.store.FileEntry("c", "h3", "b3", 8 * mb, 16 * mb));
+        s3.getSummary().setExtraFilesTotal(1);
+        s3.getSummary().setTotalCompressedBytes(8 * mb);
+        store.saveSnapshot(s1);
+        store.saveSnapshot(s2);
+        store.saveSnapshot(s3);
+        store.setPinned(3000L, true); // Row #1 is pinned
+
+        // Enter delete (3) -> try 1-3 (blocked by pinned #1, stays in loop) -> enter 2-3 -> confirm (1) -> exit (0)
+        String text = runTui(online, "3\n1-3\n2-3\n1\n0\n");
+
+        assertTrue(text.contains("Cannot delete pinned snapshot(s):"), text);
+        assertTrue(text.contains("#1 S-20260917_120000 [PIN]"), text);
+        assertTrue(text.contains("Individual unique sum:    15.0M"), text);
+        assertTrue(text.contains("Shared only among them:   15.0M"), text);
+        assertTrue(text.contains("Total space to reclaim:   30.0M"), text);
+        assertTrue(text.contains("Deleted 2 snapshot(s): S-20260917_110000, S-20260917_100000"), text);
+        assertEquals(java.util.List.of("S-20260917_120000"),
+                new io.github.truscdo.foldbackup.core.store.SnapshotStore(online).listSnapshots());
     }
 }

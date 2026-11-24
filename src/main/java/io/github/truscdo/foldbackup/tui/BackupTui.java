@@ -2,9 +2,11 @@ package io.github.truscdo.foldbackup.tui;
 
 import io.github.truscdo.foldbackup.cli.SnapshotCreation;
 import io.github.truscdo.foldbackup.core.BackupExporter;
+import io.github.truscdo.foldbackup.core.FormatUtil;
 import io.github.truscdo.foldbackup.core.store.BlobMaintenance;
 import io.github.truscdo.foldbackup.core.store.BlobStore;
 import io.github.truscdo.foldbackup.core.store.SnapshotManifest;
+import io.github.truscdo.foldbackup.core.store.SnapshotReclamationEstimator;
 import io.github.truscdo.foldbackup.core.store.SnapshotStore;
 import io.github.truscdo.foldbackup.core.archive.ArchiveDefaults;
 import io.github.truscdo.foldbackup.core.archive.ArchiveCreator;
@@ -17,6 +19,7 @@ import io.github.truscdo.foldbackup.core.restore.SnapshotRestoreSource;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.Consumer;
@@ -174,7 +177,8 @@ public class BackupTui {
     }
 
     private void listSnapshots(StoreContext store) {
-        List<BackupExporter.SnapshotInfo> snapshots = store.exporter().listSnapshotsWithCumulativeSpace();
+        BackupExporter.SnapshotListView view = store.exporter().listSnapshotsWithSummary();
+        List<BackupExporter.SnapshotInfo> snapshots = view.snapshots();
         if (snapshots.isEmpty()) {
             System.out.println("No snapshots found.\n");
             return;
@@ -182,6 +186,8 @@ public class BackupTui {
 
         System.out.println();
         System.out.println("Snapshots (" + snapshots.size() + "):");
+        SnapshotTablePrinter.printSummary(view.summary(), System.out);
+        System.out.println();
         SnapshotTablePrinter.printList(snapshots, System.out);
         System.out.println();
     }
@@ -322,20 +328,58 @@ public class BackupTui {
             SnapshotTablePrinter.printSelection(snapshots, System.out);
             System.out.println();
 
-            int snapChoice = prompt.readInt(
-                    "Select a snapshot to delete by number (0 = back): ", 0, snapshots.size());
-            if (snapChoice <= 0) {
+            ConsolePrompt.MultiSelection selection = prompt.readMultiSelection(
+                    "Select snapshot(s) to delete (e.g. 5, 4-5, 2,4-5; 0 = back): ", snapshots.size());
+            if (selection.eof() || selection.back()) {
                 return;
             }
-            BackupExporter.SnapshotInfo selected = snapshots.get(snapChoice - 1);
+
+            List<Integer> pinnedIndices = new ArrayList<>();
+            List<BackupExporter.SnapshotInfo> selectedSnapshots = new ArrayList<>(selection.indices().size());
+            List<Long> selectedEpochs = new ArrayList<>(selection.indices().size());
+            for (int rowIndex : selection.indices()) {
+                BackupExporter.SnapshotInfo info = snapshots.get(rowIndex - 1);
+                if (info.pinned) {
+                    pinnedIndices.add(rowIndex);
+                }
+                selectedSnapshots.add(info);
+                selectedEpochs.add(info.epochSeconds);
+            }
+
+            if (!pinnedIndices.isEmpty()) {
+                System.out.println();
+                System.out.println("Cannot delete pinned snapshot(s):");
+                for (int rowIndex : pinnedIndices) {
+                    BackupExporter.SnapshotInfo info = snapshots.get(rowIndex - 1);
+                    System.out.println("  - #" + rowIndex + " " + info.id + " [PIN]");
+                }
+                System.out.println("Please unpin them first or exclude them from your selection.");
+                continue;
+            }
+
+            SnapshotReclamationEstimator.SubsetDeletionEstimate estimate =
+                    store.exporter().estimateDeletion(selectedEpochs);
 
             System.out.println();
-            System.out.println("WARNING: This will permanently delete the snapshot and its blobs.");
-            System.out.println("  Snapshot: " + selected.id);
+            System.out.println("WARNING: This will permanently delete " + selectedSnapshots.size() + " snapshot(s):");
+            for (SnapshotReclamationEstimator.SnapshotDeletionItem item : estimate.snapshots()) {
+                System.out.println("  - " + item.snapshotId()
+                        + " (Unique: " + FormatUtil.formatSize(item.uniqueBytes()) + ")");
+            }
+            System.out.println();
+            System.out.println("Space reclamation estimate:");
+            System.out.println("  Individual unique sum:    " + FormatUtil.formatSize(estimate.individualUniqueSumBytes()));
+            System.out.println("  Shared only among them:   " + FormatUtil.formatSize(estimate.sharedOnlyAmongSelectedBytes()));
+            System.out.println("  Total space to reclaim:   " + FormatUtil.formatSize(estimate.totalReclaimBytes())
+                    + "  (Repository: " + FormatUtil.formatSize(estimate.repositoryBeforeBytes())
+                    + " -> " + FormatUtil.formatSize(estimate.repositoryAfterBytes()) + ")");
             System.out.println();
 
             int confirm = prompt.readInt(
                     "Are you sure? (1 = confirm, 2 = cancel to main menu, 0 = back): ", 0, 2);
+            if (confirm == ConsolePrompt.EOF) {
+                return;
+            }
             if (confirm == 2) {
                 System.out.println("Delete cancelled.\n");
                 return;
@@ -346,8 +390,13 @@ public class BackupTui {
 
             System.out.println("Deleting...");
             try {
-                BlobMaintenance.GcResult gc = store.snapshotManager().deleteSnapshot(selected.epochSeconds);
-                System.out.println("Snapshot deleted: " + selected.id);
+                BlobMaintenance.GcResult gc = store.snapshotManager().deleteSnapshots(selectedEpochs);
+                if (selectedSnapshots.size() == 1) {
+                    System.out.println("Snapshot deleted: " + selectedSnapshots.getFirst().id);
+                } else {
+                    String ids = String.join(", ", selectedSnapshots.stream().map(sn -> sn.id).toList());
+                    System.out.println("Deleted " + selectedSnapshots.size() + " snapshot(s): " + ids);
+                }
                 if (!gc.isClean()) {
                     System.out.println("Warning: cleanup of unused backup files was incomplete (failed="
                             + gc.failedFiles() + ", scanComplete=" + gc.scanComplete() + ").");

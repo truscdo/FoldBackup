@@ -13,7 +13,9 @@ foldbackup snapshot list
 foldbackup snapshot create --world <dir> [--threads <N>]
 foldbackup snapshot import --all-archive
 foldbackup snapshot export <snapshot-id> --output <path> [--zip] [--delete-extra] [--dry-run] [--threads <N>]
-foldbackup snapshot delete <snapshot-id>
+foldbackup snapshot delete <snapshot-id>... [--dry-run] [--yes]
+foldbackup snapshot pin <snapshot-id>
+foldbackup snapshot unpin <snapshot-id>
 foldbackup snapshot rollback <snapshot-id> --world <dir> --chunk <x> <z>
 
 foldbackup archive create --snapshot <snapshot-id> [--base <snapshot-id>]
@@ -55,6 +57,12 @@ foldbackup tui
 
 `--output` 为空白或解析后没有文件或目录名（如根路径）时报错，此检查与磁盘状态无关。`--zip` 仅适用于 `snapshot export`。
 
+### 快照保留与多快照删除
+
+- `snapshot pin <snapshot-id>` / `snapshot unpin <snapshot-id>` 为指定快照添加或取消保留保护（幂等操作）。保留快照豁免自动清理且禁止手动删除，须先 `unpin` 后方可删除。
+- `snapshot delete <id1> [id2 ...] [--dry-run] [--yes]` 支持一次删除一个或多个快照，`<id...>` 与 `--dry-run`、`--yes` 允许按任意顺序混排（至少提供 1 个快照 ID）。命令会按输入顺序去重并一次性前置校验全部 ID 的格式、存在性与保留状态；任一校验失败直接中止，不执行部分删除。
+- `snapshot delete --dry-run` 仅基于内存索引输出各快照独占空间、组合额外释放共享空间及预计总释放空间账单后退出，不要求交互确认，不修改仓库；同时传入 `--dry-run` 与 `--yes` 时按 `--dry-run` 执行。未传 `--dry-run` 时在确认后单次原子提交索引并执行 GC。
+
 ### 区块回滚
 
 `snapshot rollback` ，其作用范围仅为指定维度中的指定区块，不表示整个世界回滚。
@@ -76,7 +84,7 @@ foldbackup tui
 - 统计始终输出更改、跳过、删除三组；未指定 `--delete-extra` 时删除组只表示目标中将被保留的条目，不执行删除。
 - `extract` 允许使用已存在的目录，但遇到同名运行库文件时拒绝覆盖；`archive create` 遇到同名归档也拒绝覆盖。
 - 批量导入时，已有且内容一致的快照跳过并报告；相同 ID 对应不同内容时报告冲突，不覆盖已有快照。
-- `snapshot delete` 和 `snapshot rollback` 在 CLI 交互式终端中（与 TUI 菜单无关）先显示目标及影响范围，再要求确认。提供 `--yes` 跳过交互确认；非交互环境未指定 `--yes` 时直接报错，不等待输入。
+- `snapshot delete`（未指定 `--dry-run`）和 `snapshot rollback` 在 CLI 交互式终端中（与 TUI 菜单无关）先显示目标、影响范围与空间释放预估，再要求确认。提供 `--yes` 跳过交互确认；非交互环境未指定 `--yes` 时直接报错，不等待输入。
 - `--yes` 仅跳过确认，不跳过世界锁、依赖完整性及数据校验。
 
 ## 高级选项
@@ -88,4 +96,5 @@ foldbackup tui
 | `--level <N>` | `archive create` | 指定压缩级别 |
 | `--no-recompress` | `archive create` | 禁用重新压缩 |
 | `--threads <N>` | `archive create`、`archive export`、`snapshot create`、`snapshot export`、`snapshot import --all-archive` | 指定线程数 |
+| `--dry-run` | `snapshot export`、`snapshot delete`、`archive export` | 仅预估/检查并输出统计，不写入、不删除 |
 | `--yes` | `snapshot delete`、`snapshot rollback` | 跳过交互确认，供脚本或已确认操作使用；默认不启用 |

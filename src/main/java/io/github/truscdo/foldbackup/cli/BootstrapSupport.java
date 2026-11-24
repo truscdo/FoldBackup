@@ -181,7 +181,7 @@ final class BootstrapSupport {
                   java -jar foldbackup-<version>.jar snapshot create --world <directory> [--threads <N>]
                   java -jar foldbackup-<version>.jar snapshot import --all-archive
                   java -jar foldbackup-<version>.jar snapshot export <snapshot-id> --output <path> [--zip] [--delete-extra] [--dry-run] [--threads <N>]
-                  java -jar foldbackup-<version>.jar snapshot delete <snapshot-id> [--yes]
+                  java -jar foldbackup-<version>.jar snapshot delete <snapshot-id>... [--dry-run] [--yes]
                   java -jar foldbackup-<version>.jar snapshot pin <snapshot-id>
                   java -jar foldbackup-<version>.jar snapshot unpin <snapshot-id>
                   java -jar foldbackup-<version>.jar snapshot rollback <snapshot-id> --world <dir> --chunk <x> <z> [--yes]

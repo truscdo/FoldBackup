@@ -58,9 +58,9 @@ public class FoldBackupConfig {
         }
 
         /**
-         * 仅构建配置规范而不注册（供单元测试对"写文件 → 读文件 → 校验"往返行为作断言）。
+         * 仅构建配置规范而不注册（供单元测试对"写文件 → 读文件 → 校验"往返行为作断言或子类覆写）。
          */
-        FoldBackupConfig() {
+        protected FoldBackupConfig() {
                 ModConfigSpec.Builder builder = new ModConfigSpec.Builder();
 
                 // General

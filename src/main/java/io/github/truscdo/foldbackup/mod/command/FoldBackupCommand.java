@@ -4,6 +4,7 @@ import io.github.truscdo.foldbackup.core.BackupExporter;
 import io.github.truscdo.foldbackup.core.BackupResult;
 import io.github.truscdo.foldbackup.core.FormatUtil;
 import io.github.truscdo.foldbackup.core.store.SnapshotManifest;
+import io.github.truscdo.foldbackup.core.store.SnapshotReclamationEstimator;
 import io.github.truscdo.foldbackup.core.store.SnapshotStore;
 import io.github.truscdo.foldbackup.core.task.TaskStatus;
 import io.github.truscdo.foldbackup.core.task.TaskType;
@@ -19,7 +20,10 @@ import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.server.level.ServerPlayer;
 
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -48,14 +52,14 @@ public class FoldBackupCommand {
                                                                                                 StringArgumentType
                                                                                                                 .getString(ctx, "id")))))
                                                 .then(Commands.literal("delete")
-                                                                .then(Commands.argument("id",
+                                                                .then(Commands.argument("args",
                                                                                 StringArgumentType.greedyString())
                                                                                 .suggests(SnapshotIdSuggestions
-                                                                                                .suggestAll(mod::getSnapshotStore))
-                                                                                .executes(ctx -> deleteSnapshot(ctx,
+                                                                                                .suggestForDelete(mod::getSnapshotStore))
+                                                                                .executes(ctx -> deleteSnapshots(ctx,
                                                                                                 mod,
                                                                                                 StringArgumentType
-                                                                                                                .getString(ctx, "id")))))
+                                                                                                                .getString(ctx, "args")))))
                                                 .then(Commands.literal("pin")
                                                                 .then(Commands.argument("id",
                                                                                 StringArgumentType.greedyString())
@@ -91,7 +95,7 @@ public class FoldBackupCommand {
                 }
                 String prefix = pinned ? "foldbackup.command.pin." : "foldbackup.command.unpin.";
                 mod.setPinnedAsync(epochSeconds, pinned)
-                                .whenComplete((changed, exception) -> mod.getServer().execute(() -> {
+                                .whenComplete((changed, exception) -> mod.executeOnServer(() -> {
                                         if (exception != null) {
                                                 Throwable cause = exception.getCause() == null ? exception
                                                                 : exception.getCause();
@@ -109,43 +113,125 @@ public class FoldBackupCommand {
                 return Command.SINGLE_SUCCESS;
         }
 
-        private static int deleteSnapshot(CommandContext<CommandSourceStack> ctx, FoldBackupMod mod, String id) {
+        record DeleteCommandArgs(boolean dryRun, List<String> snapshotIds, String errorKey) {
+                boolean valid() {
+                        return errorKey == null;
+                }
+        }
+
+        static DeleteCommandArgs parseDeleteArgs(String rawArgs) {
+                if (rawArgs == null || rawArgs.isBlank()) {
+                        return new DeleteCommandArgs(false, List.of(), "foldbackup.command.delete.usage");
+                }
+                boolean dryRun = false;
+                Set<String> ids = new LinkedHashSet<>();
+                for (String token : rawArgs.trim().split("\\s+")) {
+                        if ("--dry-run".equals(token)) {
+                                if (dryRun) {
+                                        return new DeleteCommandArgs(false, List.of(),
+                                                        "foldbackup.command.delete.usage");
+                                }
+                                dryRun = true;
+                        } else if (token.startsWith("--")) {
+                                return new DeleteCommandArgs(false, List.of(), "foldbackup.command.delete.usage");
+                        } else {
+                                ids.add(token);
+                        }
+                }
+                if (ids.isEmpty()) {
+                        return new DeleteCommandArgs(false, List.of(), "foldbackup.command.delete.usage");
+                }
+                return new DeleteCommandArgs(dryRun, List.copyOf(ids), null);
+        }
+
+        private static int deleteSnapshots(CommandContext<CommandSourceStack> ctx, FoldBackupMod mod, String rawArgs) {
                 CommandSourceStack source = ctx.getSource();
                 SnapshotStore store = BackendGuard.requireSnapshotStore(source, mod);
                 if (store == null) {
                         return 0;
                 }
-                Long epochSeconds = BackendGuard.resolveEpoch(source, mod, store, id);
-                if (epochSeconds == null) {
+                DeleteCommandArgs parsed = parseDeleteArgs(rawArgs);
+                if (!parsed.valid()) {
+                        CommandFeedback.failure(source, mod, parsed.errorKey());
                         return 0;
                 }
-                SnapshotManifest manifest = store.loadSnapshot(epochSeconds);
-                if (manifest != null && manifest.isPinned()) {
-                        CommandFeedback.failure(source, mod, "foldbackup.command.delete.pinned", id, id);
-                        return 0;
+
+                List<Long> epochs = new ArrayList<>(parsed.snapshotIds().size());
+                for (String id : parsed.snapshotIds()) {
+                        Long epochSeconds = BackendGuard.resolveEpoch(source, mod, store, id);
+                        if (epochSeconds == null) {
+                                return 0;
+                        }
+                        SnapshotManifest manifest = store.loadSnapshot(epochSeconds);
+                        if (manifest == null) {
+                                CommandFeedback.failure(source, mod, "foldbackup.command.info.not_found", id);
+                                return 0;
+                        }
+                        if (manifest.isPinned()) {
+                                CommandFeedback.failure(source, mod, "foldbackup.command.delete.pinned", id, id);
+                                return 0;
+                        }
+                        epochs.add(epochSeconds);
                 }
-                source.sendSuccess(() -> CommandFeedback.text(source, mod, "foldbackup.command.delete.started", id),
-                                true);
-                mod.deleteSnapshotAsync(epochSeconds)
-                                .whenComplete((gc, exception) -> mod.getServer().execute(() -> {
+
+                if (parsed.dryRun()) {
+                        try {
+                                SnapshotReclamationEstimator.SubsetDeletionEstimate estimate =
+                                                SnapshotReclamationEstimator.estimateSubsetDeletion(
+                                                                store.loadAllSnapshots(), epochs,
+                                                                store.indexFileSizeBytes());
+                                source.sendSuccess(() -> CommandFeedback.text(source, mod,
+                                                "foldbackup.command.delete.dry_run.title",
+                                                estimate.snapshots().size()), false);
+                                for (SnapshotReclamationEstimator.SnapshotDeletionItem item : estimate.snapshots()) {
+                                        source.sendSuccess(() -> CommandFeedback.text(source, mod,
+                                                        "foldbackup.command.delete.dry_run.item",
+                                                        item.snapshotId(),
+                                                        FormatUtil.formatSize(item.uniqueBytes())), false);
+                                }
+                                source.sendSuccess(() -> CommandFeedback.text(source, mod,
+                                                "foldbackup.command.delete.dry_run.summary",
+                                                FormatUtil.formatSize(estimate.individualUniqueSumBytes()),
+                                                FormatUtil.formatSize(estimate.sharedOnlyAmongSelectedBytes()),
+                                                FormatUtil.formatSize(estimate.totalReclaimBytes()),
+                                                FormatUtil.formatSize(estimate.repositoryBeforeBytes()),
+                                                FormatUtil.formatSize(estimate.repositoryAfterBytes())), false);
+                                return Command.SINGLE_SUCCESS;
+                        } catch (Exception exception) {
+                                FoldBackupMod.LOG.error("Failed to estimate snapshot deletion for {}",
+                                                parsed.snapshotIds(), exception);
+                                CommandFeedback.failure(source, mod, "foldbackup.command.delete.failed",
+                                                String.join(", ", parsed.snapshotIds()));
+                                return 0;
+                        }
+                }
+
+                String displayIds = String.join(", ", parsed.snapshotIds());
+                source.sendSuccess(() -> CommandFeedback.text(source, mod, "foldbackup.command.delete.started",
+                                displayIds), true);
+                mod.deleteSnapshotsAsync(epochs)
+                                .whenComplete((gc, exception) -> mod.executeOnServer(() -> {
                                         if (exception != null) {
                                                 Throwable cause = exception.getCause() == null ? exception
                                                                 : exception.getCause();
-                                                if (cause instanceof SnapshotStore.SnapshotPinnedException) {
+                                                if (cause instanceof SnapshotStore.SnapshotPinnedException pinnedEx) {
                                                         CommandFeedback.failure(source, mod,
-                                                                        "foldbackup.command.delete.pinned", id, id);
+                                                                        "foldbackup.command.delete.pinned",
+                                                                        pinnedEx.snapshotId(), pinnedEx.snapshotId());
                                                         return;
                                                 }
-                                                FoldBackupMod.LOG.error("Failed to delete snapshot {}", id, cause);
+                                                FoldBackupMod.LOG.error("Failed to delete snapshot(s) {}",
+                                                                displayIds, cause);
                                                 CommandFeedback.failure(source, mod, "foldbackup.command.delete.failed",
-                                                                id);
+                                                                displayIds);
                                         } else if (gc != null && !gc.isClean()) {
                                                 source.sendSuccess(() -> CommandFeedback.text(source, mod,
-                                                                "foldbackup.command.delete.cleanup_incomplete", id),
-                                                                true);
+                                                                "foldbackup.command.delete.cleanup_incomplete",
+                                                                displayIds), true);
                                         } else {
                                                 source.sendSuccess(() -> CommandFeedback.text(source, mod,
-                                                                "foldbackup.command.delete.success", id), true);
+                                                                "foldbackup.command.delete.success",
+                                                                displayIds), true);
                                         }
                                 }));
                 return Command.SINGLE_SUCCESS;
@@ -176,7 +262,7 @@ public class FoldBackupCommand {
                         return 0;
                 }
 
-                future.whenComplete((result, throwable) -> mod.getServer().execute(() -> {
+                future.whenComplete((result, throwable) -> mod.executeOnServer(() -> {
                         if (source.getEntity() instanceof ServerPlayer player) {
                                 mod.getProgressNotifier().unsubscribe(player.getUUID());
                         }
@@ -226,31 +312,49 @@ public class FoldBackupCommand {
                         return 0;
                 }
                 try {
-                        List<BackupExporter.SnapshotInfo> snapshots = new BackupExporter(store)
-                                        .listSnapshotsWithCumulativeSpace();
+                        BackupExporter.SnapshotListView view = new BackupExporter(store).listSnapshotsWithSummary();
+                        List<BackupExporter.SnapshotInfo> snapshots = view.snapshots();
                         if (snapshots.isEmpty()) {
                                 source.sendSuccess(() -> CommandFeedback.text(source, mod,
                                                 "foldbackup.command.list.empty"), false);
                                 return 0;
                         }
 
+                        SnapshotReclamationEstimator.RepositorySpaceSummary summary = view.summary();
                         source.sendSuccess(() -> CommandFeedback.text(source, mod, "foldbackup.command.list.title",
                                         snapshots.size()), false);
+                        if (summary.pinnedCount() > 0) {
+                                source.sendSuccess(() -> CommandFeedback.text(source, mod,
+                                                "foldbackup.command.list.summary_pinned",
+                                                FormatUtil.formatSize(summary.storedBytes()),
+                                                FormatUtil.formatSize(summary.totalUniqueBytes()),
+                                                FormatUtil.formatSize(summary.totalSharedBytes()),
+                                                FormatUtil.formatSize(summary.globalSharedBytes()),
+                                                summary.pinnedCount(),
+                                                FormatUtil.formatSize(summary.pinnedHeldBytes())), false);
+                        } else {
+                                source.sendSuccess(() -> CommandFeedback.text(source, mod,
+                                                "foldbackup.command.list.summary",
+                                                FormatUtil.formatSize(summary.storedBytes()),
+                                                FormatUtil.formatSize(summary.totalUniqueBytes()),
+                                                FormatUtil.formatSize(summary.totalSharedBytes()),
+                                                FormatUtil.formatSize(summary.globalSharedBytes())), false);
+                        }
                         source.sendSuccess(() -> CommandFeedback.text(source, mod, "foldbackup.command.list.header"),
                                         false);
                         for (BackupExporter.SnapshotInfo snapshot : snapshots) {
-                                String rowId = snapshot.pinned ? snapshot.id + " [PINNED]" : snapshot.id;
+                                String rowId = snapshot.pinned ? snapshot.id + " [PIN]" : snapshot.id;
                                 String rowRegions = String.valueOf(snapshot.regions);
                                 String rowFiles = String.valueOf(snapshot.files);
-                                String rowCompressed = FormatUtil.formatSize(snapshot.compressedBytes);
-                                String rowUncompressed = FormatUtil.formatSize(snapshot.uncompressedBytes);
-                                String rowCumulativeSpace = snapshot.pinned
+                                String rowSize = FormatUtil.formatSize(snapshot.compressedBytes);
+                                String rowUnique = FormatUtil.formatSize(snapshot.uniqueBytes);
+                                String rowReclaim = snapshot.pinned
                                                 ? "-"
                                                 : FormatUtil.formatSize(snapshot.cumulativeSpaceBytes);
                                 source.sendSuccess(() -> CommandFeedback.text(source, mod,
                                                 "foldbackup.command.list.row",
                                                 rowId, snapshot.date, rowRegions, rowFiles,
-                                                rowCompressed, rowUncompressed, rowCumulativeSpace), false);
+                                                rowSize, rowUnique, rowReclaim), false);
                         }
                 } catch (Exception exception) {
                         FoldBackupMod.LOG.error("Failed to list snapshots", exception);
@@ -316,6 +420,11 @@ public class FoldBackupCommand {
                         return 0;
                 }
 
+                SnapshotReclamationEstimator.RepositorySpaceAnalysis analysis =
+                                SnapshotReclamationEstimator.analyze(store.loadAllSnapshots(),
+                                                store.indexFileSizeBytes());
+                SnapshotReclamationEstimator.SnapshotSpace space = analysis.spaceFor(snapshot.getEpochSeconds());
+
                 String date = FormatUtil.formatEpoch(snapshot.getEpochSeconds());
                 source.sendSuccess(() -> CommandFeedback.text(source, mod, "foldbackup.command.info.title",
                                 snapshot.getSnapshotId()), false);
@@ -336,11 +445,18 @@ public class FoldBackupCommand {
                                         summary.getExtraFilesTotal(), summary.getExtraFilesChanged()), false);
                         source.sendSuccess(() -> CommandFeedback.text(source, mod,
                                         "foldbackup.command.info.size",
-                                        summary.getTotalCompressedBytes() / (1024 * 1024),
-                                        summary.getTotalUncompressedBytes() / (1024 * 1024)), false);
+                                        FormatUtil.formatSize(summary.getTotalCompressedBytes()),
+                                        FormatUtil.formatSize(summary.getTotalUncompressedBytes())), false);
                         source.sendSuccess(() -> CommandFeedback.text(source, mod,
                                         "foldbackup.command.info.new_data",
-                                        summary.getNewBlobBytes() / (1024 * 1024)), false);
+                                        FormatUtil.formatSize(summary.getNewBlobBytes())), false);
+                }
+                if (space != null) {
+                        source.sendSuccess(() -> CommandFeedback.text(source, mod,
+                                        "foldbackup.command.info.space",
+                                        FormatUtil.formatSize(space.uniqueBytes()),
+                                        FormatUtil.formatSize(space.sharedBytes()),
+                                        FormatUtil.formatSize(analysis.summary().globalSharedBytes())), false);
                 }
                 return Command.SINGLE_SUCCESS;
         }

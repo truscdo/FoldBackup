@@ -5,6 +5,10 @@ import java.io.IOException;
 import java.io.PrintStream;
 import java.io.Reader;
 import java.nio.CharBuffer;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Set;
+import java.util.TreeSet;
 
 /**
  * TUI 控制台输入工具：编号选择与行读取，统一 EOF 语义。
@@ -100,6 +104,84 @@ public final class ConsolePrompt {
                 if (threads > 0) return threads;
             } catch (NumberFormatException ignored) { }
             out.println("Threads must be a positive integer.");
+        }
+    }
+
+    /** 多选编号输入结果（区分 EOF、返回与去重升序编号列表）。 */
+    public record MultiSelection(boolean eof, boolean back, List<Integer> indices) {
+        public static final MultiSelection EOF_RESULT = new MultiSelection(true, false, List.of());
+        public static final MultiSelection BACK_RESULT = new MultiSelection(false, true, List.of());
+
+        public MultiSelection {
+            indices = List.copyOf(indices);
+        }
+
+        public static MultiSelection of(List<Integer> indices) {
+            return new MultiSelection(false, false, indices);
+        }
+    }
+
+    /**
+     * 解析逗号分隔的单号与闭区间组合（如 {@code 5}、{@code 4-5}、{@code 2,4-5}）。
+     * 空输入或单独输入 {@code 0} 返回 {@link MultiSelection#BACK_RESULT}；
+     * 非法、越界或逆序区间抛出 {@link IllegalArgumentException}。
+     */
+    public static MultiSelection parseMultiSelection(String raw, int max) {
+        if (max < 1) {
+            throw new IllegalArgumentException("max must be >= 1");
+        }
+        String trimmed = raw == null ? "" : raw.trim();
+        if (trimmed.isEmpty() || "0".equals(trimmed)) {
+            return MultiSelection.BACK_RESULT;
+        }
+        String[] parts = trimmed.split(",", -1);
+        Set<Integer> selected = new TreeSet<>();
+        for (String part : parts) {
+            String token = part.trim();
+            if (token.isEmpty()) {
+                throw new IllegalArgumentException("Empty selection item");
+            }
+            if (token.contains("-")) {
+                String[] bounds = token.split("-", -1);
+                if (bounds.length != 2) {
+                    throw new IllegalArgumentException("Invalid range: " + token);
+                }
+                int start = Integer.parseInt(bounds[0].trim());
+                int end = Integer.parseInt(bounds[1].trim());
+                if (start < 1 || end > max || start > end) {
+                    throw new IllegalArgumentException("Range out of bounds: " + token);
+                }
+                for (int i = start; i <= end; i++) {
+                    selected.add(i);
+                }
+            } else {
+                int value = Integer.parseInt(token);
+                if (value < 1 || value > max) {
+                    throw new IllegalArgumentException("Number out of bounds: " + value);
+                }
+                selected.add(value);
+            }
+        }
+        return MultiSelection.of(new ArrayList<>(selected));
+    }
+
+    /**
+     * 读取多选编号输入（支持逗号分隔的单号与闭区间）；空输入或 {@code 0} 返回 BACK，EOF 返回 EOF，
+     * 非法输入在原地提示重试。
+     */
+    public MultiSelection readMultiSelection(String prompt, int max) {
+        while (true) {
+            out.print(prompt);
+            String line = readLineRaw();
+            if (line == null) {
+                return MultiSelection.EOF_RESULT;
+            }
+            try {
+                return parseMultiSelection(line, max);
+            } catch (IllegalArgumentException e) {
+                out.println("Invalid selection. Enter numbers or ranges between 1 and " + max
+                        + " (e.g. 5, 4-5, 2,4-5), or 0 to go back.");
+            }
         }
     }
 

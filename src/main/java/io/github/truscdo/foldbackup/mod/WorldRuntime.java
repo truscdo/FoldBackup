@@ -22,6 +22,8 @@ import net.minecraft.world.level.ChunkPos;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.Collection;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
@@ -294,12 +296,23 @@ public final class WorldRuntime {
     }
 
     /**
-     * 在备份执行器线程上异步删除快照；与仓库读写串行化。
+     * 在备份执行器线程上异步删除单个快照；委托给 {@link #deleteSnapshotsAsync(Collection)}。
      */
     public CompletableFuture<BlobMaintenance.GcResult> deleteSnapshotAsync(long epochSeconds) {
+        return deleteSnapshotsAsync(List.of(epochSeconds));
+    }
+
+    /**
+     * 在备份执行器线程上批量异步删除快照；单次任务、单次写锁提交与单次孤儿块 GC。
+     */
+    public CompletableFuture<BlobMaintenance.GcResult> deleteSnapshotsAsync(Collection<Long> epochSeconds) {
+        List<Long> epochs = List.copyOf(epochSeconds);
+        String message = epochs.size() == 1
+                ? "Deleting snapshot at epoch " + epochs.getFirst() + "..."
+                : "Deleting " + epochs.size() + " snapshots...";
         TaskStatus status = taskRegistry.startTask(TaskType.DELETE)
                 .setRunning()
-                .setMessage("Deleting snapshot at epoch " + epochSeconds + "...");
+                .setMessage(message);
         SnapshotStore store = snapshotStore;
         ExecutorService pool = backupExecutor;
         if (store == null || pool == null) {
@@ -308,11 +321,11 @@ public final class WorldRuntime {
         }
         return CompletableFuture.supplyAsync(() -> {
             try {
-                BlobMaintenance.GcResult gc = store.deleteSnapshot(epochSeconds);
+                BlobMaintenance.GcResult gc = store.deleteSnapshots(epochs);
                 if (gc.isClean()) {
                     taskRegistry.complete(status);
                 } else {
-                    taskRegistry.fail(status, "Snapshot deleted, but cleanup of unused backup files was incomplete (failed="
+                    taskRegistry.fail(status, "Snapshot(s) deleted, but cleanup of unused backup files was incomplete (failed="
                             + gc.failedFiles() + ", scanComplete=" + gc.scanComplete() + ")");
                 }
                 return gc;

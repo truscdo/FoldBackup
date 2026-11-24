@@ -15,7 +15,7 @@ El mismo archivo JAR puede instalarse como un mod de NeoForge o ejecutarse como 
 
 - **Copias de seguridad en línea**: Programa copias de seguridad basadas en el tiempo con jugadores conectados, inícialas manualmente o realiza copias opcionales al iniciar o detener el servidor.
 - **Deduplicación de contenido**: El contenido sin cambios no ocupa espacio adicional en una nueva instantánea.
-- **Gestión de instantáneas**: Consulta el espacio que ocupa cada instantánea en una cadena de instantáneas y configura la limpieza automática.
+- **Gestión de instantáneas**: Consulta el resumen de espacio del repositorio y el espacio único, compartido y recuperable acumulado de cada instantánea, fija instantáneas importantes (`pin`) para protegerlas de la limpieza automática, estima el espacio a liberar antes de eliminar una o varias instantáneas (`--dry-run`) y configura la limpieza automática.
 - **Vista previa y restauración de chunks**: Previsualiza cómo se veía un chunk en una instantánea anterior y restaura un único chunk desde la instantánea seleccionada.
 
     La restauración de chunks está disponible tanto dentro del juego como mediante la CLI con el servidor apagado. La opción sin conexión ayuda a recuperar un chunk problemático, por ejemplo uno que provoque el cierre del juego por contener demasiadas entidades.
@@ -186,9 +186,9 @@ La CLI restaura el terreno del chunk de destino, las entidades de bloque, los da
 
 Los archivos comprimidos (Archives) están pensados para almacenar y distribuir mundos priorizando una alta tasa de compresión. Dado que su creación consume bastantes recursos, las operaciones con archivos están disponibles únicamente a través de la CLI y la TUI.
 
-Los archivos se crean a partir de instantáneas, por lo que necesitas tener una instantánea antes de crear un archivo. Puedes crearla dentro del juego o mediante la TUI o la CLI. En la TUI, selecciona "4. Create archive", elige una instantánea y el tipo de archivo. Un archivo diferencial también te pedirá una instantánea anterior como base de comparación para almacenar únicamente lo que haya cambiado.
+Los archivos se crean a partir de instantáneas, por lo que necesitas tener una instantánea antes de crear un archivo. Puedes crearla dentro del juego o mediante la TUI o la CLI. En la TUI, selecciona "5. Create archive", elige una instantánea y el tipo de archivo. Un archivo diferencial también te pedirá una instantánea anterior como base de comparación para almacenar únicamente lo que haya cambiado.
 
-Un archivo puede restaurarse como un mundo de Minecraft ("6. Restore as world files" en la TUI) o importarse como una instantánea en un repositorio de instantáneas. Al restaurar como mundo también se actualiza una partida existente en el mismo sitio, y al elegir "delete extra" se eliminan los archivos que no están en el archivo comprimido. Si distribuyes un mundo mediante archivos, puedes empaquetar junto a ellos el mod y el script de inicio de la TUI (el contenido del script se muestra más arriba en este README).
+Un archivo puede restaurarse como un mundo de Minecraft ("7. Restore as world files" en la TUI) o importarse como una instantánea en un repositorio de instantáneas. Al restaurar como mundo también se actualiza una partida existente en el mismo sitio, y al elegir "delete extra" se eliminan los archivos que no están en el archivo comprimido. Si distribuyes un mundo mediante archivos, puedes empaquetar junto a ellos el mod y el script de inicio de la TUI (el contenido del script se muestra más arriba en este README).
 
 El formato de archivo es independiente de la versión de Minecraft. Puedes usar la CLI o la TUI para comprimir mundos de versiones que el mod no admite.
 
@@ -198,10 +198,12 @@ El formato de archivo es independiente de la versión de Minecraft. Puedes usar 
 | --- | --- |
 | `/foldbackup backup` | Crear una instantánea manualmente |
 | `/foldbackup backup --force` | Crear una copia de seguridad sin esperar el intervalo mínimo |
-| `/foldbackup list` | Listar las instantáneas |
+| `/foldbackup list` | Listar las instantáneas con resumen de espacio del repositorio (único, compartido y recuperable acumulado) |
 | `/foldbackup status` | Mostrar el estado de las tareas |
-| `/foldbackup info <snapshot-id>` | Mostrar los detalles de una instantánea |
-| `/foldbackup delete <snapshot-id>` | Eliminar una instantánea |
+| `/foldbackup info <snapshot-id>` | Mostrar los detalles de una instantánea y su distribución actual de espacio único/compartido |
+| `/foldbackup delete [--dry-run] <id1> [id2 ...]` | Eliminar una o varias instantáneas, o estimar el espacio recuperable con `--dry-run` |
+| `/foldbackup pin <snapshot-id>` | Fijar una instantánea para protegerla de la limpieza automática y la eliminación manual |
+| `/foldbackup unpin <snapshot-id>` | Quitar la protección de fijado de una instantánea |
 | `/foldbackup preview <x> <z> [snapshot-id]` | Previsualizar un chunk histórico en la dimensión actual |
 | `/foldbackup preview exit` | Salir de la vista previa |
 | `/foldbackup rollback chunk <x> <z> [snapshot-id]` | Restaurar un único chunk en la dimensión actual |
@@ -232,7 +234,7 @@ El archivo de configuración se encuentra por defecto en `config/foldbackup-serv
 | `localization.autoDetectPlayerLanguage` | `true` | Usar el idioma configurado por cada jugador cuando esté soportado |
 
 > [!WARNING]
-> **La limpieza automática puede eliminar todas las instantáneas históricas, incluidas las copias creadas manualmente.** Los límites predeterminados solo restringen el tamaño del repositorio (50 GiB) y el espacio libre (5 GiB); no hay límite de días de antigüedad, por lo que la limpieza puede eliminar instantáneas recientes para cumplir esos objetivos. El objetivo de espacio libre no significa que se haya reservado espacio para la siguiente copia. Establece los tres límites de limpieza en 0 para desactivar la eliminación automática, o desactiva la limpieza automática con `retention.enabled`.
+> **La limpieza automática puede eliminar todas las instantáneas históricas no fijadas, incluidas las copias creadas manualmente.** Los límites predeterminados solo restringen el tamaño del repositorio (50 GiB) y el espacio libre (5 GiB); no hay límite de días de antigüedad, por lo que la limpieza puede eliminar instantáneas recientes para cumplir esos objetivos. El objetivo de espacio libre no significa que se haya reservado espacio para la siguiente copia. Usa `/foldbackup pin <snapshot-id>` (o la CLI/TUI) para proteger instantáneas importantes, establece los tres límites de limpieza en 0 para desactivar la eliminación automática, o desactiva la limpieza automática con `retention.enabled`.
 
 `general.excludePatterns` compara rutas relativas al directorio del mundo usando `/` como separador de rutas. Por defecto excluye `**/session.lock`, `**/backups`, `**/.backups`, `**/*.wip` y `**/DistantHorizons.sqlite`. Si un directorio coincide, se excluye todo su subárbol.
 

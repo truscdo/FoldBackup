@@ -86,4 +86,31 @@ class ConsolePromptTest {
         var prompt = new ConsolePrompt(new StringReader(""), new PrintStream(out, true));
         assertNull(prompt.readLine("Path: "));
     }
+
+    @Test
+    void multiSelectionParsesSingleRangesDuplicatesAndBack() {
+        assertTrue(ConsolePrompt.parseMultiSelection("", 5).back());
+        assertTrue(ConsolePrompt.parseMultiSelection("  0 ", 5).back());
+        assertEquals(java.util.List.of(5), ConsolePrompt.parseMultiSelection("5", 5).indices());
+        assertEquals(java.util.List.of(4, 5), ConsolePrompt.parseMultiSelection("4-5", 5).indices());
+        assertEquals(java.util.List.of(2, 3, 4), ConsolePrompt.parseMultiSelection(" 2 , 2 - 4 ", 5).indices());
+
+        for (String bad : new String[] {"0,2", "5-4", "6", "1,,2", "1-2-3", "abc", "-1"}) {
+            assertThrows(IllegalArgumentException.class, () -> ConsolePrompt.parseMultiSelection(bad, 5), bad);
+        }
+    }
+
+    @Test
+    void readMultiSelectionRetriesInvalidAndHandlesEof() {
+        var out = new ByteArrayOutputStream();
+        var prompt = new ConsolePrompt(new StringReader("0,2\n5-4\n2, 4-5\n"), new PrintStream(out, true));
+        var result = prompt.readMultiSelection("Select: ", 5);
+        assertFalse(result.eof());
+        assertFalse(result.back());
+        assertEquals(java.util.List.of(2, 4, 5), result.indices());
+        assertEquals(2, out.toString().split("Invalid selection.", -1).length - 1);
+
+        var eofPrompt = new ConsolePrompt(new StringReader(""), new PrintStream(new ByteArrayOutputStream(), true));
+        assertTrue(eofPrompt.readMultiSelection("Select: ", 5).eof());
+    }
 }

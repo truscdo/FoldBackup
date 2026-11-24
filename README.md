@@ -15,7 +15,7 @@ The same JAR can be installed as a NeoForge mod or run as a standalone tool. It 
 
 - **Online backups**: Schedule backups based on player online time, trigger them manually, or optionally back up the world when the server starts or stops.
 - **Content deduplication**: Unchanged content takes no additional space in a new snapshot.
-- **Snapshot management**: View the space used by each snapshot in a snapshot chain and configure automatic cleanup.
+- **Snapshot management**: Inspect repository space summaries and each snapshot's unique, shared, and cumulative reclaimable space, pin important snapshots to protect them from automatic cleanup, preview space reclaimed before deleting one or more snapshots (`--dry-run`), and configure automatic cleanup.
 - **Chunk previews and rollback**: Preview how a chunk looked in an earlier snapshot and restore a single chunk from a selected snapshot.
 
     Chunk rollback is available both in game and through the CLI while the server is offline. The offline option can help recover a problematic chunk, including one that crashes the game because it contains too many entities.
@@ -186,9 +186,9 @@ The CLI restores the target chunk's terrain, block entities, recoverable entity 
 
 Archives are intended for storing and distributing worlds, with high compression ratios as a priority. Because creating them uses substantial resources, archive operations are available only through the CLI and TUI.
 
-Archives are created from snapshots, so you need a snapshot before creating an archive. You can create one in game or through the TUI or CLI. In the TUI, select "4. Create archive", choose a snapshot and the archive type. A differential archive also asks for an earlier snapshot to compare against, so it stores only what changed.
+Archives are created from snapshots, so you need a snapshot before creating an archive. You can create one in game or through the TUI or CLI. In the TUI, select "5. Create archive", choose a snapshot and the archive type. A differential archive also asks for an earlier snapshot to compare against, so it stores only what changed.
 
-An archive can be restored as a Minecraft world ("6. Restore as world files" in the TUI) or imported as a snapshot into a snapshot repository. Restoring as a world also updates an existing save in place, and choosing "delete extra" removes files that are not in the archive. If you distribute a world using archives, you can package the mod and TUI launcher script with them (the script content is shown earlier in this README).
+An archive can be restored as a Minecraft world ("7. Restore as world files" in the TUI) or imported as a snapshot into a snapshot repository. Restoring as a world also updates an existing save in place, and choosing "delete extra" removes files that are not in the archive. If you distribute a world using archives, you can package the mod and TUI launcher script with them (the script content is shown earlier in this README).
 
 The archive format is independent of the Minecraft version. You can use the CLI or TUI to compress worlds from versions that the mod does not support.
 
@@ -198,10 +198,12 @@ The archive format is independent of the Minecraft version. You can use the CLI 
 | --- | --- |
 | `/foldbackup backup` | Create a snapshot manually |
 | `/foldbackup backup --force` | Create a backup without waiting for the minimum interval |
-| `/foldbackup list` | List snapshots |
+| `/foldbackup list` | List snapshots with repository space summary (unique, shared, and cumulative reclaimable space) |
 | `/foldbackup status` | Show task status |
-| `/foldbackup info <snapshot-id>` | Show snapshot details |
-| `/foldbackup delete <snapshot-id>` | Delete a snapshot |
+| `/foldbackup info <snapshot-id>` | Show snapshot details and current unique/shared space breakdown |
+| `/foldbackup delete [--dry-run] <id1> [id2 ...]` | Delete one or more snapshots, or estimate reclaimed space with `--dry-run` |
+| `/foldbackup pin <snapshot-id>` | Pin a snapshot to protect it from automatic cleanup and manual deletion |
+| `/foldbackup unpin <snapshot-id>` | Remove pin protection from a snapshot |
 | `/foldbackup preview <x> <z> [snapshot-id]` | Preview a historical chunk in the current dimension |
 | `/foldbackup preview exit` | End the preview |
 | `/foldbackup rollback chunk <x> <z> [snapshot-id]` | Roll back a single chunk in the current dimension |
@@ -232,7 +234,7 @@ The configuration file is located at `config/foldbackup-server.toml` in the work
 | `localization.autoDetectPlayerLanguage` | `true` | Use each player's reported language when it is supported |
 
 > [!WARNING]
-> **Automatic cleanup may delete all historical snapshots, including manually created backups.** The default limits bound only repository size (50 GiB) and free space (5 GiB); there is no age limit, so cleanup can delete recent snapshots to satisfy those targets. The free-space target does not mean space has been reserved for the next backup. Set all three cleanup limits to 0 to disable automatic deletion, or turn off automatic cleanup with `retention.enabled`.
+> **Automatic cleanup may delete all unpinned historical snapshots, including manually created backups.** The default limits bound only repository size (50 GiB) and free space (5 GiB); there is no age limit, so cleanup can delete recent snapshots to satisfy those targets. The free-space target does not mean space has been reserved for the next backup. Pin important snapshots with `/foldbackup pin <snapshot-id>` (or via CLI/TUI) to protect them, set all three cleanup limits to 0 to disable automatic deletion, or turn off automatic cleanup with `retention.enabled`.
 
 `general.excludePatterns` matches paths relative to the world directory, using `/` as the path separator. By default, it excludes `**/session.lock`, `**/backups`, `**/.backups`, `**/*.wip`, and `**/DistantHorizons.sqlite`. If a directory matches, its entire subtree is excluded.
 
