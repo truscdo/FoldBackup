@@ -198,7 +198,7 @@ The archive format is independent of the Minecraft version. You can use the CLI 
 | --- | --- |
 | `/foldbackup backup` | Create a snapshot manually |
 | `/foldbackup backup --force` | Create a backup without waiting for the minimum interval |
-| `/foldbackup list` | List snapshots with repository space summary (unique, shared, and cumulative reclaimable space) |
+| `/foldbackup list [page]` | List snapshots (10 per page) with repository space summary (unique, shared, and cumulative reclaimable space) |
 | `/foldbackup status` | Show task status |
 | `/foldbackup info <snapshot-id>` | Show snapshot details and current unique/shared space breakdown |
 | `/foldbackup delete [--dry-run] <id1> [id2 ...]` | Delete one or more snapshots, or estimate reclaimed space with `--dry-run` |

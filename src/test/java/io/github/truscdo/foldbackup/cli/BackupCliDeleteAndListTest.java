@@ -72,7 +72,7 @@ class BackupCliDeleteAndListTest {
         assertTrue(output.contains("Snapshots (3):"), output);
         assertTrue(output.contains("Stored:"), output);
         assertTrue(output.contains("Unique: 35.0M + Shared: 115.0M [All: 100.0M]"), output);
-        assertTrue(output.contains("Pinned: 1 (Held: 5.0M)"), output);
+        assertTrue(output.contains("Pinned: 1 (Unique: 5.0M)"), output);
         assertTrue(output.contains("S-20260901_120000 [PIN]"), output);
         assertTrue(output.contains("Unique  Reclaim"), output);
         assertFalse(output.contains("[PINNED]"), output);

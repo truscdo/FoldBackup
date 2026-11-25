@@ -22,19 +22,30 @@ public class ArchiveTui {
     private final Path archiveRoot;
     private final Path onlineRoot;
     private final ConsolePrompt prompt;
+    private final int pageSize;
 
     public ArchiveTui(Path archiveRoot, Path onlineRoot, ConsolePrompt prompt) {
+        this(archiveRoot, onlineRoot, prompt, PagedConsoleList.DEFAULT_PAGE_SIZE);
+    }
+
+    ArchiveTui(Path archiveRoot, Path onlineRoot, ConsolePrompt prompt, int pageSize) {
+        if (pageSize < 1) {
+            throw new IllegalArgumentException("pageSize must be >= 1: " + pageSize);
+        }
         this.archiveRoot = Objects.requireNonNull(archiveRoot, "archiveRoot");
         this.onlineRoot = Objects.requireNonNull(onlineRoot, "onlineRoot");
         this.prompt = Objects.requireNonNull(prompt, "prompt");
+        this.pageSize = pageSize;
     }
 
     void exportArchive() {
+        int currentPage = 1;
         while (true) {
-            SelectedArchive selected = selectArchive();
+            SelectedArchive selected = selectArchive(currentPage);
             if (selected == null) {
                 return;
             }
+            currentPage = selected.page();
 
             String targetId = selected.target().meta().sourceSnapshotId;
             Path defaultOutput = ArchiveDefaults.worldExport(targetId);
@@ -48,7 +59,7 @@ public class ArchiveTui {
     }
 
     void verifyArchives() {
-        SelectedArchive selected = selectArchive();
+        SelectedArchive selected = selectArchive(1);
         if (selected == null) {
             return;
         }
@@ -98,7 +109,7 @@ public class ArchiveTui {
     }
 
     /** A selected target plus the full archive required to read it. */
-    private record SelectedArchive(ArchiveTarInfo full, ArchiveTarInfo target) {
+    private record SelectedArchive(ArchiveTarInfo full, ArchiveTarInfo target, int page) {
         Path fullTar() {
             return full.tar();
         }
@@ -112,7 +123,7 @@ public class ArchiveTui {
      * Lists all valid full/diff archives. Selecting a diff automatically resolves
      * its baseline full by epoch, as required by the TUI flow.
      */
-    private SelectedArchive selectArchive() {
+    private SelectedArchive selectArchive(int initialPage) {
         List<ArchiveTarInfo> tars = ArchiveTarScanner.scan(archiveRoot);
         List<ArchiveTarInfo> archives = tars.stream()
                 .filter(t -> t.meta() != null && (t.meta().isFull() || t.meta().isDiff()))
@@ -122,29 +133,35 @@ public class ArchiveTui {
             return null;
         }
 
-        System.out.println();
-        System.out.printf("%-4s %-8s %-22s %-30s %-22s %8s %8s %10s%n",
-                "#", "Type", "Epoch", "Source", "BaseEpoch", "Regions", "Chunks", "Size");
-        System.out.println("-".repeat(130));
-        for (int i = 0; i < archives.size(); i++) {
-            ArchiveTarInfo t = archives.get(i);
-            String baseEpoch = t.meta().isDiff()
-                    ? FormatUtil.formatEpoch(t.meta().baseEpoch) : "-";
-            System.out.printf("%-4d %-8s %-22s %-30s %-22s %8d %8d %10s%n",
-                    i + 1, t.meta().type, FormatUtil.formatEpoch(t.meta().epoch),
-                    t.meta().sourceSnapshotId, baseEpoch, t.meta().regionCount,
-                    t.meta().chunkCount, FormatUtil.formatSize(t.size()));
-        }
-        System.out.println();
-
-        int choice = prompt.readInt("Select archive by number (0 = back): ", 0, archives.size());
-        if (choice <= 0) {
+        var picked = PagedConsoleList.selectSingle(
+                prompt,
+                System.out,
+                archives,
+                pageSize,
+                initialPage,
+                "Select archive by number (0 = back): ",
+                "Select archive by number",
+                (slice, out) -> {
+                    out.printf("%-4s %-8s %-22s %-30s %-22s %8s %8s %10s%n",
+                            "#", "Type", "Epoch", "Source", "BaseEpoch", "Regions", "Chunks", "Size");
+                    out.println("-".repeat(130));
+                    int rowNum = slice.startIndex();
+                    for (ArchiveTarInfo t : slice.items()) {
+                        String baseEpoch = t.meta().isDiff()
+                                ? FormatUtil.formatEpoch(t.meta().baseEpoch) : "-";
+                        out.printf("%-4d %-8s %-22s %-30s %-22s %8d %8d %10s%n",
+                                rowNum++, t.meta().type, FormatUtil.formatEpoch(t.meta().epoch),
+                                t.meta().sourceSnapshotId, baseEpoch, t.meta().regionCount,
+                                t.meta().chunkCount, FormatUtil.formatSize(t.size()));
+                    }
+                });
+        if (picked.eof() || picked.back()) {
             return null;
         }
 
-        ArchiveTarInfo target = archives.get(choice - 1);
+        ArchiveTarInfo target = archives.get(picked.index() - 1);
         if (target.meta().isFull()) {
-            return new SelectedArchive(target, target);
+            return new SelectedArchive(target, target, picked.currentPage());
         }
 
         Path fullPath;
@@ -163,6 +180,6 @@ public class ArchiveTui {
                 .filter(t -> t.tar().equals(fullPath))
                 .findFirst()
                 .orElseThrow();
-        return new SelectedArchive(full, target);
+        return new SelectedArchive(full, target, picked.currentPage());
     }
 }

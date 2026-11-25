@@ -39,14 +39,23 @@ public class BackupTui {
     private final Path archiveRoot;
     private final ArchiveTui archiveOperations;
     private final ConsolePrompt prompt;
+    private final int pageSize;
 
     private record StoreContext(SnapshotStore snapshotManager, BlobStore blobStore, BackupExporter exporter) {}
 
     public BackupTui(Path backupRoot, Path archiveRoot, ConsolePrompt prompt) {
+        this(backupRoot, archiveRoot, prompt, PagedConsoleList.DEFAULT_PAGE_SIZE);
+    }
+
+    BackupTui(Path backupRoot, Path archiveRoot, ConsolePrompt prompt, int pageSize) {
+        if (pageSize < 1) {
+            throw new IllegalArgumentException("pageSize must be >= 1: " + pageSize);
+        }
         this.backupRoot = Objects.requireNonNull(backupRoot, "backupRoot");
         this.archiveRoot = Objects.requireNonNull(archiveRoot, "archiveRoot");
         this.prompt = Objects.requireNonNull(prompt, "prompt");
-        this.archiveOperations = new ArchiveTui(archiveRoot, backupRoot, prompt);
+        this.pageSize = pageSize;
+        this.archiveOperations = new ArchiveTui(archiveRoot, backupRoot, prompt, pageSize);
     }
 
     private StoreContext openStore() throws IOException {
@@ -184,12 +193,25 @@ public class BackupTui {
             return;
         }
 
-        System.out.println();
-        System.out.println("Snapshots (" + snapshots.size() + "):");
-        SnapshotTablePrinter.printSummary(view.summary(), System.out);
-        System.out.println();
-        SnapshotTablePrinter.printList(snapshots, System.out);
-        System.out.println();
+        PagedConsoleList.browse(
+                prompt,
+                System.out,
+                snapshots,
+                pageSize,
+                slice -> {
+                    System.out.println();
+                    if (slice.isMultiPage()) {
+                        System.out.println("Snapshots (" + slice.totalItems() + ") - Page "
+                                + slice.page() + "/" + slice.totalPages()
+                                + " (showing #" + slice.startIndex() + "-#" + slice.endIndex() + "):");
+                    } else {
+                        System.out.println("Snapshots (" + slice.totalItems() + "):");
+                    }
+                    SnapshotTablePrinter.printSummary(view.summary(), System.out);
+                    System.out.println();
+                },
+                (slice, out) -> SnapshotTablePrinter.printListPage(snapshots, slice, out),
+                out -> SnapshotTablePrinter.printList(snapshots, out));
     }
 
     // ──────────────────────────────────────────────
@@ -203,16 +225,22 @@ public class BackupTui {
             return;
         }
 
+        int currentPage = 1;
         while (true) {
-            System.out.println();
-            SnapshotTablePrinter.printSelection(snapshots, System.out);
-            System.out.println();
-
-            int snapChoice = prompt.readInt("Select a snapshot by number (0 = back): ", 0, snapshots.size());
-            if (snapChoice <= 0) {
+            var picked = PagedConsoleList.selectSingle(
+                    prompt,
+                    System.out,
+                    snapshots,
+                    pageSize,
+                    currentPage,
+                    "Select a snapshot by number (0 = back): ",
+                    "Select a snapshot by number",
+                    (slice, out) -> SnapshotTablePrinter.printSelectionPage(snapshots, slice, out));
+            if (picked.eof() || picked.back()) {
                 return;
             }
-            BackupExporter.SnapshotInfo selected = snapshots.get(snapChoice - 1);
+            currentPage = picked.currentPage();
+            BackupExporter.SnapshotInfo selected = snapshots.get(picked.index() - 1);
 
             // 0 here returns to snapshot selection.
             while (true) {
@@ -323,13 +351,18 @@ public class BackupTui {
             return;
         }
 
+        int currentPage = 1;
         while (true) {
-            System.out.println();
-            SnapshotTablePrinter.printSelection(snapshots, System.out);
-            System.out.println();
-
-            ConsolePrompt.MultiSelection selection = prompt.readMultiSelection(
-                    "Select snapshot(s) to delete (e.g. 5, 4-5, 2,4-5; 0 = back): ", snapshots.size());
+            var picked = PagedConsoleList.selectMultiple(
+                    prompt,
+                    System.out,
+                    snapshots,
+                    pageSize,
+                    currentPage,
+                    "Select snapshot(s) to delete (e.g. 5, 4-5, 2,4-5; 0 = back): ",
+                    (slice, out) -> SnapshotTablePrinter.printSelectionPage(snapshots, slice, out));
+            currentPage = picked.currentPage();
+            ConsolePrompt.MultiSelection selection = picked.selection();
             if (selection.eof() || selection.back()) {
                 return;
             }
@@ -420,16 +453,19 @@ public class BackupTui {
             return;
         }
 
-        System.out.println();
-        SnapshotTablePrinter.printSelection(snapshots, System.out);
-        System.out.println();
-
-        int snapChoice = prompt.readInt(
-                "Select a snapshot to pin/unpin by number (0 = back): ", 0, snapshots.size());
-        if (snapChoice <= 0) {
+        var picked = PagedConsoleList.selectSingle(
+                prompt,
+                System.out,
+                snapshots,
+                pageSize,
+                1,
+                "Select a snapshot to pin/unpin by number (0 = back): ",
+                "Select a snapshot to pin/unpin by number",
+                (slice, out) -> SnapshotTablePrinter.printSelectionPage(snapshots, slice, out));
+        if (picked.eof() || picked.back()) {
             return;
         }
-        BackupExporter.SnapshotInfo selected = snapshots.get(snapChoice - 1);
+        BackupExporter.SnapshotInfo selected = snapshots.get(picked.index() - 1);
         boolean targetPinned = !selected.pinned;
         try {
             store.snapshotManager().setPinned(selected.epochSeconds, targetPinned);
@@ -446,17 +482,23 @@ public class BackupTui {
             return;
         }
 
+        int currentPage = 1;
         while (true) {
             // 1. Select target snapshot.
-            System.out.println();
-            SnapshotTablePrinter.printSelection(snapshots, System.out);
-            System.out.println();
-            int targetChoice = prompt.readInt(
-                    "Select target snapshot by number (0 = back): ", 0, snapshots.size());
-            if (targetChoice <= 0) {
+            var picked = PagedConsoleList.selectSingle(
+                    prompt,
+                    System.out,
+                    snapshots,
+                    pageSize,
+                    currentPage,
+                    "Select target snapshot by number (0 = back): ",
+                    "Select target snapshot by number",
+                    (slice, out) -> SnapshotTablePrinter.printSelectionPage(snapshots, slice, out));
+            if (picked.eof() || picked.back()) {
                 return;
             }
-            BackupExporter.SnapshotInfo target = snapshots.get(targetChoice - 1);
+            currentPage = picked.currentPage();
+            BackupExporter.SnapshotInfo target = snapshots.get(picked.index() - 1);
 
             // 0 returns to target selection.
             while (true) {
@@ -483,16 +525,24 @@ public class BackupTui {
             return false;
         }
 
+        int currentPage = 1;
         while (true) {
             System.out.println();
             System.out.println("Base snapshots earlier than target " + target.id + ":");
-            SnapshotTablePrinter.printSelection(bases, System.out);
-            System.out.println();
-            int baseChoice = prompt.readInt(
-                    "Select base snapshot by number (0 = back): ", 0, bases.size());
-            if (baseChoice <= 0) return false;
+            var picked = PagedConsoleList.selectSingle(
+                    prompt,
+                    System.out,
+                    bases,
+                    pageSize,
+                    currentPage,
+                    "Select base snapshot by number (0 = back): ",
+                    "Select base snapshot by number",
+                    (slice, out) -> SnapshotTablePrinter.printSelectionPage(bases, slice, out));
+            if (picked.eof()) return true;
+            if (picked.back()) return false;
+            currentPage = picked.currentPage();
 
-            BackupExporter.SnapshotInfo base = bases.get(baseChoice - 1);
+            BackupExporter.SnapshotInfo base = bases.get(picked.index() - 1);
             var decision = confirmArchiveCreate(threads -> List.of(
                     "  Type:   diff",
                     "  Base:   " + base.id,

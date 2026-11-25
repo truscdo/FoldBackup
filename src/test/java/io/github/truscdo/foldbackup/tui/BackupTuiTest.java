@@ -170,12 +170,16 @@ class BackupTuiTest {
     }
 
     private String runTui(Path store, String input) {
+        return runTui(store, PagedConsoleList.DEFAULT_PAGE_SIZE, input);
+    }
+
+    private String runTui(Path store, int pageSize, String input) {
         var output = new ByteArrayOutputStream();
         PrintStream previous = System.out;
         try {
             System.setOut(new PrintStream(output, true));
             new BackupTui(store, root.resolve("export-archive"),
-                    new ConsolePrompt(new StringReader(input), System.out)).run();
+                    new ConsolePrompt(new StringReader(input), System.out), pageSize).run();
         } finally {
             System.setOut(previous);
         }
@@ -266,5 +270,87 @@ class BackupTuiTest {
         assertTrue(text.contains("Deleted 2 snapshot(s): S-20260917_110000, S-20260917_100000"), text);
         assertEquals(java.util.List.of("S-20260917_120000"),
                 new io.github.truscdo.foldbackup.core.store.SnapshotStore(online).listSnapshots());
+    }
+
+    @Test
+    void listSnapshotsSupportsPagingNavigationAndShowAll() throws Exception {
+        Path store = createMultiSnapshotStore("tui-list-paged", 5, -1);
+
+        // Browse pages: 1 -> n -> p -> g 3 -> 0 (back to menu) -> 1 -> a (show all) -> 0 (exit)
+        String text = runTui(store, 2, "1\nn\np\ng 3\n0\n1\na\n0\n");
+
+        assertTrue(text.contains("Snapshots (5) - Page 1/3 (showing #1-#2):"), text);
+        assertTrue(text.contains("Snapshots (5) - Page 2/3 (showing #3-#4):"), text);
+        assertTrue(text.contains("Snapshots (5) - Page 3/3 (showing #5-#5):"), text);
+        assertTrue(text.contains("Snapshots (5):"), text);
+        assertTrue(text.contains("5  S-20260917_100001"), text);
+    }
+
+    @Test
+    void deleteMenuPaginatesSupportsCrossPageSelectionAndPreservesPageOnPinBlock() throws Exception {
+        // #1=100005, #2=100004, #3=100003, #4=100002 (PIN), #5=100001
+        Path store = createMultiSnapshotStore("tui-delete-paged", 5, 2000L);
+
+        // Enter delete (3) -> next page (n -> Page 2/3) -> try 3-4 (blocked by pinned #4, stays on Page 2/3)
+        // -> cross-page selection 2,5 -> confirm (1) -> exit (0)
+        String text = runTui(store, 2, "3\nn\n3-4\n2,5\n1\n0\n");
+
+        assertTrue(text.contains("Cannot delete pinned snapshot(s):"), text);
+        assertTrue(text.contains("#4 S-20260917_100002 [PIN]"), text);
+        int blockIdx = text.indexOf("Cannot delete pinned snapshot(s):");
+        assertTrue(text.indexOf("Page 2/3 (showing #3-#4 of 5):", blockIdx) > blockIdx,
+                "must stay on page 2 after pin block: " + text);
+        assertTrue(text.contains("Deleted 2 snapshot(s): S-20260917_100004, S-20260917_100001"), text);
+        assertEquals(java.util.List.of("S-20260917_100005", "S-20260917_100003", "S-20260917_100002"),
+                new io.github.truscdo.foldbackup.core.store.SnapshotStore(store).listSnapshots());
+    }
+
+    @Test
+    void exportPinAndArchiveCreateSupportPagingAndGlobalIndices() throws Exception {
+        // #1=100005, #2=100004, #3=100003, #4=100002, #5=100001
+        Path online = createMultiSnapshotStore("tui-actions-paged", 5, -1);
+        Path archive = Files.createDirectory(root.resolve("tui-actions-archive"));
+        var output = new ByteArrayOutputStream();
+        PrintStream previous = System.out;
+        try {
+            System.setOut(new PrintStream(output, true));
+            // 1) Pin (#4 on page 2): 4 -> n -> 4
+            // 2) Export back-navigation preserves page 3: 2 -> n -> n -> 5 -> 1(zip) -> 0(zip choice) -> 0(select) -> 0(menu)
+            // 3) Create diff archive (target #1 picked from page 3, base #4 picked from base page 2):
+            //    5 -> g 3 -> 1(#1) -> 1(diff) -> n -> 4(base #4 = 100001) -> \n -> 1 -> 0
+            String input = "4\nn\n4\n2\nn\nn\n5\n1\n0\n0\n0\n5\ng 3\n1\n1\nn\n4\n\n1\n0\n";
+            new BackupTui(online, archive, new ConsolePrompt(new StringReader(input), System.out), 2).run();
+        } finally {
+            System.setOut(previous);
+        }
+
+        String text = output.toString();
+        assertTrue(text.contains("Pinned snapshot S-20260917_100002"), text);
+        assertTrue(new io.github.truscdo.foldbackup.core.store.SnapshotStore(online)
+                .loadSnapshot(2000L).isPinned());
+
+        int afterZipBack = text.indexOf("Package as zip?");
+        assertTrue(text.indexOf("Page 3/3 (showing #5-#5 of 5):", afterZipBack) > afterZipBack,
+                "export must stay on page 3 when backing out of zip choice: " + text);
+
+        assertTrue(text.contains("Page 2/2 (showing #3-#4 of 4):"), text);
+        assertTrue(Files.exists(archive.resolve("S-20260917_100001[S-20260917_100005].tar")), text);
+    }
+
+    private Path createMultiSnapshotStore(String name, int count, long pinnedEpoch) throws Exception {
+        Path storeDir = Files.createDirectory(root.resolve(name));
+        var store = new io.github.truscdo.foldbackup.core.store.SnapshotStore(storeDir);
+        long mb = 1024L * 1024L;
+        for (int i = 1; i <= count; i++) {
+            long epoch = i * 1000L;
+            String id = String.format("S-20260917_%06d", 100000 + i);
+            var sn = new io.github.truscdo.foldbackup.core.store.SnapshotManifest(id, epoch, "world");
+            sn.getSummary().setTotalCompressedBytes(i * mb);
+            store.saveSnapshot(sn);
+            if (epoch == pinnedEpoch) {
+                store.setPinned(epoch, true);
+            }
+        }
+        return storeDir;
     }
 }

@@ -200,7 +200,7 @@ java -jar ../mods/foldbackup-<版本>.jar snapshot rollback <快照ID> --world .
 | --- | --- |
 | `/foldbackup backup` | 手动创建快照 |
 | `/foldbackup backup --force` | 跳过最小备份间隔触发备份 |
-| `/foldbackup list` | 查看快照列表与仓库空间摘要（独占、共享与累计可清空间） |
+| `/foldbackup list [页码]` | 分页查看快照列表（每页 10 条）与仓库空间摘要（独占、共享与累计可清空间） |
 | `/foldbackup status` | 查看任务状态 |
 | `/foldbackup info <快照ID>` | 查看快照详情与当前独占/共享空间分布 |
 | `/foldbackup delete [--dry-run] <id1> [id2 ...]` | 删除一个或多个快照，或加 `--dry-run` 预估可释放空间 |

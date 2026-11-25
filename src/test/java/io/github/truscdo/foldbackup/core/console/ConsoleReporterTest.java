@@ -1,6 +1,7 @@
 package io.github.truscdo.foldbackup.core.console;
 
 import io.github.truscdo.foldbackup.core.BackupExporter;
+import io.github.truscdo.foldbackup.core.PageSlice;
 import io.github.truscdo.foldbackup.core.archive.ArchiveVerifier;
 import org.junit.jupiter.api.Test;
 
@@ -115,7 +116,7 @@ class ConsoleReporterTest {
                 1024L * 1024 * 100, 1024L * 128, 1024L * 1024 * 20, 1024L * 1024 * 80,
                 1024L * 1024 * 70, 1024L * 1024 * 10, 1024L * 1024 * 200, 1, 1024L * 1024 * 15);
         SnapshotTablePrinter.printSummary(withPin, c1.stream());
-        assertTrue(c1.output().contains("Pinned: 1 (Held: 15.0M)"), c1.output());
+        assertTrue(c1.output().contains("Pinned: 1 (Unique: 15.0M)"), c1.output());
         assertTrue(c1.output().contains("[All: 70.0M]"), c1.output());
         assertTrue(c1.output().contains("saved 50.0%"), c1.output());
 
@@ -125,5 +126,47 @@ class ConsoleReporterTest {
                 1024L * 1024 * 70, 1024L * 1024 * 10, 1024L * 1024 * 200, 0, 0L);
         SnapshotTablePrinter.printSummary(withoutPin, c2.stream());
         assertTrue(c2.output().trim().endsWith("Pinned: 0"), c2.output());
+    }
+
+    @Test
+    void pagedListAndSelectionUseGlobalRowNumbersAndConsistentColumnWidths() {
+        var snaps = List.of(
+                new BackupExporter.SnapshotInfo(
+                        4000L, "S-20260828_130000", "2026-08-28 13:00:00", 5, 2, 1000, 4000, 100, 300, false),
+                new BackupExporter.SnapshotInfo(
+                        3000L, "S-20260828_120000", "2026-08-28 12:00:00", 5, 2, 1000, 4000, 150, 200, false),
+                new BackupExporter.SnapshotInfo(
+                        2000L, "S-20260828_110000", "2026-08-28 11:00:00", 5, 2, 1000, 4000, 200, 100, false),
+                new BackupExporter.SnapshotInfo(
+                        1000L, "S-20260828_100000", "2026-08-28 10:00:00", 5, 2, 1000, 4000, 300, 0, true));
+
+        PageSlice<BackupExporter.SnapshotInfo> page1 = PageSlice.of(snaps, 1, 3);
+        PageSlice<BackupExporter.SnapshotInfo> page2 = PageSlice.of(snaps, 2, 3);
+
+        var listP1 = capture();
+        SnapshotTablePrinter.printListPage(snaps, page1, listP1.stream());
+        var listP2 = capture();
+        SnapshotTablePrinter.printListPage(snaps, page2, listP2.stream());
+
+        String[] p1Lines = listP1.output().strip().split("\\R");
+        String[] p2Lines = listP2.output().strip().split("\\R");
+        assertEquals(5, p1Lines.length);
+        assertEquals(3, p2Lines.length);
+        assertEquals(p1Lines[0].length(), p2Lines[0].length(), "header width must stay fixed across pages");
+        assertEquals(p1Lines[1].length(), p2Lines[1].length(), "separator width must stay fixed across pages");
+        assertTrue(p1Lines[2].startsWith("1  S-20260828_130000"));
+        assertTrue(p2Lines[2].startsWith("4  S-20260828_100000 [PIN]"));
+
+        var selP1 = capture();
+        SnapshotTablePrinter.printSelectionPage(snaps, page1, selP1.stream());
+        var selP2 = capture();
+        SnapshotTablePrinter.printSelectionPage(snaps, page2, selP2.stream());
+
+        String[] s1Lines = selP1.output().strip().split("\\R");
+        String[] s2Lines = selP2.output().strip().split("\\R");
+        assertEquals(5, s1Lines.length);
+        assertEquals(3, s2Lines.length);
+        assertEquals(s1Lines[0].length(), s2Lines[0].length(), "selection width must stay fixed across pages");
+        assertTrue(s2Lines[2].startsWith("4  S-20260828_100000 [PIN]"));
     }
 }

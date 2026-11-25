@@ -198,7 +198,7 @@ El formato de archivo es independiente de la versión de Minecraft. Puedes usar 
 | --- | --- |
 | `/foldbackup backup` | Crear una instantánea manualmente |
 | `/foldbackup backup --force` | Crear una copia de seguridad sin esperar el intervalo mínimo |
-| `/foldbackup list` | Listar las instantáneas con resumen de espacio del repositorio (único, compartido y recuperable acumulado) |
+| `/foldbackup list [página]` | Listar las instantáneas (10 por página) con resumen de espacio del repositorio (único, compartido y recuperable acumulado) |
 | `/foldbackup status` | Mostrar el estado de las tareas |
 | `/foldbackup info <snapshot-id>` | Mostrar los detalles de una instantánea y su distribución actual de espacio único/compartido |
 | `/foldbackup delete [--dry-run] <id1> [id2 ...]` | Eliminar una o varias instantáneas, o estimar el espacio recuperable con `--dry-run` |

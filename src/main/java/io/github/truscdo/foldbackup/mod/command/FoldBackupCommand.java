@@ -3,6 +3,7 @@ package io.github.truscdo.foldbackup.mod.command;
 import io.github.truscdo.foldbackup.core.BackupExporter;
 import io.github.truscdo.foldbackup.core.BackupResult;
 import io.github.truscdo.foldbackup.core.FormatUtil;
+import io.github.truscdo.foldbackup.core.PageSlice;
 import io.github.truscdo.foldbackup.core.store.SnapshotManifest;
 import io.github.truscdo.foldbackup.core.store.SnapshotReclamationEstimator;
 import io.github.truscdo.foldbackup.core.store.SnapshotStore;
@@ -14,10 +15,13 @@ import io.github.truscdo.foldbackup.mod.i18n.BackupStepFormat;
 import io.github.truscdo.foldbackup.mod.i18n.FoldBackupTranslations;
 import com.mojang.brigadier.Command;
 import com.mojang.brigadier.CommandDispatcher;
+import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
+import com.mojang.brigadier.suggestion.SuggestionProvider;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 
 import java.util.ArrayList;
@@ -26,9 +30,12 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Supplier;
 
 /** {@code /foldbackup} command for backup management. */
 public class FoldBackupCommand {
+
+        static final int LIST_PAGE_SIZE = 10;
 
         public static void register(CommandDispatcher<CommandSourceStack> dispatcher, FoldBackupMod mod) {
                 dispatcher.register(
@@ -40,7 +47,14 @@ public class FoldBackupCommand {
                                                                                 .executes(ctx -> runBackup(ctx, mod,
                                                                                                 true))))
                                                 .then(Commands.literal("list")
-                                                                .executes(ctx -> runList(ctx, mod)))
+                                                                .executes(ctx -> runList(ctx, mod, 1))
+                                                                .then(Commands.argument("page",
+                                                                                IntegerArgumentType.integer(1))
+                                                                                .suggests(suggestListPages(
+                                                                                                mod::getSnapshotStore))
+                                                                                .executes(ctx -> runList(ctx, mod,
+                                                                                                IntegerArgumentType
+                                                                                                                .getInteger(ctx, "page")))))
                                                 .then(Commands.literal("status")
                                                                 .executes(ctx -> showStatus(ctx, mod)))
                                                 .then(Commands.literal("info")
@@ -305,7 +319,33 @@ public class FoldBackupCommand {
                 }
         }
 
-        private static int runList(CommandContext<CommandSourceStack> ctx, FoldBackupMod mod) {
+        static SuggestionProvider<CommandSourceStack> suggestListPages(Supplier<SnapshotStore> snapshotStore) {
+                return (ctx, builder) -> {
+                        SnapshotStore store = snapshotStore.get();
+                        if (store == null) {
+                                return builder.buildFuture();
+                        }
+                        int totalPages = PageSlice.totalPages(store.listSnapshots().size(), LIST_PAGE_SIZE);
+                        if (totalPages <= 0) {
+                                return builder.buildFuture();
+                        }
+                        String remaining = builder.getRemaining();
+                        int suggested = 0;
+                        for (int p = 1; p <= totalPages; p++) {
+                                String text = String.valueOf(p);
+                                if (text.startsWith(remaining)) {
+                                        builder.suggest(text);
+                                        suggested++;
+                                        if (suggested >= 20) {
+                                                break;
+                                        }
+                                }
+                        }
+                        return builder.buildFuture();
+                };
+        }
+
+        private static int runList(CommandContext<CommandSourceStack> ctx, FoldBackupMod mod, int page) {
                 CommandSourceStack source = ctx.getSource();
                 SnapshotStore store = BackendGuard.requireSnapshotStore(source, mod);
                 if (store == null) {
@@ -320,41 +360,19 @@ public class FoldBackupCommand {
                                 return 0;
                         }
 
-                        SnapshotReclamationEstimator.RepositorySpaceSummary summary = view.summary();
-                        source.sendSuccess(() -> CommandFeedback.text(source, mod, "foldbackup.command.list.title",
-                                        snapshots.size()), false);
-                        if (summary.pinnedCount() > 0) {
-                                source.sendSuccess(() -> CommandFeedback.text(source, mod,
-                                                "foldbackup.command.list.summary_pinned",
-                                                FormatUtil.formatSize(summary.storedBytes()),
-                                                FormatUtil.formatSize(summary.totalUniqueBytes()),
-                                                FormatUtil.formatSize(summary.totalSharedBytes()),
-                                                FormatUtil.formatSize(summary.globalSharedBytes()),
-                                                summary.pinnedCount(),
-                                                FormatUtil.formatSize(summary.pinnedHeldBytes())), false);
-                        } else {
-                                source.sendSuccess(() -> CommandFeedback.text(source, mod,
-                                                "foldbackup.command.list.summary",
-                                                FormatUtil.formatSize(summary.storedBytes()),
-                                                FormatUtil.formatSize(summary.totalUniqueBytes()),
-                                                FormatUtil.formatSize(summary.totalSharedBytes()),
-                                                FormatUtil.formatSize(summary.globalSharedBytes())), false);
+                        int totalPages = PageSlice.totalPages(snapshots.size(), LIST_PAGE_SIZE);
+                        if (page < 1 || page > totalPages) {
+                                CommandFeedback.failure(source, mod,
+                                                "foldbackup.command.list.page_out_of_range", page, totalPages);
+                                return 0;
                         }
-                        source.sendSuccess(() -> CommandFeedback.text(source, mod, "foldbackup.command.list.header"),
-                                        false);
-                        for (BackupExporter.SnapshotInfo snapshot : snapshots) {
-                                String rowId = snapshot.pinned ? snapshot.id + " [PIN]" : snapshot.id;
-                                String rowRegions = String.valueOf(snapshot.regions);
-                                String rowFiles = String.valueOf(snapshot.files);
-                                String rowSize = FormatUtil.formatSize(snapshot.compressedBytes);
-                                String rowUnique = FormatUtil.formatSize(snapshot.uniqueBytes);
-                                String rowReclaim = snapshot.pinned
-                                                ? "-"
-                                                : FormatUtil.formatSize(snapshot.cumulativeSpaceBytes);
-                                source.sendSuccess(() -> CommandFeedback.text(source, mod,
-                                                "foldbackup.command.list.row",
-                                                rowId, snapshot.date, rowRegions, rowFiles,
-                                                rowSize, rowUnique, rowReclaim), false);
+
+                        PageSlice<BackupExporter.SnapshotInfo> slice = PageSlice.of(
+                                        snapshots, page, LIST_PAGE_SIZE);
+                        String language = FoldBackupTranslations.resolveLanguage(source, mod.getConfig());
+                        boolean interactive = source.getEntity() instanceof ServerPlayer;
+                        for (Component line : SnapshotListFormatter.formatPage(view, slice, language, interactive)) {
+                                source.sendSuccess(() -> line, false);
                         }
                 } catch (Exception exception) {
                         FoldBackupMod.LOG.error("Failed to list snapshots", exception);

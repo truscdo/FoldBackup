@@ -221,6 +221,40 @@ class ArchiveTuiTest {
         assertTrue(err.toString().contains("Restore failed: corrupt metadata"), err.toString());
     }
 
+    @Test
+    void archiveSelectionPaginatesPreservesPageAndSelectsSecondPageArchive() throws Exception {
+        writeTar("S-20260914_100000[full].tar", full(100, "S-20260914_100000"));
+        writeTar("S-20260914_110000[full].tar", full(200, "S-20260914_110000"));
+        writeTar("S-20260914_120000[full].tar", full(300, "S-20260914_120000"));
+
+        var verifyOut = new ByteArrayOutputStream();
+        PrintStream previous = System.out;
+        try {
+            System.setOut(new PrintStream(verifyOut, true));
+            new ArchiveTui(archive, archive, new ConsolePrompt(new StringReader("n\n3\n"),
+                    new PrintStream(verifyOut, true)), 2).verifyArchives();
+        } finally {
+            System.setOut(previous);
+        }
+        String verifyText = verifyOut.toString();
+        assertTrue(verifyText.contains("Page 1/2 (showing #1-#2 of 3):"), verifyText);
+        assertTrue(verifyText.contains("Page 2/2 (showing #3-#3 of 3):"), verifyText);
+        assertTrue(verifyText.contains("OK — no errors"), verifyText);
+
+        var exportOut = new ByteArrayOutputStream();
+        try {
+            System.setOut(new PrintStream(exportOut, true));
+            new ArchiveTui(archive, archive, new ConsolePrompt(new StringReader("n\n3\n0\n0\n"),
+                    new PrintStream(exportOut, true)), 2).exportArchive();
+        } finally {
+            System.setOut(previous);
+        }
+        String exportText = exportOut.toString();
+        int afterPrompt = exportText.indexOf("World files directory");
+        assertTrue(exportText.indexOf("Page 2/2 (showing #3-#3 of 3):", afterPrompt) > afterPrompt,
+                "exportArchive must preserve page 2 when backing out of path prompt: " + exportText);
+    }
+
     private void writeTar(String name, ArchiveSnapshot metadata) throws Exception {
         try (var output = Files.newOutputStream(archive.resolve(name));
                 var writer = new TarWriter(output)) {

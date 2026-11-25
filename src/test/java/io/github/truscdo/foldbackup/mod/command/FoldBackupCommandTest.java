@@ -1,6 +1,7 @@
 package io.github.truscdo.foldbackup.mod.command;
 
 import com.mojang.brigadier.CommandDispatcher;
+import com.mojang.brigadier.suggestion.Suggestion;
 import io.github.truscdo.foldbackup.core.store.BlobMaintenance;
 import io.github.truscdo.foldbackup.core.store.FileEntry;
 import io.github.truscdo.foldbackup.core.store.SnapshotManifest;
@@ -96,9 +97,22 @@ class FoldBackupCommandTest {
                 "foldbackup.command.delete.dry_run.title",
                 "foldbackup.command.delete.dry_run.item",
                 "foldbackup.command.delete.dry_run.summary",
-                "foldbackup.command.list.summary",
-                "foldbackup.command.list.summary_pinned",
+                "foldbackup.command.list.title",
+                "foldbackup.command.list.title_paged",
+                "foldbackup.command.list.summary_storage",
+                "foldbackup.command.list.summary_storage_pinned",
+                "foldbackup.command.list.summary_breakdown",
                 "foldbackup.command.list.header",
+                "foldbackup.command.list.row",
+                "foldbackup.command.list.row_pinned",
+                "foldbackup.command.list.row_hover",
+                "foldbackup.command.list.page_out_of_range",
+                "foldbackup.command.list.nav.prev",
+                "foldbackup.command.list.nav.next",
+                "foldbackup.command.list.nav.first_hover",
+                "foldbackup.command.list.nav.last_hover",
+                "foldbackup.command.list.nav.page_hover",
+                "foldbackup.command.list.nav.console",
                 "foldbackup.command.pin.success",
                 "foldbackup.command.pin.already",
                 "foldbackup.command.pin.failed",
@@ -232,12 +246,14 @@ class FoldBackupCommandTest {
         assertEquals(1, dispatcher.execute("foldbackup list", source));
         assertTrue(source.failures.isEmpty(), source.allOutput());
         String listWithPin = String.join("\n", source.successes);
-        assertTrue(listWithPin.contains("Pinned: §e1 §7[Held: 5.0M]"), listWithPin);
-        assertTrue(listWithPin.contains("S-20260901_120000 [PIN]"), listWithPin);
+        assertTrue(listWithPin.contains("Pinned: §e1 §7(Unique: 5.0M)"), listWithPin);
+        assertTrue(listWithPin.contains("Unique: §e35.0M §7| Shared: §f115.0M §7(All: 100.0M)"), listWithPin);
+        assertFalse(listWithPin.contains("Page "), "single page must not include Page suffix: " + listWithPin);
+        assertFalse(listWithPin.contains("to navigate"), "single page must not include nav hint: " + listWithPin);
         String pinnedRow = source.successes.stream()
-                .filter(line -> line.contains("S-20260901_120000 [PIN]"))
+                .filter(line -> line.contains("S-20260901_120000"))
                 .findFirst().orElseThrow();
-        assertTrue(pinnedRow.endsWith("| -"), pinnedRow);
+        assertTrue(pinnedRow.endsWith("| §e[PIN]"), pinnedRow);
 
         // /foldbackup info on pinned vs unpinned snapshot
         source.clear();
@@ -260,8 +276,66 @@ class FoldBackupCommandTest {
         assertEquals(1, dispatcher.execute("foldbackup list", source));
         String listWithoutPin = String.join("\n", source.successes);
         assertTrue(listWithoutPin.contains("Pinned: §f0"), listWithoutPin);
-        assertFalse(listWithoutPin.contains("Held:"), listWithoutPin);
+        assertFalse(listWithoutPin.contains("(Unique:"), listWithoutPin);
         assertFalse(listWithoutPin.contains("[PIN]"), listWithoutPin);
+    }
+
+    @Test
+    void listCommandPaginatesSuggestsPagesAndRejectsOutOfRange() throws Exception {
+        SnapshotStore store = new SnapshotStore(tempDir);
+        long mb = 1024L * 1024L;
+        Map<String, Long> sizes = Map.of("B", mb);
+        for (int i = 1; i <= 25; i++) {
+            String id = String.format("S-20260901_%06d", i);
+            store.saveSnapshot(snapshot(id, i * 1000L, sizes, "B"));
+        }
+
+        TestFoldBackupMod mod = new TestFoldBackupMod(store);
+        CommandDispatcher<CommandSourceStack> dispatcher = registerDispatcher(mod);
+        RecordingSource source = new RecordingSource();
+
+        // Page 1 (default): newest 10 snapshots (25..16)
+        assertEquals(1, dispatcher.execute("foldbackup list", source));
+        assertTrue(source.failures.isEmpty(), source.allOutput());
+        String p1 = String.join("\n", source.successes);
+        assertTrue(p1.contains("FoldBackup Snapshots (25, Page 1/3)"), p1);
+        assertTrue(p1.contains("S-20260901_000025"), p1);
+        assertTrue(p1.contains("S-20260901_000016"), p1);
+        assertFalse(p1.contains("S-20260901_000015"), p1);
+        assertTrue(p1.contains("Page §f1§7/§f3 §7(25 total)"), p1);
+
+        // Page 2: middle 10 snapshots (15..6)
+        source.clear();
+        assertEquals(1, dispatcher.execute("foldbackup list 2", source));
+        String p2 = String.join("\n", source.successes);
+        assertTrue(p2.contains("FoldBackup Snapshots (25, Page 2/3)"), p2);
+        assertTrue(p2.contains("S-20260901_000015"), p2);
+        assertTrue(p2.contains("S-20260901_000006"), p2);
+        assertFalse(p2.contains("S-20260901_000016"), p2);
+        assertFalse(p2.contains("S-20260901_000005"), p2);
+
+        // Page 3: remaining 5 snapshots (5..1)
+        source.clear();
+        assertEquals(1, dispatcher.execute("foldbackup list 3", source));
+        String p3 = String.join("\n", source.successes);
+        assertTrue(p3.contains("FoldBackup Snapshots (25, Page 3/3)"), p3);
+        assertTrue(p3.contains("S-20260901_000005"), p3);
+        assertTrue(p3.contains("S-20260901_000001"), p3);
+        assertFalse(p3.contains("S-20260901_000006"), p3);
+
+        // Page 4: out of range
+        source.clear();
+        assertEquals(0, dispatcher.execute("foldbackup list 4", source));
+        assertTrue(source.successes.isEmpty(), source.allOutput());
+        assertEquals(1, source.failures.size(), source.allOutput());
+        assertTrue(source.failures.getFirst().contains("Page 4 is out of range (valid range: 1-3)."),
+                source.allOutput());
+
+        // Tab suggestions for page argument
+        var suggestions = dispatcher.getCompletionSuggestions(
+                dispatcher.parse("foldbackup list ", source)).get();
+        assertEquals(List.of("1", "2", "3"),
+                suggestions.getList().stream().map(Suggestion::getText).toList());
     }
 
     private SnapshotStore createSampleStore() throws Exception {
