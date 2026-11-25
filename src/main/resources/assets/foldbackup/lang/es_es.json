@@ -1,5 +1,6 @@
 {
   "foldbackup.command.invalid_snapshot_id": "§c[FoldBackup] El formato del ID de la instantánea no es válido.",
+  "foldbackup.command.chunk.player_required": "§c[FoldBackup] Omitir las coordenadas del chunk solo está disponible para jugadores. Especifica 'at <x> <z>' (o 'in <dimensión> at <x> <z>') explícitamente.",
   "foldbackup.command.delete.started": "§6[FoldBackup] Eliminando la instantánea: §f%s§6...",
   "foldbackup.command.delete.failed": "§c[FoldBackup] No se pudo eliminar la instantánea %s. Consulta los registros del servidor.",
   "foldbackup.command.delete.cleanup_incomplete": "§e[FoldBackup] Instantánea §f%s §eeliminada, pero no se pudieron limpiar algunos archivos de respaldo sin uso. Consulta los registros del servidor.",

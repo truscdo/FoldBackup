@@ -160,9 +160,9 @@ exec java -jar "$JAR" tui --snapshot-root "$SCRIPT_DIR" --archive-root "$SCRIPT_
 
 Puedes previsualizar y restaurar un único chunk dentro del juego, o usar la CLI para restaurar un chunk directamente en un mundo sin conexión.
 
-Dentro del juego, usa `/foldbackup preview <x> <z> [snapshot-id]` para obtener una vista previa de un chunk desde una instantánea. Esto cambia la apariencia del chunk de destino en el cliente para mostrar su estado en el momento de esa instantánea, sin modificar el chunk real. `x` y `z` son coordenadas de chunk; puedes verlas en la pantalla F3 o dividir las coordenadas de bloque entre 16 redondeando hacia abajo. Un efecto de partículas azules marca el chunk previsualizado. Usa `/foldbackup preview exit` para salir de la vista previa.
+Dentro del juego, usa `/foldbackup preview from <snapshot-id>` (por defecto el chunk en el que estás) o `/foldbackup preview from <snapshot-id> at <x> <z>` para obtener una vista previa de un chunk desde una instantánea. Esto cambia la apariencia del chunk de destino en el cliente para mostrar su estado en el momento de esa instantánea, sin modificar el chunk real. `x` y `z` son coordenadas de chunk; puedes verlas en la pantalla F3 o dividir las coordenadas de bloque entre 16 redondeando hacia abajo. Un efecto de partículas azules marca el chunk previsualizado. Usa `/foldbackup preview exit` para salir de la vista previa.
 
-Para restaurar un chunk dentro del juego, usa `/foldbackup rollback chunk <x> <z> [snapshot-id]`. Puedes especificar una dimensión con `/foldbackup rollback chunk in <dimensión> <x> <z> [snapshot-id]`, o limitar el alcance con `blocks` (solo terreno, entidades de bloque y POI, conservando las entidades actuales) o `entities` (solo entidades, sin tocar el terreno ni las entidades de bloque): por ejemplo, `/foldbackup rollback chunk blocks <x> <z> [snapshot-id]` o `/foldbackup rollback chunk entities in <dimensión> <x> <z> [snapshot-id]`. El chunk de destino debe estar cargado en memoria. Para un chunk no cargado, utiliza el método sin conexión mediante la CLI que se muestra a continuación. Si omites el ID de la instantánea, se utiliza la más reciente.
+Para restaurar un chunk dentro del juego, usa `/foldbackup rollback chunk from <snapshot-id>` para restaurar el chunk en el que te encuentras. Para indicar coordenadas concretas, añade `at <x> <z>` o `in <dimensión> at <x> <z>` (obligatorio desde la consola del servidor o RCON), y opcionalmente limita el alcance con `blocks` (solo terreno, entidades de bloque y POI, conservando las entidades actuales) o `entities` (solo entidades, sin tocar el terreno ni las entidades de bloque): por ejemplo, `/foldbackup rollback chunk blocks from <snapshot-id> at <x> <z>` o `/foldbackup rollback chunk entities from <snapshot-id> in <dimensión> at <x> <z>`. El chunk de destino debe estar cargado en memoria. Para un chunk no cargado, utiliza el método sin conexión mediante la CLI que se muestra a continuación.
 
 Para los siguientes ejemplos con la CLI, se asume que el directorio actual es `foldbackups` y que el directorio del mundo del servidor está al mismo nivel y se llama `world`. Si ejecutas los comandos desde otro lugar, ajusta las rutas del JAR, del mundo y de las instantáneas según corresponda. También puedes indicar el directorio de instantáneas con `--snapshot-root <directorio>`. En modo de un jugador, el repositorio es `foldbackups/<nombre-de-carpeta-del-mundo>`, por lo que debes apuntar `--snapshot-root` a ese directorio. **Detén el servidor antes de realizar una restauración sin conexión.**
 
@@ -204,12 +204,12 @@ El formato de archivo es independiente de la versión de Minecraft. Puedes usar 
 | `/foldbackup delete [--dry-run] <id1> [id2 ...]` | Eliminar una o varias instantáneas, o estimar el espacio recuperable con `--dry-run` |
 | `/foldbackup pin <snapshot-id>` | Fijar una instantánea para protegerla de la limpieza automática y la eliminación manual |
 | `/foldbackup unpin <snapshot-id>` | Quitar la protección de fijado de una instantánea |
-| `/foldbackup preview <x> <z> [snapshot-id]` | Previsualizar un chunk histórico en la dimensión actual |
+| `/foldbackup preview from <snapshot-id> [at <x> <z>]` | Previsualizar un chunk histórico en la dimensión actual (por defecto, el chunk actual) |
 | `/foldbackup preview exit` | Salir de la vista previa |
-| `/foldbackup rollback chunk <x> <z> [snapshot-id]` | Restaurar un único chunk en la dimensión actual |
-| `/foldbackup rollback chunk in <dimensión> <x> <z> [snapshot-id]` | Restaurar un único chunk en la dimensión especificada |
-| `/foldbackup rollback chunk blocks [in <dimensión>] <x> <z> [snapshot-id]` | Restaurar solo bloques, entidades de bloque y POI de un chunk (conservando las entidades actuales) |
-| `/foldbackup rollback chunk entities [in <dimensión>] <x> <z> [snapshot-id]` | Restaurar solo entidades de un chunk (sin modificar bloques ni entidades de bloque) |
+| `/foldbackup rollback chunk from <snapshot-id> [at <x> <z>]` | Restaurar un único chunk en la dimensión actual (por defecto, el chunk actual) |
+| `/foldbackup rollback chunk from <snapshot-id> in <dimensión> at <x> <z>` | Restaurar un único chunk en la dimensión especificada |
+| `/foldbackup rollback chunk blocks from <snapshot-id> [in <dimensión> at <x> <z> \| at <x> <z>]` | Restaurar solo bloques, entidades de bloque y POI de un chunk (conservando las entidades actuales) |
+| `/foldbackup rollback chunk entities from <snapshot-id> [in <dimensión> at <x> <z> \| at <x> <z>]` | Restaurar solo entidades de un chunk (sin modificar bloques ni entidades de bloque) |
 
 ## Opciones clave de configuración
 

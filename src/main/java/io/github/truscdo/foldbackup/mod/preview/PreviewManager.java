@@ -71,12 +71,9 @@ public final class PreviewManager {
         if (store == null) {
             return 0;
         }
-        Long epochSeconds = null;
-        if (snapshotId != null) {
-            epochSeconds = BackendGuard.resolveEpoch(store, snapshotId, (key, args) -> message(player, key, args));
-            if (epochSeconds == null) {
-                return 0;
-            }
+        Long epochSeconds = BackendGuard.resolveEpoch(store, snapshotId, (key, args) -> message(player, key, args));
+        if (epochSeconds == null) {
+            return 0;
         }
         ChunkPos pos = new ChunkPos(x, z);
         ServerLevel level = player.serverLevel();
@@ -91,7 +88,7 @@ public final class PreviewManager {
         UUID token = UUID.randomUUID();
         pending.put(player.getUUID(), token);
         message(player, "foldbackup.preview.loading", pos.x, pos.z);
-        // 在仓库锁保护下一次性解析指定（或最新）快照。
+        // 在仓库锁保护下一次性解析指定快照。
         mod.readPreviewAsync(pos, epochSeconds, DimensionPath.forLevel(level))
                 .whenComplete((raw, error) -> player.server.execute(() -> {
                     if (!token.equals(pending.get(player.getUUID())))

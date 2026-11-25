@@ -160,11 +160,11 @@ exec java -jar "$JAR" tui --snapshot-root "$SCRIPT_DIR" --archive-root "$SCRIPT_
 
 支持游戏内使用命令预览与回档单个区块，同时也支持使用 CLI 直接操作游戏存档回档单个区块。
 
-在游戏中可以使用 `/foldbackup preview <x> <z> [快照ID]` 对目标快照和目标区块进行预览，这条命令会改变目标区块在客户端显示的内容，替换为目标快照时间的区块景象，不会真正地修改区块；
+在游戏中可以使用 `/foldbackup preview from <快照ID>`（默认预览脚下所在区块）或 `/foldbackup preview from <快照ID> at <x> <z>` 对目标快照和目标区块进行预览，这条命令会改变目标区块在客户端显示的内容，替换为目标快照时间的区块景象，不会真正地修改区块；
 `x` 与 `z` 是区块坐标，可以通过 F3 信息显示，或者将方块坐标除以 16 并向下取整获得；
 预览时目标区块会显示蓝色粒子效果进行区分，使用 `/foldbackup preview exit` 即可退出预览。
 
-游戏内回档可使用 `/foldbackup rollback chunk <x> <z> [快照ID]`，也可以用 `/foldbackup rollback chunk in <维度> <x> <z> [快照ID]` 指定维度，或使用 `blocks`（仅恢复地形、方块实体与 POI，保留当前实体）与 `entities`（仅恢复实体，不动地形与方块实体）限定范围，例如 `/foldbackup rollback chunk blocks <x> <z> [快照ID]` 或 `/foldbackup rollback chunk entities in <维度> <x> <z> [快照ID]`。目标区块必须已经加载到内存中；未加载的区块请使用下面的 CLI 离线回档方式。省略快照 ID 时使用最新快照。
+游戏内回档可使用 `/foldbackup rollback chunk from <快照ID>`（默认回档玩家当前所在区块）；也可以追加 `at <x> <z>` 或 `in <维度> at <x> <z>` 指定坐标和维度（服务端控制台或 RCON 执行时必须显式指定坐标），或使用 `blocks`（仅恢复地形、方块实体与 POI，保留当前实体）与 `entities`（仅恢复实体，不动地形与方块实体）限定范围，例如 `/foldbackup rollback chunk blocks from <快照ID> at <x> <z>` 或 `/foldbackup rollback chunk entities from <快照ID> in <维度> at <x> <z>`。目标区块必须已经加载到内存中；未加载的区块请使用下面的 CLI 离线回档方式。
 
 当需要使用 CLI 回档时，以下示例假设当前目录为 `foldbackups`，且服务端存档目录为同级的 `world`。如果在其它目录执行，需要相应调整 JAR、存档和快照目录路径；也可以用 `--snapshot-root <目录>` 指定快照目录。单机存档的仓库位于 `foldbackups/<存档目录名>`，需要把 `--snapshot-root` 指向该目录。**离线回档前必须先关闭服务端。**
 
@@ -206,12 +206,12 @@ java -jar ../mods/foldbackup-<版本>.jar snapshot rollback <快照ID> --world .
 | `/foldbackup delete [--dry-run] <id1> [id2 ...]` | 删除一个或多个快照，或加 `--dry-run` 预估可释放空间 |
 | `/foldbackup pin <快照ID>` | 保留快照，防止被自动清理或手动删除 |
 | `/foldbackup unpin <快照ID>` | 取消快照的保留保护 |
-| `/foldbackup preview <x> <z> [快照ID]` | 预览当前维度的历史区块 |
+| `/foldbackup preview from <快照ID> [at <x> <z>]` | 预览当前维度的历史区块（省略坐标时默认当前区块） |
 | `/foldbackup preview exit` | 结束预览 |
-| `/foldbackup rollback chunk <x> <z> [快照ID]` | 回档当前维度的单个区块 |
-| `/foldbackup rollback chunk in <维度> <x> <z> [快照ID]` | 回档指定维度的单个区块 |
-| `/foldbackup rollback chunk blocks [in <维度>] <x> <z> [快照ID]` | 仅回档区块的方块、方块实体与 POI（保留当前实体） |
-| `/foldbackup rollback chunk entities [in <维度>] <x> <z> [快照ID]` | 仅回档区块的实体（不改动方块与方块实体） |
+| `/foldbackup rollback chunk from <快照ID> [at <x> <z>]` | 回档当前维度的单个区块（省略坐标时默认当前区块） |
+| `/foldbackup rollback chunk from <快照ID> in <维度> at <x> <z>` | 回档指定维度的单个区块 |
+| `/foldbackup rollback chunk blocks from <快照ID> [in <维度> at <x> <z> \| at <x> <z>]` | 仅回档区块的方块、方块实体与 POI（保留当前实体） |
+| `/foldbackup rollback chunk entities from <快照ID> [in <维度> at <x> <z> \| at <x> <z>]` | 仅回档区块的实体（不改动方块与方块实体） |
 
 ## 关键配置
 

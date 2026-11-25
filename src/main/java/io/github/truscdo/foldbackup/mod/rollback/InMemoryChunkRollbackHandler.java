@@ -59,14 +59,14 @@ public class InMemoryChunkRollbackHandler {
     /**
      * 通过替换内存数据来回滚单个已加载的区块。
      *
-     * @param level      区块所在的维度
-     * @param chunkX     全局区块 X 坐标
-     * @param chunkZ     全局区块 Z 坐标
-     * @param epochSeconds 要恢复的快照 Epoch，或 {@code null} 表示使用最新的
+     * @param level        区块所在的维度
+     * @param chunkX       全局区块 X 坐标
+     * @param chunkZ       全局区块 Z 坐标
+     * @param epochSeconds 要恢复的快照 Epoch
      * @return 操作结果
      */
     public RollbackOutcome rollbackChunk(
-            ServerLevel level, int chunkX, int chunkZ, @Nullable Long epochSeconds) {
+            ServerLevel level, int chunkX, int chunkZ, long epochSeconds) {
         return rollbackChunk(level, chunkX, chunkZ, epochSeconds, RollbackScope.ALL);
     }
 
@@ -76,12 +76,12 @@ public class InMemoryChunkRollbackHandler {
      * @param level        区块所在的维度
      * @param chunkX       全局区块 X 坐标
      * @param chunkZ       全局区块 Z 坐标
-     * @param epochSeconds 要恢复的快照 Epoch，或 {@code null} 表示使用最新的
+     * @param epochSeconds 要恢复的快照 Epoch
      * @param scope        回档范围（{@link RollbackScope#ALL}、{@link RollbackScope#BLOCKS} 或 {@link RollbackScope#ENTITIES}）
      * @return 操作结果
      */
     public RollbackOutcome rollbackChunk(
-            ServerLevel level, int chunkX, int chunkZ, @Nullable Long epochSeconds, RollbackScope scope) {
+            ServerLevel level, int chunkX, int chunkZ, long epochSeconds, RollbackScope scope) {
         Objects.requireNonNull(scope, "scope");
         if (!level.getServer().isSameThread()) return failure("foldbackup.rollback.failure.server_thread");
 

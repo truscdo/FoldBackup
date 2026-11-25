@@ -98,7 +98,7 @@ public class OverworldBackupAndRollbackIT extends IntegrationTestBase {
                 // ── 步骤 4：执行 chunk [0, 0] 内存回档 ──
                 System.out.println("--- Step 4: Rollback chunk [0, 0] ---");
                 String rollbackResponse = rcon.sendCommand(
-                                "/foldbackup rollback chunk 0 0 " + snapshotId);
+                                "/foldbackup rollback chunk from " + snapshotId + " at 0 0");
                 System.out.println("  Rollback response: " + rollbackResponse);
 
                 assertTrue(rollbackResponse.contains("restored") || rollbackResponse.contains("✓"),
@@ -184,7 +184,7 @@ public class OverworldBackupAndRollbackIT extends IntegrationTestBase {
                 // ── 步骤 8：回档 chunk [2, 0] ──
                 System.out.println("--- Step 8: Rollback chunk [2, 0] ---");
                 String rollbackResponse = rcon.sendCommand(
-                                "/foldbackup rollback chunk 2 0 " + snapshotId);
+                                "/foldbackup rollback chunk from " + snapshotId + " at 2 0");
                 System.out.println("  Rollback response: " + rollbackResponse);
                 assertTrue(rollbackResponse.contains("restored") || rollbackResponse.contains("✓"),
                                 "Rollback should succeed, got: " + rollbackResponse);
@@ -255,7 +255,7 @@ public class OverworldBackupAndRollbackIT extends IntegrationTestBase {
                 // ── 步骤 4：回档 chunk [1, 0] ──
                 System.out.println("--- Step 4: Rollback chunk [1, 0] ---");
                 String rollbackResponse = rcon.sendCommand(
-                                "/foldbackup rollback chunk 1 0 " + snapshotId);
+                                "/foldbackup rollback chunk from " + snapshotId + " at 1 0");
                 System.out.println("  Rollback response: " + rollbackResponse);
                 assertTrue(rollbackResponse.contains("restored") || rollbackResponse.contains("✓"),
                                 "Rollback should succeed, got: " + rollbackResponse);
@@ -283,7 +283,7 @@ public class OverworldBackupAndRollbackIT extends IntegrationTestBase {
         }
 
         @Test
-        @DisplayName("Snapshot info, default latest chunk rollback, unloaded rejection, and async delete")
+        @DisplayName("Snapshot info, RCON coordinate check, explicit chunk rollback, unloaded rejection, and async delete")
         void testSnapshotInfoDeleteAndDefaultRollback() throws Exception {
                 final BlockPos INFO_POS = BlockPos.fromChunk(3, 0, 8, 64, 8);
 
@@ -312,22 +312,28 @@ public class OverworldBackupAndRollbackIT extends IntegrationTestBase {
                 String invalid = rcon.sendCommand("/foldbackup info invalid-id");
                 assertTrue(invalid.contains("Invalid snapshot ID"), "invalid ID error expected: " + invalid);
 
-                System.out.println("--- Step 3: Default latest rollback & unloaded chunk rejection ---");
+                System.out.println("--- Step 3: Non-player coordinate check, explicit rollback & unloaded chunk rejection ---");
+                String missingCoords = rcon.sendCommand("/foldbackup rollback chunk from " + snapshotId);
+                assertTrue(missingCoords.contains("only available to players"),
+                                "RCON omitting coordinates must be rejected: " + missingCoords);
+
                 world.setBlock(INFO_POS, "minecraft:diamond_block");
                 String diamondCheck = world.checkBlock(INFO_POS, "minecraft:diamond_block");
                 assertTrue(diamondCheck.isEmpty() || diamondCheck.toLowerCase().contains("pass"),
                                 "diamond_block should be placed. Got: " + diamondCheck);
 
-                String defaultRollback = rcon.sendCommand("/foldbackup rollback chunk 3 0");
-                assertTrue(defaultRollback.contains("restored") && defaultRollback.contains(snapshotId),
-                                "default rollback should restore from latest snapshot " + snapshotId + ": "
-                                                + defaultRollback);
+                String explicitRollback = rcon.sendCommand(
+                                "/foldbackup rollback chunk from " + snapshotId + " at 3 0");
+                assertTrue(explicitRollback.contains("restored") && explicitRollback.contains(snapshotId),
+                                "explicit rollback should restore from snapshot " + snapshotId + ": "
+                                                + explicitRollback);
 
                 String restoredCheck = world.checkBlock(INFO_POS, "minecraft:gold_block");
                 assertTrue(restoredCheck.isEmpty() || restoredCheck.toLowerCase().contains("pass"),
-                                "gold_block should be restored by default rollback. Got: " + restoredCheck);
+                                "gold_block should be restored by explicit rollback. Got: " + restoredCheck);
 
-                String unloadedRollback = rcon.sendCommand("/foldbackup rollback chunk 999 999");
+                String unloadedRollback = rcon.sendCommand(
+                                "/foldbackup rollback chunk from " + snapshotId + " at 999 999");
                 assertTrue(unloadedRollback.contains("not loaded"),
                                 "unloaded chunk rollback must be rejected: " + unloadedRollback);
 

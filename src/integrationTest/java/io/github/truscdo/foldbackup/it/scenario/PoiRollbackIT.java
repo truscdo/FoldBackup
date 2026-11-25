@@ -51,7 +51,7 @@ public class PoiRollbackIT extends IntegrationTestBase {
         Thread.sleep(500);
 
         String response = rcon.sendCommand(
-                "/foldbackup rollback chunk in minecraft:overworld 0 0 " + snapshot);
+                "/foldbackup rollback chunk from " + snapshot + " in minecraft:overworld at 0 0");
         System.out.println("  Rollback response: " + response);
         assertTrue(response.contains("restored"), response);
 
@@ -192,7 +192,7 @@ public class PoiRollbackIT extends IntegrationTestBase {
         assertTrue(awaitMemory("poi_blocks_live", "meeting_point"));
 
         String response = rcon.sendCommand(
-                "/foldbackup rollback chunk blocks in minecraft:overworld 16 0 " + snapshot);
+                "/foldbackup rollback chunk blocks from " + snapshot + " in minecraft:overworld at 16 0");
         assertTrue(response.contains("restored"), response);
         saveAndWait();
 
@@ -262,7 +262,7 @@ public class PoiRollbackIT extends IntegrationTestBase {
         assertPoi(21, 0, 344, 64, 12, "minecraft:meeting", 31);
 
         String response = rcon.sendCommand(
-                "/foldbackup rollback chunk entities in minecraft:overworld 20 0 " + snapshot);
+                "/foldbackup rollback chunk entities from " + snapshot + " in minecraft:overworld at 20 0");
         assertTrue(response.contains("restored"), response);
         saveAndWait();
 
@@ -287,7 +287,7 @@ public class PoiRollbackIT extends IntegrationTestBase {
 
     private void rollback(int chunkX, int chunkZ, String snapshot) throws Exception {
         String response = rcon.sendCommand(
-                "/foldbackup rollback chunk in minecraft:overworld " + chunkX + " " + chunkZ + " " + snapshot);
+                "/foldbackup rollback chunk from " + snapshot + " in minecraft:overworld at " + chunkX + " " + chunkZ);
         assertTrue(response.contains("restored"), response);
     }
 

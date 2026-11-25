@@ -60,7 +60,7 @@ public final class PreviewData {
         return sectionIndex * SECTION_BLOCKS + y * 256 + z * 16 + x;
     }
 
-    public static Raw read(SnapshotStore store, BlobStore blobs, ChunkPos pos, Long epochSeconds, String dimension)
+    public static Raw read(SnapshotStore store, BlobStore blobs, ChunkPos pos, long epochSeconds, String dimension)
             throws IOException {
         var raw = PreviewSnapshotReader.read(store, blobs, pos.x, pos.z, epochSeconds, dimension);
         CompoundTag blocks = SnapshotNbt.read(raw.blocks());

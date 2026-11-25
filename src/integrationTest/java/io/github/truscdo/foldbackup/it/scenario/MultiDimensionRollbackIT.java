@@ -29,8 +29,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * {@code ServerLevel.dimension()} 推导维度子路径并传入 resolve 方法。
  *
  * <p>
- * 从 v2 开始，{@code /foldbackup rollback chunk} 新增 {@code in <dimension>}
- * 子命令支持显式指定维度（例如 {@code in minecraft:the_nether}），
+ * 从 v2 开始，{@code /foldbackup rollback chunk from <snapshotId>} 新增 {@code in <dimension> at <x> <z>}
+ * 子命令支持显式指定维度（例如 {@code in minecraft:the_nether at 0 0}），
  * 不再需要 {@code /execute in <dim> run} 包裹。
  *
  * <p>
@@ -112,7 +112,7 @@ public class MultiDimensionRollbackIT extends IntegrationTestBase {
         // ── 步骤 5：回档下界 chunk [0, 0] ──
         System.out.println("--- D-1 Step 5: Rollback Nether chunk [0, 0] ---");
         String rollbackResponse = rcon.sendCommand(
-                "/foldbackup rollback chunk in minecraft:the_nether 0 0 " + snapshotId);
+                "/foldbackup rollback chunk from " + snapshotId + " in minecraft:the_nether at 0 0");
         System.out.println("  Rollback response: " + rollbackResponse);
         assertTrue(rollbackResponse.contains("restored") || rollbackResponse.contains("✓"),
                 "Nether rollback should succeed, got: " + rollbackResponse);
@@ -189,7 +189,7 @@ public class MultiDimensionRollbackIT extends IntegrationTestBase {
         // ── 步骤 5：回档末地 chunk [0, 0] ──
         System.out.println("--- D-2 Step 5: Rollback End chunk [0, 0] ---");
         String rollbackResponse = rcon.sendCommand(
-                "/foldbackup rollback chunk in minecraft:the_end 0 0 " + snapshotId);
+                "/foldbackup rollback chunk from " + snapshotId + " in minecraft:the_end at 0 0");
         System.out.println("  Rollback response: " + rollbackResponse);
         assertTrue(rollbackResponse.contains("restored") || rollbackResponse.contains("✓"),
                 "End rollback should succeed, got: " + rollbackResponse);
@@ -312,7 +312,7 @@ public class MultiDimensionRollbackIT extends IntegrationTestBase {
         // ── 步骤 8-10：仅回档主世界 chunk → 验证下界/末地保持不变 ──
         System.out.println("--- D-3 Step 8-10: Rollback ONLY overworld chunk ---");
         String owRollback = rcon.sendCommand(
-                "/foldbackup rollback chunk in minecraft:overworld " + CHUNK_X + " " + CHUNK_Z + " " + snapshotId);
+                "/foldbackup rollback chunk from " + snapshotId + " in minecraft:overworld at " + CHUNK_X + " " + CHUNK_Z);
         System.out.println("  Overworld rollback: " + owRollback);
         assertTrue(owRollback.contains("restored") || owRollback.contains("✓"),
                 "Overworld rollback should succeed, got: " + owRollback);
@@ -341,7 +341,7 @@ public class MultiDimensionRollbackIT extends IntegrationTestBase {
         // ── 步骤 11-13：回档下界 chunk → 验证主世界/末地不变 ──
         System.out.println("--- D-3 Step 11-13: Rollback Nether chunk ---");
         String netherRollback = rcon.sendCommand(
-                "/foldbackup rollback chunk in minecraft:the_nether " + CHUNK_X + " " + CHUNK_Z + " " + snapshotId);
+                "/foldbackup rollback chunk from " + snapshotId + " in minecraft:the_nether at " + CHUNK_X + " " + CHUNK_Z);
         System.out.println("  Nether rollback: " + netherRollback);
         assertTrue(netherRollback.contains("restored") || netherRollback.contains("✓"),
                 "Nether rollback should succeed, got: " + netherRollback);
@@ -365,7 +365,7 @@ public class MultiDimensionRollbackIT extends IntegrationTestBase {
         // ── 步骤 14-16：回档末地 chunk → 验证三个维度全部还原 ──
         System.out.println("--- D-3 Step 14-16: Rollback End chunk ---");
         String endRollback = rcon.sendCommand(
-                "/foldbackup rollback chunk in minecraft:the_end " + CHUNK_X + " " + CHUNK_Z + " " + snapshotId);
+                "/foldbackup rollback chunk from " + snapshotId + " in minecraft:the_end at " + CHUNK_X + " " + CHUNK_Z);
         System.out.println("  End rollback: " + endRollback);
         assertTrue(endRollback.contains("restored") || endRollback.contains("✓"),
                 "End rollback should succeed, got: " + endRollback);

@@ -1,5 +1,6 @@
 {
   "foldbackup.command.invalid_snapshot_id": "§c[FoldBackup] 快照 ID 格式无效。",
+  "foldbackup.command.chunk.player_required": "§c[FoldBackup] 省略区块坐标时只能由玩家执行。请显式指定 at <x> <z>（或 in <维度> at <x> <z>）。",
   "foldbackup.command.delete.started": "§6[FoldBackup] 正在删除快照：§f%s§6...",
   "foldbackup.command.delete.failed": "§c[FoldBackup] 删除快照 %s 失败。详情请查看服务端日志。",
   "foldbackup.command.delete.cleanup_incomplete": "§e[FoldBackup] 已删除快照 §f%s§e，但部分不再使用的备份文件未能清理。详情请查看服务端日志。",

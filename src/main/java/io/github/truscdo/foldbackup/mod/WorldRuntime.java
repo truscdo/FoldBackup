@@ -357,7 +357,7 @@ public final class WorldRuntime {
     /**
      * 在备份执行器线程上读取预览数据；与快照清理/删除串行化。
      */
-    public CompletableFuture<PreviewData.Raw> readPreviewAsync(ChunkPos pos, Long epochSeconds, String dimension) {
+    public CompletableFuture<PreviewData.Raw> readPreviewAsync(ChunkPos pos, long epochSeconds, String dimension) {
         SnapshotStore store = snapshotStore;
         BlobStore blobs = blobStore;
         ExecutorService pool = backupExecutor;

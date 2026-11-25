@@ -18,7 +18,7 @@ public class EntityRollbackIT extends IntegrationTestBase {
         assertEquals(expected, result.contains("\"" + tag + "\""), tag + ": " + result);
     }
     private String rollback(String dim, int x, int z, String snapshot) throws Exception {
-        return rcon.sendCommand("/foldbackup rollback chunk in " + dim + " " + x + " " + z + " " + snapshot);
+        return rcon.sendCommand("/foldbackup rollback chunk from " + snapshot + " in " + dim + " at " + x + " " + z);
     }
     private void load(String dim, int x) throws Exception {
         command(dim, "forceload add " + x + " 0 " + (x + 16) + " 0");
@@ -197,7 +197,7 @@ public class EntityRollbackIT extends IntegrationTestBase {
         command(dim, "setblock 264 99 8 minecraft:diamond_block");
         command(dim, "summon minecraft:marker 264 100 8 {Tags:[\"rollback_entities_fail_live\"]}");
         String entitiesFail = rcon.sendCommand(
-                "/foldbackup rollback chunk entities in " + dim + " 16 0 " + invalidSnapshots.get(1));
+                "/foldbackup rollback chunk entities from " + invalidSnapshots.get(1) + " in " + dim + " at 16 0");
         assertFalse(entitiesFail.contains("restored"), entitiesFail);
         assertTrue(entitiesFail.contains("could not be recovered"), entitiesFail);
         exists(dim, "rollback_invalid", true);
@@ -216,7 +216,7 @@ public class EntityRollbackIT extends IntegrationTestBase {
         command(dim, "setblock 328 99 8 minecraft:diamond_block");
         command(dim, "kill @e[distance=0..,tag=scope_blocks_old]");
         command(dim, "summon minecraft:marker 328 100 8 {Tags:[\"scope_blocks_live\"]}");
-        String response = rcon.sendCommand("/foldbackup rollback chunk blocks in " + dim + " 20 0 " + snapshot);
+        String response = rcon.sendCommand("/foldbackup rollback chunk blocks from " + snapshot + " in " + dim + " at 20 0");
         assertTrue(response.contains("restored"), response);
         assertTrue(response.contains("preserved"), response);
         assertTrue(command(dim, "execute if block 328 99 8 minecraft:gold_block").toLowerCase().contains("passed"));
@@ -235,7 +235,7 @@ public class EntityRollbackIT extends IntegrationTestBase {
         command(dim, "setblock 360 99 8 minecraft:diamond_block");
         command(dim, "kill @e[distance=0..,tag=scope_entities_old]");
         command(dim, "summon minecraft:marker 360 100 8 {Tags:[\"scope_entities_live\"]}");
-        String response = rcon.sendCommand("/foldbackup rollback chunk entities in " + dim + " 22 0 " + snapshot);
+        String response = rcon.sendCommand("/foldbackup rollback chunk entities from " + snapshot + " in " + dim + " at 22 0");
         assertTrue(response.contains("restored"), response);
         assertTrue(response.contains("blocks untouched"), response);
         exists(dim, "scope_entities_old", true);

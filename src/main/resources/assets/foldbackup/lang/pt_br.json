@@ -1,5 +1,6 @@
 {
   "foldbackup.command.invalid_snapshot_id": "§c[FoldBackup] O formato do ID do snapshot é inválido.",
+  "foldbackup.command.chunk.player_required": "§c[FoldBackup] Omitir as coordenadas do chunk está disponível apenas para jogadores. Especifique 'at <x> <z>' (ou 'in <dimensão> at <x> <z>') explicitamente.",
   "foldbackup.command.delete.started": "§6[FoldBackup] Excluindo snapshot: §f%s§6...",
   "foldbackup.command.delete.failed": "§c[FoldBackup] Falha ao excluir o snapshot %s. Consulte o log do servidor.",
   "foldbackup.command.delete.cleanup_incomplete": "§e[FoldBackup] Snapshot §f%s §eexcluído, mas alguns arquivos de backup sem uso não puderam ser limpos. Consulte o log do servidor.",

@@ -241,7 +241,7 @@ public class FoldBackupMod {
         return previewManager;
     }
 
-    public CompletableFuture<PreviewData.Raw> readPreviewAsync(ChunkPos pos, Long epochSeconds, String dimension) {
+    public CompletableFuture<PreviewData.Raw> readPreviewAsync(ChunkPos pos, long epochSeconds, String dimension) {
         WorldRuntime current = runtime;
         if (current == null) {
             return CompletableFuture.failedFuture(new IllegalStateException("Backend not initialized"));

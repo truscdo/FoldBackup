@@ -160,9 +160,9 @@ exec java -jar "$JAR" tui --snapshot-root "$SCRIPT_DIR" --archive-root "$SCRIPT_
 
 You can preview and roll back a single chunk in game, or use the CLI to roll back a chunk directly in an offline world.
 
-In game, use `/foldbackup preview <x> <z> [snapshot-id]` to preview a chunk from a snapshot. This changes how the target chunk appears on the client to show its state at the time of that snapshot; it does not modify the actual chunk. `x` and `z` are chunk coordinates. You can find them on the F3 screen, or divide the block coordinates by 16 and round down. A blue particle effect marks the previewed chunk. Use `/foldbackup preview exit` to end the preview.
+In game, use `/foldbackup preview from <snapshot-id>` (defaults to the chunk you are standing in) or `/foldbackup preview from <snapshot-id> at <x> <z>` to preview a chunk from a snapshot. This changes how the target chunk appears on the client to show its state at the time of that snapshot; it does not modify the actual chunk. `x` and `z` are chunk coordinates. You can find them on the F3 screen, or divide the block coordinates by 16 and round down. A blue particle effect marks the previewed chunk. Use `/foldbackup preview exit` to end the preview.
 
-To roll back a chunk in game, use `/foldbackup rollback chunk <x> <z> [snapshot-id]`. You can specify a dimension with `/foldbackup rollback chunk in <dimension> <x> <z> [snapshot-id]`, or narrow the scope with `blocks` (terrain, block entities, and POI only, preserving current entities) or `entities` (entities only, leaving terrain and block entities untouched): e.g. `/foldbackup rollback chunk blocks <x> <z> [snapshot-id]` or `/foldbackup rollback chunk entities in <dimension> <x> <z> [snapshot-id]`. The target chunk must already be loaded in memory. For an unloaded chunk, use the offline CLI method below. If you omit the snapshot ID, the latest snapshot is used.
+To roll back a chunk in game, use `/foldbackup rollback chunk from <snapshot-id>` to restore the chunk you are currently in. To target specific coordinates, append `at <x> <z>` or `in <dimension> at <x> <z>` (required when running from the server console or RCON), and optionally narrow the scope with `blocks` (terrain, block entities, and POI only, preserving current entities) or `entities` (entities only, leaving terrain and block entities untouched): e.g. `/foldbackup rollback chunk blocks from <snapshot-id> at <x> <z>` or `/foldbackup rollback chunk entities from <snapshot-id> in <dimension> at <x> <z>`. The target chunk must already be loaded in memory. For an unloaded chunk, use the offline CLI method below.
 
 For the CLI examples below, assume the current directory is `foldbackups` and the server world directory is its sibling, `world`. If you run the commands elsewhere, adjust the JAR, world, and snapshot paths accordingly. You can also specify the snapshot directory with `--snapshot-root <directory>`. In singleplayer the repository is `foldbackups/<world-folder-name>`, so point `--snapshot-root` at that directory. **Stop the server before performing an offline rollback.**
 
@@ -204,12 +204,12 @@ The archive format is independent of the Minecraft version. You can use the CLI 
 | `/foldbackup delete [--dry-run] <id1> [id2 ...]` | Delete one or more snapshots, or estimate reclaimed space with `--dry-run` |
 | `/foldbackup pin <snapshot-id>` | Pin a snapshot to protect it from automatic cleanup and manual deletion |
 | `/foldbackup unpin <snapshot-id>` | Remove pin protection from a snapshot |
-| `/foldbackup preview <x> <z> [snapshot-id]` | Preview a historical chunk in the current dimension |
+| `/foldbackup preview from <snapshot-id> [at <x> <z>]` | Preview a historical chunk in the current dimension (defaults to current chunk) |
 | `/foldbackup preview exit` | End the preview |
-| `/foldbackup rollback chunk <x> <z> [snapshot-id]` | Roll back a single chunk in the current dimension |
-| `/foldbackup rollback chunk in <dimension> <x> <z> [snapshot-id]` | Roll back a single chunk in a specified dimension |
-| `/foldbackup rollback chunk blocks [in <dimension>] <x> <z> [snapshot-id]` | Roll back only blocks, block entities, and POI of a chunk (preserving current entities) |
-| `/foldbackup rollback chunk entities [in <dimension>] <x> <z> [snapshot-id]` | Roll back only entities of a chunk (leaving blocks and block entities untouched) |
+| `/foldbackup rollback chunk from <snapshot-id> [at <x> <z>]` | Roll back a single chunk in the current dimension (defaults to current chunk) |
+| `/foldbackup rollback chunk from <snapshot-id> in <dimension> at <x> <z>` | Roll back a single chunk in a specified dimension |
+| `/foldbackup rollback chunk blocks from <snapshot-id> [in <dimension> at <x> <z> \| at <x> <z>]` | Roll back only blocks, block entities, and POI of a chunk (preserving current entities) |
+| `/foldbackup rollback chunk entities from <snapshot-id> [in <dimension> at <x> <z> \| at <x> <z>]` | Roll back only entities of a chunk (leaving blocks and block entities untouched) |
 
 ## Key Configuration Options
 
