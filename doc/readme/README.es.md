@@ -8,21 +8,18 @@ Las instantáneas utilizan un esquema de deduplicación de contenido similar a G
 
 El mismo archivo JAR puede instalarse como un mod de NeoForge o ejecutarse como una herramienta independiente. Ofrece una interfaz de línea de comandos (CLI) y un menú interactivo (TUI) para poder usar sus funciones mientras el servidor está apagado.
 
-- **Entorno**: Minecraft `1.21.1`, NeoForge `21.1+`, Java `21+` (el modo independiente CLI / TUI no depende de la versión de Minecraft)
+- **Entorno**: Minecraft `1.21.1`, NeoForge `21.1+`, Java `21+` (las funciones ofrecidas por el modo independiente CLI / TUI no dependen de la versión del juego y son compatibles con la mayoría de las versiones de Minecraft)
 - **Instalación**: Solo se requiere en el **servidor** (o en el cliente para un jugador); los jugadores que se conecten al servidor **no** necesitan instalar este mod en sus clientes para usar todas las funciones (incluidas las vistas previas de chunks históricos dentro del juego)
 
 ## Características
 
 - **Copias de seguridad en línea**: Programa copias de seguridad basadas en el tiempo con jugadores conectados, inícialas manualmente o realiza copias opcionales al iniciar o detener el servidor.
+- **Copias de seguridad sin conexión**: Crea copias de seguridad de mundos con la TUI o la CLI sin iniciar el juego.
 - **Deduplicación de contenido**: El contenido sin cambios no ocupa espacio adicional en una nueva instantánea.
-- **Gestión de instantáneas**: Consulta el resumen de espacio del repositorio y el espacio único, compartido y recuperable acumulado de cada instantánea, fija instantáneas importantes (`pin`) para protegerlas de la limpieza automática, estima el espacio a liberar antes de eliminar una o varias instantáneas (`--dry-run`) y configura la limpieza automática.
-- **Vista previa y restauración de chunks**: Previsualiza cómo se veía un chunk en una instantánea anterior y restaura un único chunk desde la instantánea seleccionada.
-
-    La restauración de chunks está disponible tanto dentro del juego como mediante la CLI con el servidor apagado. La opción sin conexión ayuda a recuperar un chunk problemático, por ejemplo uno que provoque el cierre del juego por contener demasiadas entidades.
-- **Exportación de mundos**: Exporta una instantánea como un mundo de Minecraft.
-- **Compresión en archivos (Archives)**: Crea archivos completos o diferenciales y luego restáuralos como un mundo de Minecraft o impórtalos en un repositorio de instantáneas.
-
-    Los archivos comprimidos están pensados para almacenar y distribuir mundos. Tras descargar un archivo completo una vez, los archivos diferenciales posteriores transfieren únicamente los datos modificados, lo que permite sincronizar el mundo de un servidor con un equipo local, editarlo allí y sincronizarlo de vuelta ahorrando ancho de banda.
+- **Gestión de instantáneas**: Consulta el resumen de espacio del repositorio y el espacio único, compartido y recuperable acumulado de cada instantánea, fija instantáneas importantes (`pin`) para protegerlas de la limpieza automática, estima el espacio a liberar antes de la eliminación por lotes y configura la limpieza automática.
+- **Vista previa y restauración de chunks**: Previsualiza cómo se veía un chunk en una instantánea anterior y restaura un único chunk de la instantánea seleccionada en el mundo; también puedes restaurar chunks directamente en una partida guardada mediante la CLI sin iniciar el juego, útil para resolver chunks problemáticos o cierres inesperados causados por demasiadas entidades.
+- **Restauración completa rápida**: Al exportar una instantánea como un mundo de Minecraft, si ya existe una partida guardada en la ubicación de destino, se omiten las partes sin cambios para acelerar el proceso de restauración.
+- **Compresión en archivos (Archives)**: Crea archivos completos o diferenciales de alta compresión para distribución o almacenamiento, que pueden restaurarse como un mundo de Minecraft o importarse a un repositorio de instantáneas; en servidores, los archivos diferenciales permiten transferir únicamente las partes modificadas del mundo para editar el mapa localmente.
 
 > [!NOTE]
 > **Diferencia entre instantáneas (Snapshots) y archivos (Archives)**:
@@ -51,38 +48,63 @@ FoldBackup también introduce el formato LRHD para registrar diferencias de chun
 
    En el modo de un jugador, el anfitrión del mundo puede usar estos comandos aunque los trucos estén desactivados. Otros jugadores que se unan por LAN no podrán usarlos.
 
-De forma predeterminada, las copias de seguridad se guardan en `foldbackups/` dentro del directorio de trabajo del servidor. Puedes cambiarlo con `general.backupPath`, que define la raíz de las copias: un servidor dedicado la usa directamente como repositorio, mientras que en un jugador se utiliza `foldbackups/<nombre-de-carpeta-del-mundo>` para que cada mundo mantenga su propio repositorio. Antes de una copia de seguridad, FoldBackup fuerza el guardado del mundo y desactiva temporalmente el guardado automático. El guardado se restablece tan pronto como termina el análisis del mundo, por lo que confirmar la instantánea y limpiar datos no prolongan esa pausa. Si el análisis no avanza durante `scheduling.savePauseStallSeconds` (300 por defecto), la copia se cancela, el guardado automático se restaura, se avisa a los jugadores y el siguiente intento programado espera un intervalo completo.
+De forma predeterminada, las copias de seguridad se guardan en `foldbackups/` dentro del directorio de trabajo del servidor y puedes cambiarlo con `general.backupPath`. Un servidor dedicado usa este directorio directamente como repositorio, mientras que en un jugador se utiliza `foldbackups/<nombre-de-carpeta-del-mundo>` para que cada mundo mantenga su propio repositorio.
 
 Las copias de seguridad automáticas están activadas por defecto. El intervalo contabiliza el tiempo acumulado mientras hay jugadores conectados. Las copias manuales también están sujetas al intervalo mínimo entre copias; usa `/foldbackup backup --force` para omitirlo.
 
-### Restaurar un mundo completo
+Incluso sin instalar el mod en el juego, puedes crear instantáneas sin conexión para partidas guardadas de cualquier versión de Minecraft mediante la CLI o la TUI independiente:
 
-Puedes restaurar un mundo completo mediante la TUI o la CLI.
+<details>
+<summary>Haz clic para expandir las instrucciones para crear copias de seguridad sin conexión con CLI / TUI</summary>
 
-Desde el directorio del repositorio del mundo (`foldbackups/` en un servidor dedicado, `foldbackups/<nombre-de-carpeta-del-mundo>` en un jugador), ejecuta los siguientes comandos para exportar las bibliotecas de ejecución incluidas (esto evita conflictos de dependencias entre el mod y la CLI) y luego abre el menú. Reemplaza `<version>` con el nombre real del archivo JAR:
+> Antes de ejecutar la TUI o la CLI, primero debes exportar las bibliotecas de ejecución incluidas en el JAR (este diseño evita conflictos de dependencias entre el mod y la CLI) y luego ejecutar la TUI o la CLI (puedes omitir este paso si utilizas el script de inicio rápido de la TUI).
+>
+> ```bash
+> # Servidor dedicado: foldbackups/
+> java -jar ../mods/foldbackup-<version>.jar extract
+>
+> # Un jugador: foldbackups/<nombre-de-carpeta-del-mundo>
+> java -jar ../../mods/foldbackup-<version>.jar extract
+> ```
+>
+> Los parámetros predeterminados de los comandos asumen que el directorio actual es el directorio del repositorio del mundo de destino (`foldbackups/` en un servidor dedicado y `foldbackups/<nombre-de-carpeta-del-mundo>` en un jugador). Si los ejecutas desde otra ubicación, ajusta los parámetros correspondientes.
+
+**Antes de crear una copia de seguridad sin conexión debes detener el servidor o salir del mundo de un jugador.**
+
+**Crear una instantánea con la CLI:**
 
 ```bash
-# Servidor dedicado: foldbackups/
-java -jar ../mods/foldbackup-<version>.jar extract
-java -jar ../mods/foldbackup-<version>.jar tui
+# Crear una instantánea con las reglas de filtrado predeterminadas
+java -jar ../mods/foldbackup-<version>.jar snapshot create --world ../world
 
-# Un jugador: foldbackups/<nombre-de-carpeta-del-mundo>
-java -jar ../../mods/foldbackup-<version>.jar extract
-java -jar ../../mods/foldbackup-<version>.jar tui
+# Añadir reglas de exclusión adicionales (entrecomilla en tu shell las reglas con * o ** para evitar su expansión prematura)
+java -jar ../mods/foldbackup-<version>.jar snapshot create --world ../world \
+  --exclude "**/DistantHorizons.sqlite" \
+  --exclude "cache/"
 ```
 
-En el menú, selecciona "2. Export world files" y sigue las indicaciones para elegir una instantánea, exportar como directorio o ZIP y la ruta de salida. Pulsa Intro para aceptar la ruta por defecto (`world-export/<snapshot-id>`, o el mismo nombre con `.zip` para un ZIP).
+- `--world <directorio>`: Obligatorio; apunta al directorio raíz de la partida guardada.
+- `--exclude <glob>`: Opcional y repetible; añade exclusiones sobre las reglas de filtrado predeterminadas.
 
-> [!IMPORTANT]
-> **Detén primero el servidor** antes de exportar sobre el directorio de un mundo activo para restaurarlo.
+**Crear una instantánea con la TUI:**
 
-Al exportar a un directorio, el destino puede ser una partida guardada existente: FoldBackup actualiza solo los archivos que difieren de la instantánea y omite los archivos idénticos. Antes de exportar se realiza una comprobación; tras la comprobación, elige "1 = overwrite" para conservar los archivos del destino que no estén en la instantánea, o "2 = delete extra" para eliminarlos y dejar el destino exactamente igual que la instantánea. En la solicitud del número de hilos puedes pulsar Intro para usar el valor predeterminado.
+Ejecuta `java -jar ../mods/foldbackup-<version>.jar tui` (o el script de inicio) en el directorio del repositorio, selecciona **`6. Create snapshot from world`** y sigue las indicaciones:
 
-La CLI puede realizar la misma exportación: `snapshot export <snapshot-id> --output <directorio>`. `--zip` genera un archivo ZIP; al exportar a un directorio, `--delete-extra` elimina el contenido que no está en la instantánea; `--dry-run` muestra las estadísticas sin escribir ni eliminar nada.
+1. **Directorio del mundo**: Introduce la ruta del directorio raíz de la partida guardada (pulsa Intro para volver al menú principal).
+2. **Reglas de exclusión adicionales**: La pantalla muestra primero las reglas de protección predeterminadas; si quieres añadir más, escribe varias reglas separadas por comas en una sola línea (admite `{a,b}`, por ejemplo `**/DistantHorizons.sqlite, cache/`). Pulsa Intro para no añadir ninguna o escribe `0` para volver; si alguna regla no es válida, se pedirá volver a introducirla en el momento.
+3. **Número de hilos**: Introduce un entero positivo, pulsa Intro para selección automática o escribe `0` para volver.
+
+**Reglas de filtrado de archivos:**
+
+- La creación de instantáneas sin conexión conserva siempre 4 reglas básicas predeterminadas: `**/session.lock`, `**/backups`, `**/.backups` y `**/*.wip` (a diferencia de la configuración predeterminada del mod, el modo sin conexión no excluye `**/DistantHorizons.sqlite` por defecto; añádelo manualmente como se indica arriba si lo necesitas).
+- Las reglas comparan rutas relativas dentro del directorio del mundo usando `/` como separador y **no pueden empezar por `/`** (por ejemplo, escribe `backups/` en lugar de `/backups/`); se admiten `*`, `**`, `?`, `[...]` y `{a,b}`.
+- Si coincide un directorio, se omite todo su subárbol; una regla terminada en `/` (como `cache/`) coincide solo con directorios y no con archivos del mismo nombre. Las reglas vacías, una `/` inicial o una sintaxis glob inválida detienen la operación inmediatamente con un error.
+
+</details>
 
 ### Inicio rápido de la TUI
 
-Si prefieres un lanzador, guarda uno de los siguientes scripts en el directorio del repositorio como `foldbackup-tui.bat` o `foldbackup-tui.sh` (y dale permisos con `chmod +x` en Linux). El script busca el JAR junto a sí mismo, luego en `../mods` y después en `../../mods`, por lo que las estructuras predeterminadas de servidor y de un jugador funcionan sin necesidad de editarlo.
+Si prefieres un lanzador, guarda uno de los siguientes scripts en el directorio del repositorio como `foldbackup-tui.bat` o `foldbackup-tui.sh` (y dale permisos con `chmod +x` en Linux). El script busca el JAR junto a sí mismo, luego en `../mods` y después en `../../mods`, y exporta automáticamente las bibliotecas de ejecución.
 
 <details>
 <summary>Haz clic para expandir el script de inicio para Windows (<code>foldbackup-tui.bat</code>)</summary>
@@ -162,9 +184,24 @@ Puedes previsualizar y restaurar un único chunk dentro del juego, o usar la CLI
 
 Dentro del juego, usa `/foldbackup preview from <snapshot-id>` (por defecto el chunk en el que estás) o `/foldbackup preview from <snapshot-id> at <x> <z>` para obtener una vista previa de un chunk desde una instantánea. Esto cambia la apariencia del chunk de destino en el cliente para mostrar su estado en el momento de esa instantánea, sin modificar el chunk real. `x` y `z` son coordenadas de chunk; puedes verlas en la pantalla F3 o dividir las coordenadas de bloque entre 16 redondeando hacia abajo. Un efecto de partículas azules marca el chunk previsualizado. Usa `/foldbackup preview exit` para salir de la vista previa.
 
-Para restaurar un chunk dentro del juego, usa `/foldbackup rollback chunk from <snapshot-id>` para restaurar el chunk en el que te encuentras. Para indicar coordenadas concretas, añade `at <x> <z>` o `in <dimensión> at <x> <z>` (obligatorio desde la consola del servidor o RCON), y opcionalmente limita el alcance con `blocks` (solo terreno, entidades de bloque y POI, conservando las entidades actuales) o `entities` (solo entidades, sin tocar el terreno ni las entidades de bloque): por ejemplo, `/foldbackup rollback chunk blocks from <snapshot-id> at <x> <z>` o `/foldbackup rollback chunk entities from <snapshot-id> in <dimensión> at <x> <z>`. El chunk de destino debe estar cargado en memoria. Para un chunk no cargado, utiliza el método sin conexión mediante la CLI que se muestra a continuación.
+Para restaurar un chunk dentro del juego, usa `/foldbackup rollback chunk from <snapshot-id>` para restaurar el chunk en el que te encuentras. Para indicar coordenadas concretas, añade `at <x> <z>` o `in <dimensión> at <x> <z>` (obligatorio desde la consola del servidor o RCON), y opcionalmente limita el alcance con `blocks` (solo terreno, entidades de bloque y POI, conservando las entidades actuales) o `entities` (solo entidades, sin tocar el terreno ni las entidades de bloque): por ejemplo, `/foldbackup rollback chunk blocks from <snapshot-id> at <x> <z>` o `/foldbackup rollback chunk entities from <snapshot-id> in <dimensión> at <x> <z>`. El chunk de destino debe estar cargado en memoria. Para un chunk no cargado, utiliza el método sin conexión mediante la CLI que se muestra a continuación:
 
-Para los siguientes ejemplos con la CLI, se asume que el directorio actual es `foldbackups` y que el directorio del mundo del servidor está al mismo nivel y se llama `world`. Si ejecutas los comandos desde otro lugar, ajusta las rutas del JAR, del mundo y de las instantáneas según corresponda. También puedes indicar el directorio de instantáneas con `--snapshot-root <directorio>`. En modo de un jugador, el repositorio es `foldbackups/<nombre-de-carpeta-del-mundo>`, por lo que debes apuntar `--snapshot-root` a ese directorio. **Detén el servidor antes de realizar una restauración sin conexión.**
+<details>
+<summary>Haz clic para expandir las instrucciones de restauración sin conexión con CLI</summary>
+
+> Antes de ejecutar la TUI o la CLI, primero debes exportar las bibliotecas de ejecución incluidas en el JAR (este diseño evita conflictos de dependencias entre el mod y la CLI) y luego ejecutar la TUI o la CLI (puedes omitir este paso si utilizas el script de inicio rápido de la TUI).
+>
+> ```bash
+> # Servidor dedicado: foldbackups/
+> java -jar ../mods/foldbackup-<version>.jar extract
+>
+> # Un jugador: foldbackups/<nombre-de-carpeta-del-mundo>
+> java -jar ../../mods/foldbackup-<version>.jar extract
+> ```
+>
+> Los parámetros predeterminados de los comandos asumen que el directorio actual es el directorio del repositorio del mundo de destino (`foldbackups/` en un servidor dedicado y `foldbackups/<nombre-de-carpeta-del-mundo>` en un jugador). Si los ejecutas desde otra ubicación, ajusta los parámetros correspondientes.
+
+**Detén el servidor antes de realizar una restauración sin conexión.**
 
 Listar las instantáneas:
 
@@ -181,6 +218,41 @@ java -jar ../mods/foldbackup-<version>.jar snapshot rollback <snapshot-id> --wor
 `--world` apunta al directorio de la dimensión de destino: usa la raíz del mundo para la superficie (Overworld), `../world/DIM-1` para el Nether, `../world/DIM1` para el End, o el directorio `dimensions/<namespace>/<path>` correspondiente para una dimensión personalizada. `--chunk` recibe coordenadas de chunk enteras con signo, no coordenadas de bloque. `--scope` usa `all` por defecto, o puede establecerse en `blocks` (solo terreno, entidades de bloque y POI) o `entities` (solo entidades). La CLI pide confirmación antes de continuar; añade `--yes` para omitir la confirmación.
 
 Por defecto, la CLI restaura el terreno del chunk de destino, las entidades de bloque, los datos de entidades recuperables y los puntos de interés (POI) de ese chunk tal como se registraron en la instantánea, incluido el estado de ocupación de tickets. No restaura datos de jugadores ni la configuración general del mundo.
+
+</details>
+
+### Restaurar un mundo completo
+
+Por motivos de rendimiento, la restauración completa del mundo dentro del juego no está disponible por ahora, pero puedes restaurar todo el mundo mediante la TUI o la CLI.
+
+> Antes de ejecutar la TUI o la CLI, primero debes exportar las bibliotecas de ejecución incluidas en el JAR (este diseño evita conflictos de dependencias entre el mod y la CLI) y luego ejecutar la TUI o la CLI (puedes omitir este paso si utilizas el script de inicio rápido de la TUI).
+>
+> ```bash
+> # Servidor dedicado: foldbackups/
+> java -jar ../mods/foldbackup-<version>.jar extract
+>
+> # Un jugador: foldbackups/<nombre-de-carpeta-del-mundo>
+> java -jar ../../mods/foldbackup-<version>.jar extract
+> ```
+>
+> Los parámetros predeterminados de los comandos asumen que el directorio actual es el directorio del repositorio del mundo de destino (`foldbackups/` en un servidor dedicado y `foldbackups/<nombre-de-carpeta-del-mundo>` en un jugador). Si los ejecutas desde otra ubicación, ajusta los parámetros correspondientes.
+
+```bash
+# Servidor dedicado: foldbackups/
+java -jar ../mods/foldbackup-<version>.jar tui
+
+# Un jugador: foldbackups/<nombre-de-carpeta-del-mundo>
+java -jar ../../mods/foldbackup-<version>.jar tui
+```
+
+En el menú, selecciona "2. Export world files" y sigue las indicaciones para elegir una instantánea, exportar como directorio o ZIP y la ruta de salida. Pulsa Intro para aceptar la ruta por defecto (`world-export/<snapshot-id>`, o el mismo nombre con `.zip` para un ZIP).
+
+> [!IMPORTANT]
+> **Detén primero el servidor** antes de exportar sobre el directorio de un mundo activo para restaurarlo.
+
+Al exportar a un directorio, el destino puede ser una partida guardada existente: FoldBackup actualiza solo los archivos que difieren de la instantánea y omite los archivos idénticos. Antes de exportar se realiza una comprobación; tras la comprobación, elige "1 = overwrite" para conservar los archivos del destino que no estén en la instantánea, o "2 = delete extra" para eliminarlos y dejar el destino exactamente igual que la instantánea. En la solicitud del número de hilos puedes pulsar Intro para usar el valor predeterminado.
+
+La CLI puede realizar la misma exportación: `snapshot export <snapshot-id> --output <directorio>`. `--zip` genera un archivo ZIP; al exportar a un directorio, `--delete-extra` elimina el contenido que no está en la instantánea; `--dry-run` muestra las estadísticas sin escribir ni eliminar nada.
 
 ### Archivos completos y diferenciales
 
@@ -275,7 +347,7 @@ El archivo de configuración se encuentra por defecto en `config/foldbackup-serv
 >
 > Usa `/foldbackup pin <snapshot-id>` (o la CLI/TUI) para proteger instantáneas importantes, establece los tres límites de limpieza en 0 para desactivar la eliminación automática, o desactiva la limpieza automática con `retention.enabled`.
 
-`general.excludePatterns` compara rutas relativas al directorio del mundo usando `/` como separador de rutas. Por defecto excluye `**/session.lock`, `**/backups`, `**/.backups`, `**/*.wip` y `**/DistantHorizons.sqlite`. Si un directorio coincide, se excluye todo su subárbol.
+`general.excludePatterns` compara rutas relativas al directorio del mundo usando `/` como separador de rutas y sin `/` inicial. Por defecto excluye `**/session.lock`, `**/backups`, `**/.backups`, `**/*.wip` y `**/DistantHorizons.sqlite`. Si un directorio coincide, se excluye todo su subárbol, y una barra final `/` (como `backups/`) coincide solo con directorios. Para las opciones de filtrado al crear instantáneas sin conexión con la CLI / TUI, consulta «Crear una copia de seguridad» más arriba.
 
 ## Licencia y agradecimientos
 

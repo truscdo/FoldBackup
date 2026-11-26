@@ -84,9 +84,10 @@ public class FoldBackupConfig {
                                 .comment("Backup exclusion rules: glob patterns matched against paths relative "
                                                 + "to the world directory (using '/' separators, without a leading '/'; "
                                                 + "absolute paths are not supported). A matching file is skipped; "
-                                                + "a matching directory and its entire subtree are skipped. Supports "
+                                                + "a matching directory and its entire subtree are skipped (a trailing "
+                                                + "'/' matches directories only, e.g. backups/). Supports "
                                                 + "*, **, ?, [...], and {...} (e.g. **/session.lock, data/foo.dat). "
-                                                + "Empty files are backed up unless matched by a rule. "
+                                                + "Zero-byte files are always skipped before filtering. "
                                                 + "An empty list disables exclusion entirely; entries that are not "
                                                 + "non-blank strings are discarded on load.")
                                 .defineListAllowEmpty(

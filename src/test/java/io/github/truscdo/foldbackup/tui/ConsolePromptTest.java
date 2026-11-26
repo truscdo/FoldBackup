@@ -113,4 +113,35 @@ class ConsolePromptTest {
         var eofPrompt = new ConsolePrompt(new StringReader(""), new PrintStream(new ByteArrayOutputStream(), true));
         assertTrue(eofPrompt.readMultiSelection("Select: ", 5).eof());
     }
+
+    @Test
+    void readExtraExcludes_handlesNoneBackEofMultipleAndRetriesInvalid() {
+        var noneOut = new ByteArrayOutputStream();
+        var nonePrompt = new ConsolePrompt(new StringReader("\n"), new PrintStream(noneOut, true));
+        ConsolePrompt.ExcludeInput none = nonePrompt.readExtraExcludes();
+        assertFalse(none.eof());
+        assertFalse(none.back());
+        assertTrue(none.patterns().isEmpty());
+        assertTrue(noneOut.toString().contains(
+                "Default excludes: **/session.lock, **/backups, **/.backups, **/*.wip"), noneOut.toString());
+
+        var backPrompt = new ConsolePrompt(new StringReader("0\n"), new PrintStream(new ByteArrayOutputStream(), true));
+        assertTrue(backPrompt.readExtraExcludes().back());
+
+        var eofPrompt2 = new ConsolePrompt(new StringReader(""), new PrintStream(new ByteArrayOutputStream(), true));
+        assertTrue(eofPrompt2.readExtraExcludes().eof());
+
+        var retryOut = new ByteArrayOutputStream();
+        var retryPrompt = new ConsolePrompt(
+                new StringReader("/region\n[bad\na,,b\n**/DistantHorizons.sqlite, data/{a,b}.tmp, cache/\n"),
+                new PrintStream(retryOut, true));
+        ConsolePrompt.ExcludeInput parsed = retryPrompt.readExtraExcludes();
+        assertFalse(parsed.eof());
+        assertFalse(parsed.back());
+        assertEquals(java.util.List.of("**/DistantHorizons.sqlite", "data/{a,b}.tmp", "cache/"), parsed.patterns());
+        String output = retryOut.toString();
+        assertTrue(output.contains("leading '/'"), output);
+        assertTrue(output.contains("missing ']'"), output);
+        assertTrue(output.contains("must not be blank"), output);
+    }
 }

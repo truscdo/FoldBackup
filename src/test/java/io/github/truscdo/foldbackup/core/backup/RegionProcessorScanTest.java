@@ -87,4 +87,31 @@ class RegionProcessorScanTest {
         assertEquals(Set.of("data/keep.txt", "level.dat"), files,
                 "matching directory's whole subtree must be skipped");
     }
+
+    @Test
+    void customFilter_trailingSlashSkipsDirectoryOnlyAndKeepsSameNamedFile() throws IOException {
+        Path world = tempDir.resolve("world");
+        Files.createDirectories(world.resolve("data/cache"));
+        Files.writeString(world.resolve("data/cache/a.bin"), "cached");
+        Files.writeString(world.resolve("cache"), "regular file named cache");
+        Files.writeString(world.resolve("level.dat"), "world data");
+
+        Set<String> files = scanFiles(world, BackupFilter.ofStrict(List.of("**/cache/")));
+
+        assertEquals(Set.of("cache", "level.dat"), files,
+                "trailing '/' should skip matching directory subtree without skipping same-named file");
+    }
+
+    @Test
+    void customFilter_doubleStarTrailingSlashSkipsSubdirsWithoutSkippingWorldRoot() throws IOException {
+        Path world = tempDir.resolve("world");
+        Files.createDirectories(world.resolve("data/sub"));
+        Files.writeString(world.resolve("data/sub/x.dat"), "nested");
+        Files.writeString(world.resolve("level.dat"), "world data");
+
+        Set<String> files = scanFiles(world, BackupFilter.ofStrict(List.of("**/")));
+
+        assertEquals(Set.of("level.dat"), files,
+                "'**/' must not skip world root itself, only subdirectories");
+    }
 }

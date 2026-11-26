@@ -3,6 +3,7 @@ package io.github.truscdo.foldbackup.cli;
 import io.github.truscdo.foldbackup.core.BackupExporter;
 import io.github.truscdo.foldbackup.core.FormatUtil;
 import io.github.truscdo.foldbackup.core.LogUtil;
+import io.github.truscdo.foldbackup.core.backup.BackupFilter;
 import io.github.truscdo.foldbackup.core.console.ArchiveVerifyReporter;
 import io.github.truscdo.foldbackup.core.console.ProgressPrinter;
 import io.github.truscdo.foldbackup.core.console.SnapshotTablePrinter;
@@ -105,11 +106,20 @@ public class BackupCli {
     static void runCreate(Path root, List<String> args) throws IOException {
         Path world = null;
         Integer threads = null;
+        List<String> excludes = new ArrayList<>();
         for (int i = 2; i < args.size(); i++) {
             switch (args.get(i)) {
                 case "--world" -> {
                     if (world != null) throw new IOException("Duplicate --world");
                     world = Path.of(CliArgs.requireValue(args, ++i, "--world"));
+                }
+                case "--exclude" -> {
+                    String raw = CliArgs.requireValue(args, ++i, "--exclude");
+                    try {
+                        excludes.add(BackupFilter.validatePattern(raw));
+                    } catch (IllegalArgumentException e) {
+                        throw new IOException(e.getMessage(), e);
+                    }
                 }
                 case "--threads" -> {
                     if (threads != null) throw new IOException("Duplicate --threads");
@@ -119,9 +129,11 @@ public class BackupCli {
             }
         }
         if (world == null) throw new IOException("snapshot create requires --world <directory>");
+        BackupFilter filter = BackupFilter.defaultsWith(excludes);
         SnapshotManifest snapshot;
         try (var progress = new ProgressPrinter(System.err)) {
-            snapshot = SnapshotCreation.create(world, root, threads == null ? 0 : threads, progress.onProgress());
+            snapshot = SnapshotCreation.create(
+                    world, root, filter, threads == null ? 0 : threads, progress.onProgress());
         }
         System.out.println(SnapshotCreation.summary(snapshot, root));
     }

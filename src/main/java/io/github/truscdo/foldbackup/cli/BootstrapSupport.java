@@ -178,7 +178,7 @@ final class BootstrapSupport {
                 Usage:
                   java -jar foldbackup-<version>.jar extract [--output <dir>]
                   java -jar foldbackup-<version>.jar snapshot list
-                  java -jar foldbackup-<version>.jar snapshot create --world <directory> [--threads <N>]
+                  java -jar foldbackup-<version>.jar snapshot create --world <directory> [--exclude <glob>]... [--threads <N>]
                   java -jar foldbackup-<version>.jar snapshot import --all-archive
                   java -jar foldbackup-<version>.jar snapshot export <snapshot-id> --output <path> [--zip] [--delete-extra] [--dry-run] [--threads <N>]
                   java -jar foldbackup-<version>.jar snapshot delete <snapshot-id>... [--dry-run] [--yes]
@@ -198,7 +198,10 @@ final class BootstrapSupport {
                   TUI export output:     world-export/<snapshot-id>
 
                 Options:
-                  --world <dir>        Closed world directory for snapshot create; dimension directory for rollback
+                  --world <dir>         Closed world directory for snapshot create; dimension directory for rollback
+                  --exclude <glob>      Extra exclude glob for snapshot create (repeatable, appended to the 4 defaults;
+                                        relative '/' path without leading '/', trailing '/' matches directories only;
+                                        quote patterns containing * or ** in your shell to avoid expansion)
                   --zip                 Package snapshot export as a zip archive (appends .zip when missing)
                   --output <path>       Final world directory or zip file path
                   --level <N>           archive create compression level

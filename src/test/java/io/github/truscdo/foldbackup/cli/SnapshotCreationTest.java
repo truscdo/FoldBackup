@@ -1,6 +1,7 @@
 package io.github.truscdo.foldbackup.cli;
 
 import io.github.truscdo.foldbackup.core.ProgressEvent;
+import io.github.truscdo.foldbackup.core.backup.BackupFilter;
 import io.github.truscdo.foldbackup.core.backup.RegionProcessor;
 import io.github.truscdo.foldbackup.core.export.SnapshotZipExport;
 import io.github.truscdo.foldbackup.core.format.AnvilTestSupport;
@@ -10,6 +11,7 @@ import io.github.truscdo.foldbackup.core.restore.RestoreOperation;
 import io.github.truscdo.foldbackup.core.restore.SnapshotRestoreSource;
 import io.github.truscdo.foldbackup.core.WorldSaveLock;
 import io.github.truscdo.foldbackup.core.store.BlobStore;
+import io.github.truscdo.foldbackup.core.store.FileEntry;
 import io.github.truscdo.foldbackup.core.store.SnapshotManifest;
 import io.github.truscdo.foldbackup.core.store.SnapshotStore;
 import org.junit.jupiter.api.Test;
@@ -20,6 +22,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -147,15 +151,77 @@ class SnapshotCreationTest {
         for (var options : List.of(
                 List.of("snapshot", "create"),
                 List.of("snapshot", "create", "--world"),
+                List.of("snapshot", "create", "--exclude"),
+                List.of("snapshot", "create", "--exclude", "--threads", "1"),
+                List.of("snapshot", "create", "--world", world.toString(), "--exclude", ""),
+                List.of("snapshot", "create", "--world", world.toString(), "--exclude", "   "),
+                List.of("snapshot", "create", "--world", world.toString(), "--exclude", "/region"),
+                List.of("snapshot", "create", "--world", world.toString(), "--exclude", "[unterminated"),
+                List.of("snapshot", "create", "--world", world.toString(), "--exclude", "{a,b"),
                 List.of("snapshot", "create", "--threads", "0"),
                 List.of("snapshot", "create", "--threads", "bad"),
                 List.of("snapshot", "create", "--threads", "1", "--threads", "2"),
                 List.of("snapshot", "create", "--world", world.toString(), "--world", world.toString()),
                 List.of("snapshot", "create", "--unknown"))) {
-            assertThrows(IOException.class, () -> BackupCli.runCreate(root, options));
+            assertThrows(IOException.class, () -> BackupCli.runCreate(root, options), options::toString);
             assertFalse(Files.exists(root));
         }
         BackupCli.runCreate(root, List.of("snapshot", "create", "--world", world.toString(), "--threads", "1"));
         assertNotNull(new SnapshotStore(root).loadLatestSnapshot());
+    }
+
+    @Test
+    void createWithCustomFilterAppliesExtraExcludesAlongsideDefaults() throws Exception {
+        Path world = Files.createDirectory(temp.resolve("world-custom-filter"));
+        Files.writeString(world.resolve("level.dat"), "world metadata");
+        Files.writeString(world.resolve("session.lock"), "lock");
+        Files.writeString(world.resolve("temp.wip"), "wip");
+        Files.createDirectories(world.resolve("data"));
+        Files.writeString(world.resolve("data/DistantHorizons.sqlite"), "dh");
+        Files.writeString(world.resolve("data/keep.dat"), "keep");
+        Path root = temp.resolve("store-custom-filter");
+
+        BackupFilter filter = BackupFilter.defaultsWith(List.of("**/DistantHorizons.sqlite"));
+        SnapshotManifest manifest = SnapshotCreation.create(world, root, filter, 1, null);
+
+        Set<String> files = manifest.getExtraFiles().stream()
+                .map(FileEntry::getFilename)
+                .collect(Collectors.toSet());
+        assertEquals(Set.of("level.dat", "data/keep.dat"), files);
+    }
+
+    @Test
+    void cliCreateSupportsRepeatableExcludesWhileKeepingDefaults() throws Exception {
+        Path world = Files.createDirectory(temp.resolve("world-cli-excludes"));
+        Files.writeString(world.resolve("level.dat"), "world metadata");
+        Files.writeString(world.resolve("session.lock"), "lock");
+        Files.writeString(world.resolve("partial.wip"), "wip");
+        Files.createDirectories(world.resolve("backups"));
+        Files.writeString(world.resolve("backups/old.zip"), "old");
+        Files.createDirectories(world.resolve("data"));
+        Files.writeString(world.resolve("data/DistantHorizons.sqlite"), "dh");
+        Files.writeString(world.resolve("data/foo.tmp"), "tmp1");
+        Files.writeString(world.resolve("data/bar.tmp"), "tmp2");
+        Files.writeString(world.resolve("data/keep.dat"), "keep");
+        Files.createDirectories(world.resolve("cache/sub"));
+        Files.writeString(world.resolve("cache/sub/item.bin"), "cached dir item");
+        Files.createDirectories(world.resolve("sub"));
+        Files.writeString(world.resolve("sub/cache"), "regular file named cache");
+        Path root = temp.resolve("store-cli-excludes");
+
+        BackupCli.runCreate(root, List.of(
+                "snapshot", "create",
+                "--world", world.toString(),
+                "--exclude", "**/DistantHorizons.sqlite",
+                "--exclude", "cache/",
+                "--exclude", "**/{foo,bar}.tmp",
+                "--threads", "1"));
+
+        SnapshotManifest manifest = new SnapshotStore(root).loadLatestSnapshot();
+        assertNotNull(manifest);
+        Set<String> files = manifest.getExtraFiles().stream()
+                .map(FileEntry::getFilename)
+                .collect(Collectors.toSet());
+        assertEquals(Set.of("level.dat", "data/keep.dat", "sub/cache"), files);
     }
 }

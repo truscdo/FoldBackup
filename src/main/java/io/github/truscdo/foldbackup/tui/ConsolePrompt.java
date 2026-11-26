@@ -1,5 +1,7 @@
 package io.github.truscdo.foldbackup.tui;
 
+import io.github.truscdo.foldbackup.core.backup.BackupFilter;
+
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.PrintStream;
@@ -104,6 +106,46 @@ public final class ConsolePrompt {
                 if (threads > 0) return threads;
             } catch (NumberFormatException ignored) { }
             out.println("Threads must be a positive integer.");
+        }
+    }
+
+    /** 额外排除规则输入结果（区分 EOF、返回与校验后的额外规则列表）。 */
+    public record ExcludeInput(boolean eof, boolean back, List<String> patterns) {
+        public static final ExcludeInput EOF_RESULT = new ExcludeInput(true, false, List.of());
+        public static final ExcludeInput BACK_RESULT = new ExcludeInput(false, true, List.of());
+
+        public ExcludeInput {
+            patterns = List.copyOf(patterns);
+        }
+
+        public static ExcludeInput of(List<String> patterns) {
+            return new ExcludeInput(false, false, patterns);
+        }
+    }
+
+    /**
+     * 展示默认保护规则并读取可选的额外排除规则（支持单行顶层逗号分隔多条规则）；
+     * 直接回车仅使用默认 4 条，输入 {@code 0} 返回，非法规则原地提示重试。
+     */
+    public ExcludeInput readExtraExcludes() {
+        out.println("Default excludes: " + String.join(", ", BackupFilter.DEFAULT_PATTERNS));
+        while (true) {
+            String line = readLine("Extra excludes (Enter = none, 0 = back): ");
+            if (line == null) {
+                return ExcludeInput.EOF_RESULT;
+            }
+            String trimmed = line.trim();
+            if (trimmed.isEmpty()) {
+                return ExcludeInput.of(List.of());
+            }
+            if ("0".equals(trimmed)) {
+                return ExcludeInput.BACK_RESULT;
+            }
+            try {
+                return ExcludeInput.of(BackupFilter.parseExcludeList(trimmed));
+            } catch (IllegalArgumentException e) {
+                out.println(e.getMessage());
+            }
         }
     }
 

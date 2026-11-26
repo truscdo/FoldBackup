@@ -8,21 +8,18 @@ FoldBackup 是面向 Minecraft NeoForge 服务端的世界备份工具，支持�
 
 同一个 JAR 既可以安装为 NeoForge 模组，也可以作为独立工具运行，提供独立命令行（CLI）和交互菜单（TUI），方便在服务器关闭时使用功能。
 
-- **运行环境**：Minecraft `1.21.1`、NeoForge `21.1+`、Java `21+`（独立 CLI / TUI 模式不受游戏版本限制）
+- **运行环境**：Minecraft `1.21.1`、NeoForge `21.1+`、Java `21+`（独立 CLI / TUI 模式提供的功能不受游戏版本限制，可以兼容大部分 MC 版本）
 - **安装要求**：仅需安装在**服务端**（或单机客户端）；连入服务器的玩家客户端**无需**安装本模组即可使用全部功能（包括游戏内区块历史预览）
 
 ## 主要功能
 
 - **在线备份**：按玩家在线时间定时备份，支持手动触发，以及可选的启动、关闭时备份
+- **离线备份**: 可以在不启动游戏的情况下使用 TUI 或者 CLI 备份存档
 - **内容去重**：新建快照的未变化内容不占用空间
-- **快照管理**：查看仓库空间摘要及每个快照的独占空间、共享空间与累计可清空间，支持保留（Pin）重要快照免受自动清理保护、在批量删除前预估可释放空间（`--dry-run`），以及可配置的自动清理
-- **区块预览与回档**：在游戏中预览区块历史景象，允许指定快照中的单个区块恢复到世界中
-
-    同时支持游戏内区块回档与游戏外 CLI 直接对存档进行区块回档，可以用于处理异常区块或者实体过多导致游戏崩溃的情况
-- **存档导出**：将快照导出为 Minecraft 游戏存档
-- **归档压缩**：可以创建完整归档或差分归档，并使用归档文件恢复为游戏存档或导入到快照仓库
-
-    归档用于储存和分发存档。下载一次完整归档后，后续差分归档只需传输更改部分，即可把服务器存档同步到本地，编辑后再同步回去，节约带宽
+- **快照管理**：查看仓库空间摘要及每个快照的独占空间、共享空间与累计可清空间，支持保留（Pin）重要快照免受自动清理删除、在批量删除前预估可释放空间，以及可配置的自动清理
+- **区块预览与回档**：在游戏中预览区块历史景象，允许指定快照中的单个区块恢复到世界中；可以在不启动游戏的情况下使用 CLI 对存档进行区块回档，用于解决异常区块或者实体过多导致游戏崩溃的问题
+- **快速全量回档**：将快照导出为 Minecraft 游戏存档时，如果指定的位置已存在游戏存档，会跳过不变的部分加速回档过程
+- **归档压缩**：可以创建高压缩率的完整归档或差分归档用于分发或储存，归档文件可以恢复为游戏存档或导入到快照仓库；对于服务器场景，可以通过差分归档仅传输存档的更改部分，在本地实现地图编辑
 
 > [!NOTE]
 > **快照（Snapshot）与归档（Archive）的区别**：
@@ -51,38 +48,63 @@ FoldBackup 是面向 Minecraft NeoForge 服务端的世界备份工具，支持�
 
    单机存档即使未开启作弊，主机玩家也能使用这些命令；通过局域网加入的其它玩家不能使用。
 
-默认备份目录是服务端运行目录下的 `foldbackups/`，可以通过 `general.backupPath` 修改。该配置是备份根：专用服务器直接以它为仓库，单机则使用 `foldbackups/<存档目录名>`，每个存档各自持有独立仓库。备份前会强制保存世界并暂时关闭自动保存；世界扫描结束即恢复保存，之后的快照提交与清理不再占用暂停时间。如果扫描连续 `scheduling.savePauseStallSeconds`（默认 300）秒没有进展，本次备份会被中止、保存立即恢复、在线玩家收到提示，下一次计划备份需要重新攒满一个完整间隔。
+默认备份目录是服务端运行目录下的 `foldbackups/`，可以通过 `general.backupPath` 修改。服务器直接以此目录做为仓库，单机则使用 `foldbackups/<存档目录名>`，每个存档各自持有独立仓库。
 
 默认开启自动备份，间隔按有玩家在线时的累计时间计算。手动备份也受最小备份间隔限制，需要跳过该间隔时可以使用 `/foldbackup backup --force`。
 
-### 整体回档
+即使不在游戏内安装mod，也可以通过独立 CLI 或 TUI 对任意版本的 Minecraft 存档离线创建快照：
 
-回档整个游戏存档可以使用 TUI 或者 CLI。
+<details>
+<summary>点击展开使用 CLI / TUI 离线创建备份的说明</summary>
 
-在该世界的仓库目录（专用服务器为 `foldbackups/`，单机为 `foldbackups/<存档目录名>`）执行以下命令，先导出随 JAR 打包的运行库（这个设计是为了避免 Mod 与 CLI 的依赖冲突），再启动菜单。请将 `<版本>` 替换为实际 JAR 文件名：
+> TUI 或者 CLI 运行前需要先导出随 JAR 打包的运行库（这个设计是为了避免 Mod 与 CLI 的依赖冲突），然后再运行 TUI 或者 CLI （如果使用 TUI 快速启动脚本，则可以忽略）。
+>
+> ```bash
+> # 服务器 foldbackups/
+> java -jar ../mods/foldbackup-<版本>.jar extract
+>
+> # 单机 foldbackups/<存档目录名>
+> java -jar ../../mods/foldbackup-<版本>.jar extract
+> ```
+>
+> 命令默认参数都是以当前目录为目标世界的仓库目录（专用服务器为 `foldbackups/`，单机为 `foldbackups/<存档目录名>`）为默认值，如果运行位置不同，需要修改对应参数。
+
+**离线备份前必须先关闭服务端或退出单机存档。**
+
+**使用 CLI 创建快照：**
 
 ```bash
-# 服务器 foldbackups/
-java -jar ../mods/foldbackup-<版本>.jar extract
-java -jar ../mods/foldbackup-<版本>.jar tui
+# 使用默认过滤规则创建快照
+java -jar ../mods/foldbackup-<版本>.jar snapshot create --world ../world
 
-# 单机 foldbackups/<存档目录名>
-java -jar ../../mods/foldbackup-<版本>.jar extract
-java -jar ../../mods/foldbackup-<版本>.jar tui
+# 追加额外排除规则（含 * / ** 的规则在 Shell 中需加引号以防提前展开）
+java -jar ../mods/foldbackup-<版本>.jar snapshot create --world ../world \
+  --exclude "**/DistantHorizons.sqlite" \
+  --exclude "cache/"
 ```
 
-在菜单中选择“2. Export world files”（导出世界文件），按提示选择快照、导出为目录还是 ZIP，再输入输出路径。路径可以直接回车使用默认值（`world-export/<快照ID>`，ZIP 为同名 `.zip`）。
+- `--world <目录>`：必填，指向游戏存档根目录。
+- `--exclude <glob>`：可选，可重复传入，在默认过滤规则基础上追加排除项。
 
-> [!IMPORTANT]
-> 导出到正在使用的游戏存档目录进行回档前，**请先停止服务器**。
+**使用 TUI 创建快照：**
 
-导出为目录时，目标可以指向已有的游戏存档：程序只更新与快照不同的文件，相同的文件会进行跳过。导出前会进行检查，检查完成后选择“1 = overwrite”会保留存档中多出的文件，选择“2 = delete extra”会删除这些文件，使存档与快照完全一致。之后的线程数提示可以直接回车使用默认设置。
+在仓库目录运行 `java -jar ../mods/foldbackup-<版本>.jar tui`（或启动脚本），选择菜单 **`6. Create snapshot from world`**，按提示依次输入：
 
-CLI 也可以完成同样的导出：`snapshot export <快照ID> --output <目录>`。`--zip` 导出 ZIP；目录导出可加 `--delete-extra` 删除多出的内容；`--dry-run` 只输出统计，不写入也不删除。
+1. **世界目录**：输入存档根目录路径（直接回车返回主菜单）。
+2. **额外排除规则**：界面会先列出默认保护规则；如需追加，可在单行以逗号分隔输入多条规则（兼容 `{a,b}`，例如 `**/DistantHorizons.sqlite, cache/`），直接回车表示不追加，`0` 返回上一步，规则非法时会原地提示重输。
+3. **线程数**：输入正整数，直接回车自动选择，`0` 返回上一步。
+
+**文件过滤规则说明：**
+
+- 离线创建快照固定保留 4 条核心默认规则：`**/session.lock`、`**/backups`、`**/.backups`、`**/*.wip`（与 Mod 默认配置不同，离线模式默认不排除 `**/DistantHorizons.sqlite`，如需排除请按上述方式手动追加）。
+- 规则按世界目录内的相对路径匹配，路径分隔符使用 `/` 且**不能以 `/` 开头**（例如写 `backups/` 而非 `/backups/`）；支持 `*`、`**`、`?`、`[...]`、`{a,b}`。
+- 匹配目录时会跳过整个子目录树；以 `/` 结尾的规则（如 `cache/`）仅匹配目录，不匹配同名文件。空规则、前导 `/` 或非法 glob 语法会直接报错中止。
+
+</details>
 
 ### 快速启动 TUI
 
-如果希望少敲命令，可以把下面的脚本另存到仓库目录，命名为 `foldbackup-tui.bat` 或 `foldbackup-tui.sh`（Linux 下需 `chmod +x`）。脚本会依次在自身所在目录、`../mods`、`../../mods` 中查找 JAR。
+如果希望少敲命令，可以把下面的脚本保存到仓库目录，命名为 `foldbackup-tui.bat` 或 `foldbackup-tui.sh`（Linux 下需 `chmod +x`）。脚本会依次在自身所在目录、`../mods`、`../../mods` 中查找 JAR，并自动导出运行库。
 
 <details>
 <summary>点击展开 Windows 启动脚本（<code>foldbackup-tui.bat</code>）</summary>
@@ -164,9 +186,24 @@ exec java -jar "$JAR" tui --snapshot-root "$SCRIPT_DIR" --archive-root "$SCRIPT_
 `x` 与 `z` 是区块坐标，可以通过 F3 信息显示，或者将方块坐标除以 16 并向下取整获得；
 预览时目标区块会显示蓝色粒子效果进行区分，使用 `/foldbackup preview exit` 即可退出预览。
 
-游戏内回档可使用 `/foldbackup rollback chunk from <快照ID>`（默认回档玩家当前所在区块）；也可以追加 `at <x> <z>` 或 `in <维度> at <x> <z>` 指定坐标和维度（服务端控制台或 RCON 执行时必须显式指定坐标），或使用 `blocks`（仅恢复地形、方块实体与 POI，保留当前实体）与 `entities`（仅恢复实体，不动地形与方块实体）限定范围，例如 `/foldbackup rollback chunk blocks from <快照ID> at <x> <z>` 或 `/foldbackup rollback chunk entities from <快照ID> in <维度> at <x> <z>`。目标区块必须已经加载到内存中；未加载的区块请使用下面的 CLI 离线回档方式。
+游戏内回档可使用 `/foldbackup rollback chunk from <快照ID>`（默认回档玩家当前所在区块）；也可以追加 `at <x> <z>` 或 `in <维度> at <x> <z>` 指定坐标和维度（服务端控制台或 RCON 执行时必须显式指定坐标），或使用 `blocks`（仅恢复地形、方块实体与 POI，保留当前实体）与 `entities`（仅恢复实体，不动地形与方块实体）限定范围，例如 `/foldbackup rollback chunk blocks from <快照ID> at <x> <z>` 或 `/foldbackup rollback chunk entities from <快照ID> in <维度> at <x> <z>`。目标区块必须已经加载到内存中；未加载的区块请使用下面的 CLI 离线回档方式：
 
-当需要使用 CLI 回档时，以下示例假设当前目录为 `foldbackups`，且服务端存档目录为同级的 `world`。如果在其它目录执行，需要相应调整 JAR、存档和快照目录路径；也可以用 `--snapshot-root <目录>` 指定快照目录。单机存档的仓库位于 `foldbackups/<存档目录名>`，需要把 `--snapshot-root` 指向该目录。**离线回档前必须先关闭服务端。**
+<details>
+<summary>点击展开 CLI 离线回档的说明</summary>
+
+> TUI 或者 CLI 运行前需要先导出随 JAR 打包的运行库（这个设计是为了避免 Mod 与 CLI 的依赖冲突），然后再运行 TUI 或者 CLI （如果使用TUI快速启动脚本，则可以忽略）。
+>
+> ```bash
+> # 服务器 foldbackups/
+> java -jar ../mods/foldbackup-<版本>.jar extract
+>
+> # 单机 foldbackups/<存档目录名>
+> java -jar ../../mods/foldbackup-<版本>.jar extract
+> ```
+>
+> 命令默认参数都是以当前目录为目标世界的仓库目录（专用服务器为 `foldbackups/`，单机为 `foldbackups/<存档目录名>`）为默认值，如果运行位置不同，需要修改对应参数。
+
+**离线回档前必须先关闭服务端。**
 
 列出快照：
 
@@ -183,6 +220,41 @@ java -jar ../mods/foldbackup-<版本>.jar snapshot rollback <快照ID> --world .
 `--world` 指向目标维度目录：主世界使用存档根目录，下界使用 `../world/DIM-1`，末地使用 `../world/DIM1`，自定义维度使用其 `dimensions/<命名空间>/<路径>` 目录。`--chunk` 接收有符号整数区块坐标，不是方块坐标。`--scope` 默认为 `all`，也可指定为 `blocks`（仅地形、方块实体与 POI）或 `entities`（仅实体）。CLI 会在执行前要求确认；可追加 `--yes` 跳过确认。
 
 默认情况下，CLI 会恢复目标区块的地形、方块实体、可恢复的实体数据，以及快照中该区块的兴趣点（POI）数据，包括票据占用状态；不会恢复玩家数据或世界级配置。
+
+</details>
+
+### 整体回档
+
+因为性能问题，暂不支持在游戏内进行整体回档，但是可以使用 TUI 或者 CLI 对整个存档进行回档。
+
+> TUI 或者 CLI 运行前需要先导出随 JAR 打包的运行库（这个设计是为了避免 Mod 与 CLI 的依赖冲突），然后再运行 TUI 或者 CLI （如果使用TUI快速启动脚本，则可以忽略）。
+>
+> ```bash
+> # 服务器 foldbackups/
+> java -jar ../mods/foldbackup-<版本>.jar extract
+>
+> # 单机 foldbackups/<存档目录名>
+> java -jar ../../mods/foldbackup-<版本>.jar extract
+> ```
+>
+> 命令默认参数都是以当前目录为目标世界的仓库目录（专用服务器为 `foldbackups/`，单机为 `foldbackups/<存档目录名>`）为默认值，如果运行位置不同，需要修改对应参数。
+
+```bash
+# 服务器 foldbackups/
+java -jar ../mods/foldbackup-<版本>.jar tui
+
+# 单机 foldbackups/<存档目录名>
+java -jar ../../mods/foldbackup-<版本>.jar tui
+```
+
+在菜单中选择“2. Export world files”（导出世界文件），按提示选择快照、导出为目录还是 ZIP，再输入输出路径。路径可以直接回车使用默认值（`world-export/<快照ID>`，ZIP 为同名 `.zip`）。
+
+> [!IMPORTANT]
+> 导出到正在使用的游戏存档目录进行回档前，**请先停止服务器**。
+
+导出为目录时，目标可以指向已有的游戏存档：程序只更新与快照不同的文件，相同的文件会进行跳过。导出前会进行检查，检查完成后选择“1 = overwrite”会保留存档中多出的文件，选择“2 = delete extra”会删除这些文件，使存档与快照完全一致。之后的线程数提示可以直接回车使用默认设置。
+
+CLI 也可以完成同样的导出：`snapshot export <快照ID> --output <目录>`。`--zip` 导出 ZIP；目录导出可加 `--delete-extra` 删除多出的内容；`--dry-run` 只输出统计，不写入也不删除。
 
 ### 完整归档与差分归档
 
@@ -277,7 +349,7 @@ Stored: 601.0M (Unique: 350.0M + Shared: 250.0M [All: 50.0M], index: 1.0M) | Log
 >
 > 重要快照可使用 `/foldbackup pin <快照ID>`（或通过 CLI / TUI）加以保护；三个清理限制均设为 0 时禁用自动删除，也可以通过 `retention.enabled` 关闭自动清理。
 
-`general.excludePatterns` 按世界目录内的相对路径匹配，路径分隔符使用 `/`。默认排除 `**/session.lock`、`**/backups`、`**/.backups`、`**/*.wip` 和 `**/DistantHorizons.sqlite`；匹配目录时会排除整个子目录树。
+`general.excludePatterns` 按世界目录内的相对路径匹配，路径分隔符使用 `/` 且不能带前导 `/`。默认排除 `**/session.lock`、`**/backups`、`**/.backups`、`**/*.wip` 和 `**/DistantHorizons.sqlite`；匹配目录时会排除整个子目录树，以 `/` 结尾的规则（如 `backups/`）仅匹配目录。离线 CLI / TUI 创建快照时的过滤选项见上方「创建备份」。
 
 ## 许可证与致谢
 

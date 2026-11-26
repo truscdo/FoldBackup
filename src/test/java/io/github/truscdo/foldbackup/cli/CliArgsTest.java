@@ -21,6 +21,10 @@ class CliArgsTest {
                 () -> BackupCli.runCreate(tempDir, List.of("snapshot", "create", "--world")));
         assertEquals("--world requires a value", backupMissing.getMessage());
 
+        IOException excludeMissing = assertThrows(IOException.class,
+                () -> BackupCli.runCreate(tempDir, List.of("snapshot", "create", "--exclude")));
+        assertEquals("--exclude requires a value", excludeMissing.getMessage());
+
         IOException archiveCreateMissing = assertThrows(IOException.class,
                 () -> ArchiveCli.runArchiveCreate(tempDir, tempDir,
                         List.of("archive", "create", "--snapshot", "--base")));

@@ -169,4 +169,104 @@ class BackupFilterTest {
     void globToRegex_doubleStarSlashMatchesZeroDirs() {
         assertEquals("^(?:.*/)?session\\.lock$", BackupFilter.globToRegex("**/session.lock"));
     }
+
+    // ──────────────────────────────────────────────
+    // 严格校验、追加构造与尾 '/' / 前导 '/' 边界
+    // ──────────────────────────────────────────────
+
+    @Test
+    void defaultsWith_appendsExtraRulesToDefaultFour() {
+        BackupFilter same = BackupFilter.defaultsWith(List.of());
+        assertEquals(BackupFilter.DEFAULT_PATTERNS, same.getExcludePatterns());
+        assertEquals(BackupFilter.DEFAULT_PATTERNS, BackupFilter.defaultsWith(null).getExcludePatterns());
+
+        BackupFilter filter = BackupFilter.defaultsWith(List.of("  **/DistantHorizons.sqlite  ", "data/cache/"));
+        assertTrue(filter.skipFile("session.lock"));
+        assertTrue(filter.skipDirectory("data/backups"));
+        assertTrue(filter.skipFile("foo.wip"));
+        assertTrue(filter.skipFile("data/DistantHorizons.sqlite"));
+        assertTrue(filter.skipDirectory("data/cache"));
+        assertFalse(filter.skipFile("data/cache"), "trailing '/' rule must only skip directories");
+        assertFalse(filter.skipFile("level.dat"));
+    }
+
+    @Test
+    void validatePatternAndOfStrict_rejectBlankLeadingSlashAndInvalidGlobs() {
+        for (String blank : new String[] { null, "", "   " }) {
+            assertThrows(IllegalArgumentException.class, () -> BackupFilter.validatePattern(blank));
+        }
+        IllegalArgumentException leading = assertThrows(IllegalArgumentException.class,
+                () -> BackupFilter.validatePattern("/region"));
+        assertTrue(leading.getMessage().contains("leading '/'"), leading.getMessage());
+        assertTrue(leading.getMessage().contains("'region'"), leading.getMessage());
+
+        assertThrows(IllegalArgumentException.class, () -> BackupFilter.validatePattern("/"));
+        assertThrows(IllegalArgumentException.class, () -> BackupFilter.validatePattern("//a/b"));
+
+        for (String bad : List.of("[unterminated", "[]", "[!]", "{a,b", "{a,{b,c}", "a}b", "{a,b}}", "foo\\")) {
+            assertThrows(IllegalArgumentException.class, () -> BackupFilter.validatePattern(bad), bad);
+            assertThrows(IllegalArgumentException.class, () -> BackupFilter.ofStrict(List.of(bad)), bad);
+        }
+    }
+
+    @Test
+    void trailingSlash_matchesDirectoriesOnlyAndNeverMatchesRoot() {
+        BackupFilter dirOnly = BackupFilter.ofStrict(List.of("backups/", "data/{cache,tmp}/", "**/sub//"));
+        assertTrue(dirOnly.skipDirectory("backups"));
+        assertFalse(dirOnly.skipFile("backups"));
+        assertTrue(dirOnly.skipDirectory("data/cache"));
+        assertTrue(dirOnly.skipDirectory("data/tmp"));
+        assertFalse(dirOnly.skipFile("data/cache"));
+        assertTrue(dirOnly.skipDirectory("a/sub"));
+        assertFalse(dirOnly.skipFile("a/sub"));
+        assertFalse(dirOnly.skipDirectory(""));
+        assertFalse(dirOnly.skipDirectory(Path.of("")));
+
+        BackupFilter allDirs = BackupFilter.ofStrict(List.of("**/"));
+        assertFalse(allDirs.skipDirectory(""));
+        assertTrue(allDirs.skipDirectory("region"));
+        assertFalse(allDirs.skipFile("level.dat"));
+
+        BackupFilter escapedSlash = BackupFilter.ofStrict(List.of("a\\\\/"));
+        assertTrue(escapedSlash.skipDirectory("a\\"));
+        assertFalse(escapedSlash.skipFile("a\\"));
+    }
+
+    @Test
+    void lenientConstructor_supportsTrailingSlashAndIgnoresLeadingSlash() {
+        BackupFilter filter = new BackupFilter(List.of("/region", "backups/", "data/ok.dat"));
+        assertFalse(filter.skipDirectory("region"));
+        assertTrue(filter.skipDirectory("backups"));
+        assertFalse(filter.skipFile("backups"));
+        assertTrue(filter.skipFile("data/ok.dat"));
+    }
+
+    @Test
+    void parseExcludeList_splitsTopLevelCommasPreservingBracesBracketsAndEscapes() {
+        assertEquals(List.of(), BackupFilter.parseExcludeList(null));
+        assertEquals(List.of(), BackupFilter.parseExcludeList("   "));
+
+        assertEquals(
+                List.of("**/DistantHorizons.sqlite", "data/{foo,bar}.dat", "data/{a,{b,c}}.txt",
+                        "data/[a,b].bin", "foo\\,bar.dat", "cache/"),
+                BackupFilter.parseExcludeList(
+                        " **/DistantHorizons.sqlite , data/{foo,bar}.dat, data/{a,{b,c}}.txt, data/[a,b].bin, foo\\,bar.dat, cache/ "));
+
+        for (String bad : List.of("a,,b", ",a", "a,", "{a,b", "/region", "a}b")) {
+            assertThrows(IllegalArgumentException.class, () -> BackupFilter.parseExcludeList(bad), bad);
+        }
+    }
+
+    @Test
+    void groupSyntax_supportsBracketsAndEscapedBraces() {
+        BackupFilter filter = BackupFilter.ofStrict(List.of("{a,[b,c]}", "{\\},z}", "{a,[!]x]}"));
+        assertTrue(filter.skipFile("a"));
+        assertTrue(filter.skipFile("b"));
+        assertTrue(filter.skipFile(","));
+        assertTrue(filter.skipFile("}"));
+        assertTrue(filter.skipFile("z"));
+        assertTrue(filter.skipFile("y"));
+        assertFalse(filter.skipFile("]"));
+        assertThrows(IllegalArgumentException.class, () -> BackupFilter.validatePattern("{a,[unterminated}"));
+    }
 }

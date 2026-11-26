@@ -10,7 +10,7 @@
 foldbackup extract [--output <dir>]
 
 foldbackup snapshot list
-foldbackup snapshot create --world <dir> [--threads <N>]
+foldbackup snapshot create --world <dir> [--exclude <glob>]... [--threads <N>]
 foldbackup snapshot import --all-archive
 foldbackup snapshot export <snapshot-id> --output <path> [--zip] [--delete-extra] [--dry-run] [--threads <N>]
 foldbackup snapshot delete <snapshot-id>... [--dry-run] [--yes]
@@ -41,7 +41,7 @@ foldbackup tui
 
 ### 快照导入与归档创建
 
-- `snapshot create --world <dir> [--threads <N>]` 直接从游戏存档创建新快照。离线扫描固定采用 `BackupFilter.defaults()` 的 4 条核心排除规则（`**/session.lock`、`**/backups`、`**/.backups`、`**/*.wip`）。
+- `snapshot create --world <dir> [--exclude <glob>]... [--threads <N>]` 直接从游戏存档创建新快照。离线扫描固定保留 `BackupFilter.defaults()` 的 4 条核心保护规则（`**/session.lock`、`**/backups`、`**/.backups`、`**/*.wip`），并支持重复传入 `--exclude <glob>` 追加排除规则。规则使用相对于世界目录、以 `/` 分隔且不含前导 `/` 的 glob 语法（尾 `/` 仅匹配目录，如 `backups/`），空规则、前导 `/` 或非法 glob 语法会立即报错中止；在 Shell 中包含 `*` / `**` 的规则需加引号以防提前展开。
 - `snapshot import --all-archive` 扫描归档库中的全部归档，依据归档依赖关系恢复其中的快照并导入在线库。缺失依赖或归档损坏时需报告具体文件和原因，不能将不完整的快照标记为导入成功。
 - `archive create --snapshot <snapshot-id>` 为指定在线快照创建完整归档，输出到归档库。
 - 指定 `--base <snapshot-id>` 时，以该在线快照为基准，与目标在线快照计算差异并创建差异归档。两个快照都必须存在于在线库，`--base` 不接受归档文件路径。
@@ -98,6 +98,7 @@ foldbackup tui
 | 选项 | 适用命令 | 用途 |
 | --- | --- | --- |
 | `--level <N>` | `archive create` | 指定压缩级别 |
+| `--exclude <glob>` | `snapshot create` | 追加排除规则（可重复；在默认 4 条核心保护规则基础上追加，相对路径不含前导 `/`） |
 | `--no-recompress` | `archive create` | 禁用重新压缩 |
 | `--threads <N>` | `archive create`、`archive export`、`snapshot create`、`snapshot export`、`snapshot import --all-archive` | 指定线程数 |
 | `--dry-run` | `snapshot export`、`snapshot delete`、`archive export` | 仅预估/检查并输出统计，不写入、不删除 |

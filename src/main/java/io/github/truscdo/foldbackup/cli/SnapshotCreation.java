@@ -24,13 +24,19 @@ public final class SnapshotCreation {
 
     public static SnapshotManifest create(Path world, Path root, int threads, ProgressListener listener)
             throws IOException {
+        return create(world, root, BackupFilter.defaults(), threads, listener);
+    }
+
+    public static SnapshotManifest create(Path world, Path root, BackupFilter filter, int threads,
+            ProgressListener listener) throws IOException {
         if (threads < 0) throw new IOException("Threads must be non-negative");
+        BackupFilter effectiveFilter = filter == null ? BackupFilter.defaults() : filter;
         world = world.toAbsolutePath().normalize();
         try (WorldSaveLock ignored = WorldSaveLock.acquireRoot(world)) {
             var snapshots = new SnapshotStore(root);
             var blobs = new BlobStore(root, COMPRESSION_LEVEL);
             var processor = new RegionProcessor(snapshots::getIndex, blobs, COMPRESSION_LEVEL,
-                    BackupFilter.defaults(), threads, 0);
+                    effectiveFilter, threads, 0);
             String name = world.getFileName() == null ? "world" : world.getFileName().toString();
             var coordinator = new BackupCoordinator(new BackupContext(world, name, ""),
                     snapshots, processor, null);

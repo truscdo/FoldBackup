@@ -3,6 +3,7 @@ package io.github.truscdo.foldbackup.tui;
 import io.github.truscdo.foldbackup.cli.SnapshotCreation;
 import io.github.truscdo.foldbackup.core.BackupExporter;
 import io.github.truscdo.foldbackup.core.FormatUtil;
+import io.github.truscdo.foldbackup.core.backup.BackupFilter;
 import io.github.truscdo.foldbackup.core.store.BlobMaintenance;
 import io.github.truscdo.foldbackup.core.store.BlobStore;
 import io.github.truscdo.foldbackup.core.store.SnapshotManifest;
@@ -167,21 +168,38 @@ public class BackupTui {
     // ──────────────────────────────────────────────
 
     private void createSnapshot() {
-        String input = prompt.readLine("World directory (Enter = back): ");
-        if (input == null || input.isBlank()) return;
-        int threads = prompt.readThreadCount();
-        if (threads == ConsolePrompt.EOF || threads == ConsolePrompt.BACK) return;
-        System.out.println("Snapshot root: " + backupRoot);
-        System.out.println("The world must be closed before creating a snapshot.");
-        try {
-            SnapshotManifest snapshot;
-            try (var progress = new ProgressPrinter(System.out)) {
-                snapshot = SnapshotCreation.create(
-                        Path.of(input.trim()), backupRoot, threads, progress.onProgress());
+        while (true) {
+            String input = prompt.readLine("World directory (Enter = back): ");
+            if (input == null || input.isBlank()) return;
+            String worldInput = input.trim();
+
+            while (true) {
+                ConsolePrompt.ExcludeInput excludes = prompt.readExtraExcludes();
+                if (excludes.eof()) return;
+                if (excludes.back()) break;
+
+                int threads = prompt.readThreadCount();
+                if (threads == ConsolePrompt.EOF) return;
+                if (threads == ConsolePrompt.BACK) continue;
+
+                BackupFilter filter = BackupFilter.defaultsWith(excludes.patterns());
+                System.out.println("Snapshot root: " + backupRoot);
+                if (!excludes.patterns().isEmpty()) {
+                    System.out.println("Extra excludes: " + String.join(", ", excludes.patterns()));
+                }
+                System.out.println("The world must be closed before creating a snapshot.");
+                try {
+                    SnapshotManifest snapshot;
+                    try (var progress = new ProgressPrinter(System.out)) {
+                        snapshot = SnapshotCreation.create(
+                                Path.of(worldInput), backupRoot, filter, threads, progress.onProgress());
+                    }
+                    System.out.println(SnapshotCreation.summary(snapshot, backupRoot));
+                } catch (IOException | RuntimeException e) {
+                    System.err.println("Error creating snapshot: " + e.getMessage());
+                }
+                return;
             }
-            System.out.println(SnapshotCreation.summary(snapshot, backupRoot));
-        } catch (IOException | RuntimeException e) {
-            System.err.println("Error creating snapshot: " + e.getMessage());
         }
     }
 

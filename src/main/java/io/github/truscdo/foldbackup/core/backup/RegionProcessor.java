@@ -145,6 +145,8 @@ public class RegionProcessor {
         })) {
             Files.walkFileTree(worldDir, new SimpleFileVisitor<>() {
                 public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
+                    if (dir.equals(worldDir))
+                        return FileVisitResult.CONTINUE;
                     return backupFilter.skipDirectory(worldDir.relativize(dir)) ? FileVisitResult.SKIP_SUBTREE
                             : FileVisitResult.CONTINUE;
                 }

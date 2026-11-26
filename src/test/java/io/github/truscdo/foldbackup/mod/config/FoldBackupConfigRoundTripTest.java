@@ -66,6 +66,10 @@ class FoldBackupConfigRoundTripTest {
         assertEquals(List.of(), trip.corrections(),
                 () -> "默认配置写盘后读回被判定为不一致（会导致每次加载都重写文件）：\n"
                         + String.join("\n", trip.corrections()) + "\n--- 文件内容 ---\n" + trip.text());
+        assertTrue(trip.text().contains("Zero-byte files are always skipped before filtering."),
+                "配置注释应准确说明 0 字节文件在过滤前被无条件跳过");
+        assertTrue(trip.text().contains("trailing '/' matches directories only"),
+                "配置注释应说明尾 '/' 仅匹配目录");
     }
 
     @Test

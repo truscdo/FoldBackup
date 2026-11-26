@@ -169,6 +169,16 @@ class BootstrapSupportTest {
                 + "[--delete-extra] [--dry-run]"), "archive export lists the restore options: " + usage);
     }
 
+    @Test
+    void usageTextDocumentsSnapshotCreateExcludesAndShellQuoting() {
+        String usage = BootstrapSupport.usageText();
+        assertTrue(usage.contains("snapshot create --world <directory> [--exclude <glob>]... [--threads <N>]"),
+                usage);
+        assertTrue(usage.contains("--exclude <glob>"), usage);
+        assertTrue(usage.contains("quote") && usage.contains("**"),
+                "usage should remind users to quote * / ** in shell: " + usage);
+    }
+
     // ── --lib parsing ──────────────────────────────────────────
 
     @Test

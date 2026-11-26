@@ -24,7 +24,7 @@ class BackupTuiTest {
         PrintStream previous = System.out;
         try {
             System.setOut(new PrintStream(output, true));
-            String input = "1\n6\n" + world + "\n\n1\n0\n";
+            String input = "1\n6\n" + world + "\n\n\n1\n0\n";
             new BackupTui(store, store, new ConsolePrompt(new StringReader(input), System.out)).run();
         } finally { System.setOut(previous); }
         assertTrue(output.toString().contains("No snapshots found."));
@@ -35,10 +35,56 @@ class BackupTuiTest {
     @Test
     void cancellingSnapshotCreationDoesNotInitializeStore() throws Exception {
         Path store = root.resolve("store");
-        for (String input : new String[] {"6\n\n0\n", "6\n", "6\nworld\n0\n0\n", "6\nworld\n"}) {
+        for (String input : new String[] {
+                "6\n\n0\n",
+                "6\n",
+                "6\nworld\n0\n\n0\n",
+                "6\nworld\n",
+                "6\nworld\n\n0\n0\n\n0\n",
+                "6\nworld\n\n"
+        }) {
             new BackupTui(store, store, new ConsolePrompt(new StringReader(input), System.out)).run();
-            assertFalse(Files.exists(store));
+            assertFalse(Files.exists(store), "store should not exist for input: " + input.replace("\n", "\\n"));
         }
+    }
+
+    @Test
+    void createSnapshotSupportsExtraExcludesInvalidRetryAndBackNavigation() throws Exception {
+        Path world = Files.createDirectory(root.resolve("world-tui-excludes"));
+        Files.writeString(world.resolve("level.dat"), "world data");
+        Files.writeString(world.resolve("session.lock"), "lock");
+        Files.createDirectories(world.resolve("data"));
+        Files.writeString(world.resolve("data/DistantHorizons.sqlite"), "dh");
+        Files.writeString(world.resolve("data/foo.tmp"), "foo");
+        Files.writeString(world.resolve("data/bar.tmp"), "bar");
+        Files.writeString(world.resolve("data/keep.dat"), "keep");
+        Files.createDirectories(world.resolve("data/cache/nested"));
+        Files.writeString(world.resolve("data/cache/nested/file.bin"), "ignored dir");
+        Files.writeString(world.resolve("cache"), "file named cache");
+        Path store = root.resolve("store-tui-excludes");
+
+        // Enter 6 -> enter wrong world -> 0 at extra excludes (back to world) -> enter real world
+        // -> invalid excludes (/region, {a,b) -> enter first exclude list -> 0 at threads (back to excludes)
+        // -> enter final comma-separated excludes -> Enter (auto threads) -> exit (0)
+        String input = "6\nwrong-world\n0\n"
+                + world + "\n"
+                + "/region\n{a,b\n"
+                + "**/DistantHorizons.sqlite\n"
+                + "0\n"
+                + "**/DistantHorizons.sqlite, **/{foo,bar}.tmp, **/cache/\n"
+                + "\n0\n";
+        String text = runTui(store, input);
+
+        assertTrue(text.contains("Default excludes: **/session.lock, **/backups, **/.backups, **/*.wip"), text);
+        assertTrue(text.contains("Extra excludes: **/DistantHorizons.sqlite, **/{foo,bar}.tmp, **/cache/"), text);
+        assertTrue(text.contains("Created snapshot"), text);
+
+        var latest = new io.github.truscdo.foldbackup.core.store.SnapshotStore(store).loadLatestSnapshot();
+        assertNotNull(latest);
+        var files = latest.getExtraFiles().stream()
+                .map(io.github.truscdo.foldbackup.core.store.FileEntry::getFilename)
+                .collect(java.util.stream.Collectors.toSet());
+        assertEquals(java.util.Set.of("level.dat", "data/keep.dat", "cache"), files);
     }
 
     @Test
