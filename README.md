@@ -76,7 +76,7 @@ In the menu, select "2. Export world files" and follow the prompts to choose a s
 > [!IMPORTANT]
 > **Stop the server first** before exporting into an active world directory to restore it.
 
-For a directory export, the target can be an existing game save: FoldBackup updates only the content that differs from the snapshot and never rewrites identical files. After the check, choose "1 = overwrite" to keep files in the target that the snapshot does not contain, or "2 = delete extra" to remove them so the target matches the snapshot exactly. The thread-count prompt can be accepted with Enter.
+For a directory export, the target can be an existing game save: FoldBackup updates only the files that differ from the snapshot and skips identical files. A check is performed before exporting; after the check, choose "1 = overwrite" to keep files in the target that the snapshot does not contain, or "2 = delete extra" to remove them so the target matches the snapshot exactly. The thread-count prompt can be accepted with Enter.
 
 The CLI can do the same export: `snapshot export <snapshot-id> --output <directory>`. `--zip` writes a ZIP; for a directory export, `--delete-extra` removes content that is not in the snapshot; `--dry-run` prints the statistics without writing or deleting.
 
@@ -178,17 +178,17 @@ Copy the target snapshot ID from the list, then roll back the chunk. The followi
 java -jar ../mods/foldbackup-<version>.jar snapshot rollback <snapshot-id> --world ../world --chunk <chunk-x> <chunk-z> [--scope <all|blocks|entities>]
 ```
 
-`--world` points to the target dimension directory: use the world root for the Overworld, `../world/DIM-1` for the Nether, `../world/DIM1` for the End, or the corresponding `dimensions/<namespace>/<path>` directory for a custom dimension. `--chunk` takes signed integer chunk coordinates, not block coordinates. For example, block coordinate `-1` belongs to chunk coordinate `-1`. `--scope` defaults to `all`, or can be set to `blocks` (terrain, block entities, and POI only) or `entities` (entities only). The CLI asks for confirmation before proceeding; append `--yes` to skip the prompt.
+`--world` points to the target dimension directory: use the world root for the Overworld, `../world/DIM-1` for the Nether, `../world/DIM1` for the End, or the corresponding `dimensions/<namespace>/<path>` directory for a custom dimension. `--chunk` takes signed integer chunk coordinates, not block coordinates. `--scope` defaults to `all`, or can be set to `blocks` (terrain, block entities, and POI only) or `entities` (entities only). The CLI asks for confirmation before proceeding; append `--yes` to skip the prompt.
 
-By default (`--scope all`), the CLI restores the target chunk's terrain, block entities, recoverable entity data, and that chunk's points of interest exactly as recorded in the snapshot, including ticket occupancy. It does not restore player data or world-level configuration.
+By default, the CLI restores the target chunk's terrain, block entities, recoverable entity data, and that chunk's points of interest exactly as recorded in the snapshot, including ticket occupancy. It does not restore player data or world-level configuration.
 
 ### Full and Differential Archives
 
 Archives are intended for storing and distributing worlds, with high compression ratios as a priority. Because creating them uses substantial resources, archive operations are available only through the CLI and TUI.
 
-Archives are created from snapshots, so you need a snapshot before creating an archive. You can create one in game or through the TUI or CLI. In the TUI, select "5. Create archive", choose a snapshot and the archive type. A differential archive also asks for an earlier snapshot to compare against, so it stores only what changed.
+Archives are created from snapshots, so you need a snapshot before creating an archive. You can create one in game or through the TUI or CLI. In the TUI, select "5. Create archive", choose a snapshot and the archive type. A differential archive requires choosing an earlier snapshot to compare against, so it stores only what changed.
 
-An archive can be restored as a Minecraft world ("7. Restore as world files" in the TUI) or imported as a snapshot into a snapshot repository. Restoring as a world also updates an existing save in place, and choosing "delete extra" removes files that are not in the archive. If you distribute a world using archives, you can package the mod and TUI launcher script with them (the script content is shown earlier in this README).
+An archive can be restored as a Minecraft world ("7. Restore as world files" in the TUI) or imported as a snapshot into a snapshot repository. When restoring as a world, if a game save already exists at the target location, FoldBackup likewise updates it in place, and choosing "delete extra" removes files that are not in the archive. If you distribute a world using archives, you can package the mod and the TUI launcher script together (the script content is shown above).
 
 The archive format is independent of the Minecraft version. You can use the CLI or TUI to compress worlds from versions that the mod does not support.
 
@@ -210,6 +210,41 @@ The archive format is independent of the Minecraft version. You can use the CLI 
 | `/foldbackup rollback chunk from <snapshot-id> in <dimension> at <x> <z>` | Roll back a single chunk in a specified dimension |
 | `/foldbackup rollback chunk blocks from <snapshot-id> [in <dimension> at <x> <z> \| at <x> <z>]` | Roll back only blocks, block entities, and POI of a chunk (preserving current entities) |
 | `/foldbackup rollback chunk entities from <snapshot-id> [in <dimension> at <x> <z> \| at <x> <z>]` | Roll back only entities of a chunk (leaving blocks and block entities untouched) |
+
+<details>
+<summary>Click to expand snapshot list and space statistics guide &amp; example (Mod / TUI / CLI)</summary>
+
+The snapshot list is displayed **newest first**. The in-game mod displays a compact chat layout with the same English labels, while the TUI (`1. List snapshots`) and CLI (`snapshot list`) share the same full table output, with each metric corresponding one-to-one.
+
+| Mod | TUI / CLI | Meaning |
+| --- | --- | --- |
+| `Stored` | `Stored` | Actual repository disk usage (deduplicated data blocks + `index.db` index file) |
+| `Unique` / `Shared (All)` | `Unique` / `Shared [All]` | Space referenced by a single snapshot only / shared across multiple snapshots; `All` is baseline data referenced by every snapshot |
+| `Pinned (Unique)` | `Pinned (Unique)` | Number of pinned snapshots, plus space held exclusively by the pinned snapshot set |
+| — | `Logical (saved %)` | Total compressed snapshot size without cross-snapshot deduplication, and the space savings percentage |
+| `Size` | `Size` | Compressed size of that snapshot itself (not equal to the space freed by deleting it) |
+| `Unique` (in row) | `Unique` (column) | Space immediately freed by deleting that snapshot alone |
+| `Reclaim` / `[PIN]` | `Reclaim` / `-` | Total space freed by deleting continuously from the oldest unpinned snapshot up to the current row in automatic cleanup order (skipping `[PIN]`) |
+
+**TUI `1. List snapshots` (identical to CLI `snapshot list`) example:**
+
+```text
+Snapshots (5):
+Stored: 601.0M (Unique: 350.0M + Shared: 250.0M [All: 50.0M], index: 1.0M) | Logical: 1000.0M (saved 40.0%) | Pinned: 1 (Unique: 80.0M)
+
+#  ID                       Date                 Regions  Files    Size  Unique  Reclaim
+----------------------------------------------------------------------------------------
+1  S-20260901_120000        2026-09-01 12:00:00      145     88  230.0M  120.0M   410.0M
+2  S-20260901_113000        2026-09-01 11:30:00      135     85  210.0M   40.0M   230.0M
+3  S-20260901_110000 [PIN]  2026-09-01 11:00:00      125     82  190.0M   80.0M        -
+4  S-20260901_103000        2026-09-01 10:30:00      125     82  190.0M   60.0M   190.0M
+5  S-20260901_100000        2026-09-01 10:00:00      120     80  180.0M   50.0M    50.0M
+```
+
+- **Interaction and pagination**: The mod displays 10 entries per page; hovering over a snapshot row in chat shows its timestamp, region count, and extra file count, clicking it runs `/foldbackup info <snapshot-id>`, and a clickable pagination bar appears at the bottom when there are multiple pages. The TUI displays 15 entries per page and shows pagination key prompts at the bottom when there is more than 1 page (selection screens for export, delete, pin, and archive creation use the compact `# / ID / Date / Size / Unique` table).
+- **Batch deletion estimate**: When you need to delete any combination of snapshots, use `/foldbackup delete --dry-run`, CLI `snapshot delete --dry-run`, or the TUI deletion confirmation screen to see the exact space reclaimed.
+
+</details>
 
 ## Key Configuration Options
 
@@ -236,7 +271,9 @@ The configuration file is located at `config/foldbackup-server.toml` in the work
 | `localization.autoDetectPlayerLanguage` | `true` | Use each player's reported language when it is supported |
 
 > [!WARNING]
-> **Automatic cleanup may delete all unpinned historical snapshots, including manually created backups.** The default limits bound only repository size (50 GiB) and free space (5 GiB); there is no age limit, so cleanup can delete recent snapshots to satisfy those targets. The free-space target does not mean space has been reserved for the next backup. Pin important snapshots with `/foldbackup pin <snapshot-id>` (or via CLI/TUI) to protect them, set all three cleanup limits to 0 to disable automatic deletion, or turn off automatic cleanup with `retention.enabled`.
+> **Automatic cleanup may delete all unpinned snapshots.** The default limits bound only repository size (50 GiB) and free space (5 GiB), so automatic cleanup can delete recent snapshots to satisfy those targets.
+>
+> Pin important snapshots with `/foldbackup pin <snapshot-id>` (or via CLI/TUI) to protect them, set all three cleanup limits to 0 to disable automatic deletion, or turn off automatic cleanup with `retention.enabled`.
 
 `general.excludePatterns` matches paths relative to the world directory, using `/` as the path separator. By default, it excludes `**/session.lock`, `**/backups`, `**/.backups`, `**/*.wip`, and `**/DistantHorizons.sqlite`. If a directory matches, its entire subtree is excluded.
 

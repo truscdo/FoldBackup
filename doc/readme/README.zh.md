@@ -76,7 +76,7 @@ java -jar ../../mods/foldbackup-<版本>.jar tui
 > [!IMPORTANT]
 > 导出到正在使用的游戏存档目录进行回档前，**请先停止服务器**。
 
-导出为目录时，目标可以指向已有的游戏存档：程序只更新与快照不同的内容，相同的文件不会重写。检查完成后选择“1 = overwrite”会保留存档中多出的文件，选择“2 = delete extra”会删除这些文件，使存档与快照完全一致。之后的线程数提示可以直接回车使用默认设置。
+导出为目录时，目标可以指向已有的游戏存档：程序只更新与快照不同的文件，相同的文件会进行跳过。导出前会进行检查，检查完成后选择“1 = overwrite”会保留存档中多出的文件，选择“2 = delete extra”会删除这些文件，使存档与快照完全一致。之后的线程数提示可以直接回车使用默认设置。
 
 CLI 也可以完成同样的导出：`snapshot export <快照ID> --output <目录>`。`--zip` 导出 ZIP；目录导出可加 `--delete-extra` 删除多出的内容；`--dry-run` 只输出统计，不写入也不删除。
 
@@ -180,17 +180,17 @@ java -jar ../mods/foldbackup-<版本>.jar snapshot list
 java -jar ../mods/foldbackup-<版本>.jar snapshot rollback <快照ID> --world ../world --chunk <区块X> <区块Z> [--scope <all|blocks|entities>]
 ```
 
-`--world` 指向目标维度目录：主世界使用存档根目录，下界使用 `../world/DIM-1`，末地使用 `../world/DIM1`，自定义维度使用其 `dimensions/<命名空间>/<路径>` 目录。`--chunk` 接收有符号整数区块坐标，不是方块坐标；例如方块坐标 `-1` 对应区块坐标 `-1`。`--scope` 默认为 `all`，也可指定为 `blocks`（仅地形、方块实体与 POI）或 `entities`（仅实体）。CLI 会在执行前要求确认；可追加 `--yes` 跳过确认。
+`--world` 指向目标维度目录：主世界使用存档根目录，下界使用 `../world/DIM-1`，末地使用 `../world/DIM1`，自定义维度使用其 `dimensions/<命名空间>/<路径>` 目录。`--chunk` 接收有符号整数区块坐标，不是方块坐标。`--scope` 默认为 `all`，也可指定为 `blocks`（仅地形、方块实体与 POI）或 `entities`（仅实体）。CLI 会在执行前要求确认；可追加 `--yes` 跳过确认。
 
-默认情况下（`--scope all`），CLI 会恢复目标区块的地形、方块实体、可恢复的实体数据，以及快照中该区块的兴趣点（POI）数据，包括票据占用状态；不会恢复玩家数据或世界级配置。
+默认情况下，CLI 会恢复目标区块的地形、方块实体、可恢复的实体数据，以及快照中该区块的兴趣点（POI）数据，包括票据占用状态；不会恢复玩家数据或世界级配置。
 
 ### 完整归档与差分归档
 
 归档用于储存和分发存档，以高压缩率为目标，性能占用较大，因此仅提供CLI和TUI实现。
 
-创建归档前需要有对应的快照，可以在游戏内备份，也可以用TUI或CLI创建。在TUI主菜单选择“5. Create archive”（创建归档），选择快照和归档类型即可；创建差分归档时会再选择一个更早的快照作为对比基准，只保存变化的部分。
+创建归档前需要有对应的快照，可以在游戏内备份，也可以用TUI或CLI创建。在TUI主菜单选择“5. Create archive”（创建归档），选择快照和归档类型即可；差分归档需要选择一个更早的快照作为对比基准，只保存变化的部分。
 
-归档可以恢复为游戏存档（TUI 主菜单为“7. Restore as world files”）或者导入为快照仓库中的快照。恢复为存档时同样会更新已有的游戏存档，选择“delete extra”会删除归档中不存在的文件。作为存档分发方案时，可以将mod与tui启动脚本一起打包（脚本内容见本说明）。
+归档可以恢复为游戏存档（TUI 主菜单为“7. Restore as world files”）或者导入为快照仓库中的快照。恢复为存档时如果目标位置已有游戏存档，同样会以游戏存档为基础进行更新，选择“delete extra”会删除归档中不存在的文件。将归档作为存档分发方案时，可以将mod与tui启动脚本一起打包（脚本内容见上方说明）。
 
 归档格式与游戏版本无关，对于mod不支持的版本，也可以使用CLI或者TUI进行压缩。
 
@@ -212,6 +212,41 @@ java -jar ../mods/foldbackup-<版本>.jar snapshot rollback <快照ID> --world .
 | `/foldbackup rollback chunk from <快照ID> in <维度> at <x> <z>` | 回档指定维度的单个区块 |
 | `/foldbackup rollback chunk blocks from <快照ID> [in <维度> at <x> <z> \| at <x> <z>]` | 仅回档区块的方块、方块实体与 POI（保留当前实体） |
 | `/foldbackup rollback chunk entities from <快照ID> [in <维度> at <x> <z> \| at <x> <z>]` | 仅回档区块的实体（不改动方块与方块实体） |
+
+<details>
+<summary>点击展开快照列表与空间统计说明及示例（Mod / TUI / CLI）</summary>
+
+快照列表按**最新优先**展示。Mod 在中文环境下显示中文表头，TUI（`1. List snapshots`）与 CLI（`snapshot list`）共用同一套英文输出，各项数据一一对应。
+
+| Mod（中文） | TUI / CLI（英文） | 含义 |
+| --- | --- | --- |
+| `总占用` | `Stored` | 仓库实际磁盘占用（去重后的数据块 + `index.db` 索引文件） |
+| `独占` / `共享 (全局)` | `Unique` / `Shared [All]` | 仅被单个快照引用 / 被多个快照共用的空间；全局(All)为被全部快照共同引用的基础数据 |
+| `保留 (独占)` | `Pinned (Unique)` | 已保留快照数量，以及仅由保留快照集合独占的空间 |
+| — | `Logical (saved %)` | 未跨快照去重时的压缩体积总和，以及去重节省比例 |
+| `大小` | `Size` | 该快照自身的压缩体积（不等于删除它可释放的空间） |
+| `独占`（行内） | `Unique`（列） | 单独删除该快照可立即释放的空间 |
+| `累计可清` / `[PIN]` | `Reclaim` / `-` | 按自动清理顺序，从最旧的未保留快照起连续删到当前行（跳过 `[PIN]`）总共可释放的空间 |
+
+**TUI `1. List snapshots`（与 CLI `snapshot list` 相同）示例：**
+
+```text
+Snapshots (5):
+Stored: 601.0M (Unique: 350.0M + Shared: 250.0M [All: 50.0M], index: 1.0M) | Logical: 1000.0M (saved 40.0%) | Pinned: 1 (Unique: 80.0M)
+
+#  ID                       Date                 Regions  Files    Size  Unique  Reclaim
+----------------------------------------------------------------------------------------
+1  S-20260901_120000        2026-09-01 12:00:00      145     88  230.0M  120.0M   410.0M
+2  S-20260901_113000        2026-09-01 11:30:00      135     85  210.0M   40.0M   230.0M
+3  S-20260901_110000 [PIN]  2026-09-01 11:00:00      125     82  190.0M   80.0M        -
+4  S-20260901_103000        2026-09-01 10:30:00      125     82  190.0M   60.0M   190.0M
+5  S-20260901_100000        2026-09-01 10:00:00      120     80  180.0M   50.0M    50.0M
+```
+
+- **交互与分页**：Mod 每页 10 条，玩家在聊天栏中悬停快照行可查看时间、区域数与额外文件数，点击可直接运行 `/foldbackup info <快照ID>`，多页时底部显示可点击翻页栏；TUI 每页 15 条，超过 1 页时底部提示翻页按键（导出、删除、保留、创建归档等选择界面使用 `# / ID / Date / Size / Unique` 精简表）。
+- **批量删除预估**：需要删除任意组合的快照时，可用 `/foldbackup delete --dry-run`、CLI `snapshot delete --dry-run` 或 TUI 删除确认界面查看精确释放量。
+
+</details>
 
 ## 关键配置
 
@@ -238,7 +273,9 @@ java -jar ../mods/foldbackup-<版本>.jar snapshot rollback <快照ID> --world .
 | `localization.autoDetectPlayerLanguage` | `true` | 玩家上报的语言受支持时按其显示 |
 
 > [!WARNING]
-> **自动清理可能删除包括手动备份在内的全部未保留历史快照。** 默认只限制仓库容量（50 GiB）与剩余空间（5 GiB），不设保留天数上限，因此清理可能为满足这两个目标而删除较新的快照；剩余空间目标不代表已为下一次备份预留空间。重要快照可使用 `/foldbackup pin <快照ID>`（或通过 CLI / TUI）加以保护；三个清理限制均设为 0 时禁用自动删除，也可以通过 `retention.enabled` 关闭自动清理。
+> **自动清理可能删除全部未保留的快照。** 默认只限制仓库容量（50 GiB）与剩余空间（5 GiB），因此自动清理可能为满足这两个目标而删除较新的快照。
+>
+> 重要快照可使用 `/foldbackup pin <快照ID>`（或通过 CLI / TUI）加以保护；三个清理限制均设为 0 时禁用自动删除，也可以通过 `retention.enabled` 关闭自动清理。
 
 `general.excludePatterns` 按世界目录内的相对路径匹配，路径分隔符使用 `/`。默认排除 `**/session.lock`、`**/backups`、`**/.backups`、`**/*.wip` 和 `**/DistantHorizons.sqlite`；匹配目录时会排除整个子目录树。
 

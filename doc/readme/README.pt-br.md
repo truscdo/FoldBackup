@@ -76,7 +76,7 @@ No menu, selecione "2. Export world files" e siga as instruções para escolher 
 > [!IMPORTANT]
 > **Pare o servidor primeiro** antes de exportar para o diretório de um mundo ativo para restaurá-lo.
 
-Ao exportar para um diretório, o destino pode ser um mundo salvo existente: o FoldBackup atualiza apenas o conteúdo diferente do snapshot e nunca regrava arquivos idênticos. Após a verificação, escolha "1 = overwrite" para manter no destino os arquivos que o snapshot não contém, ou "2 = delete extra" para removê-los e deixar o destino exatamente igual ao snapshot. No prompt de número de threads, basta pressionar Enter para aceitar o padrão.
+Ao exportar para um diretório, o destino pode ser um mundo salvo existente: o FoldBackup atualiza apenas os arquivos diferentes do snapshot e ignora os arquivos idênticos. Antes de exportar é feita uma verificação; após a verificação, escolha "1 = overwrite" para manter no destino os arquivos que o snapshot não contém, ou "2 = delete extra" para removê-los e deixar o destino exatamente igual ao snapshot. No prompt de número de threads, basta pressionar Enter para aceitar o padrão.
 
 A CLI pode fazer a mesma exportação: `snapshot export <snapshot-id> --output <diretório>`. `--zip` grava um ZIP; para exportação em diretório, `--delete-extra` remove o conteúdo que não está no snapshot; `--dry-run` exibe as estatísticas sem gravar nem excluir nada.
 
@@ -178,17 +178,17 @@ Copie o ID do snapshot desejado na lista e restaure o chunk. O comando a seguir 
 java -jar ../mods/foldbackup-<version>.jar snapshot rollback <snapshot-id> --world ../world --chunk <chunk-x> <chunk-z> [--scope <all|blocks|entities>]
 ```
 
-`--world` aponta para o diretório da dimensão de destino: use a raiz do mundo para a superfície (Overworld), `../world/DIM-1` para o Nether, `../world/DIM1` para o End, ou o diretório `dimensions/<namespace>/<path>` correspondente para uma dimensão personalizada. `--chunk` recebe coordenadas de chunk inteiras com sinal, e não coordenadas de bloco. Por exemplo, a coordenada de bloco `-1` pertence à coordenada de chunk `-1`. `--scope` usa `all` por padrão, ou pode ser definido como `blocks` (apenas terreno, entidades de bloco e POI) ou `entities` (apenas entidades). A CLI pede confirmação antes de prosseguir; adicione `--yes` para pular a confirmação.
+`--world` aponta para o diretório da dimensão de destino: use a raiz do mundo para a superfície (Overworld), `../world/DIM-1` para o Nether, `../world/DIM1` para o End, ou o diretório `dimensions/<namespace>/<path>` correspondente para uma dimensão personalizada. `--chunk` recebe coordenadas de chunk inteiras com sinal, e não coordenadas de bloco. `--scope` usa `all` por padrão, ou pode ser definido como `blocks` (apenas terreno, entidades de bloco e POI) ou `entities` (apenas entidades). A CLI pede confirmação antes de prosseguir; adicione `--yes` para pular a confirmação.
 
-Por padrão (`--scope all`), a CLI restaura o terreno do chunk de destino, entidades de bloco, dados de entidades recuperáveis e os pontos de interesse (POI) daquele chunk exatamente como registrados no snapshot, incluindo a ocupação de tickets. Ela não restaura dados de jogadores nem configurações gerais do mundo.
+Por padrão, a CLI restaura o terreno do chunk de destino, entidades de bloco, dados de entidades recuperáveis e os pontos de interesse (POI) daquele chunk exatamente como registrados no snapshot, incluindo a ocupação de tickets. Ela não restaura dados de jogadores nem configurações gerais do mundo.
 
 ### Arquivos Completos e Diferenciais
 
 Os arquivos compactados (Archives) são voltados para o armazenamento e a distribuição de mundos, priorizando altas taxas de compactação. Como sua criação consome muitos recursos, as operações de arquivo estão disponíveis apenas pela CLI e pela TUI.
 
-Os arquivos são criados a partir de snapshots, portanto você precisa de um snapshot antes de criar um arquivo. Você pode criar um dentro do jogo ou pela TUI ou CLI. Na TUI, selecione "5. Create archive", escolha um snapshot e o tipo de arquivo. Um arquivo diferencial também solicita um snapshot anterior para comparação, armazenando apenas o que mudou.
+Os arquivos são criados a partir de snapshots, portanto você precisa de um snapshot antes de criar um arquivo. Você pode criar um dentro do jogo ou pela TUI ou CLI. Na TUI, selecione "5. Create archive", escolha um snapshot e o tipo de arquivo; um arquivo diferencial exige escolher um snapshot anterior como base de comparação, salvando apenas o que mudou.
 
-Um arquivo pode ser restaurado como um mundo de Minecraft ("7. Restore as world files" na TUI) ou importado como um snapshot para um repositório de snapshots. Restaurar como mundo também atualiza um salvamento existente no local, e escolher "delete extra" remove arquivos que não estão no arquivo compactado. Se você distribuir um mundo usando arquivos, poderá empacotar o mod e o script de inicialização da TUI junto com eles (o conteúdo do script é mostrado anteriormente neste README).
+Um arquivo pode ser restaurado como um mundo de Minecraft ("7. Restore as world files" na TUI) ou importado como um snapshot para um repositório de snapshots. Ao restaurar como mundo, se já existir um salvamento no local de destino, a atualização também será feita com base nesse salvamento, e escolher "delete extra" remove arquivos que não estão no arquivo compactado. Se você distribuir um mundo usando arquivos, poderá empacotar o mod e o script de inicialização da TUI juntos (o conteúdo do script é mostrado acima).
 
 O formato de arquivo é independente da versão do Minecraft. Você pode usar a CLI ou a TUI para compactar mundos de versões às quais o mod não oferece suporte.
 
@@ -210,6 +210,41 @@ O formato de arquivo é independente da versão do Minecraft. Você pode usar a 
 | `/foldbackup rollback chunk from <snapshot-id> in <dimensão> at <x> <z>` | Restaurar um único chunk em uma dimensão especificada |
 | `/foldbackup rollback chunk blocks from <snapshot-id> [in <dimensão> at <x> <z> \| at <x> <z>]` | Restaurar apenas blocos, entidades de bloco e POI de um chunk (preservando as entidades atuais) |
 | `/foldbackup rollback chunk entities from <snapshot-id> [in <dimensão> at <x> <z> \| at <x> <z>]` | Restaurar apenas entidades de um chunk (deixando blocos e entidades de bloco intactos) |
+
+<details>
+<summary>Clique para expandir o guia e o exemplo da lista de snapshots e estatísticas de espaço (Mod / TUI / CLI)</summary>
+
+A lista de snapshots é exibida **do mais recente para o mais antigo**. Em português, o mod exibe cabeçalhos em português, enquanto a TUI (`1. List snapshots`) e a CLI (`snapshot list`) compartilham a mesma saída em inglês, com correspondência direta entre os dados.
+
+| Mod (português) | TUI / CLI (inglês) | Significado |
+| --- | --- | --- |
+| `Ocupado` | `Stored` | Uso real em disco do repositório (blocos de dados deduplicados + arquivo de índice `index.db`) |
+| `Único` / `Compartilhado (Global)` | `Unique` / `Shared [All]` | Espaço referenciado por um único snapshot / compartilhado entre vários snapshots; `Global` (`All`) representa os dados base referenciados por todos os snapshots |
+| `Fixados (Único)` | `Pinned (Unique)` | Quantidade de snapshots fixados e espaço ocupado exclusivamente pelo conjunto de snapshots fixados |
+| — | `Logical (saved %)` | Soma do tamanho compactado sem deduplicação entre snapshots e porcentagem de economia obtida pela deduplicação |
+| `Tamanho` | `Size` | Tamanho compactado do próprio snapshot (não equivale ao espaço liberado ao excluí-lo) |
+| `Único` (na linha) | `Unique` (coluna) | Espaço liberado imediatamente ao excluir apenas esse snapshot |
+| `Recuperável` / `[PIN]` | `Reclaim` / `-` | Espaço total liberado ao excluir continuamente do snapshot não fixado mais antigo até a linha atual na ordem da limpeza automática (pulando `[PIN]`) |
+
+**Exemplo de `1. List snapshots` na TUI (igual a `snapshot list` na CLI):**
+
+```text
+Snapshots (5):
+Stored: 601.0M (Unique: 350.0M + Shared: 250.0M [All: 50.0M], index: 1.0M) | Logical: 1000.0M (saved 40.0%) | Pinned: 1 (Unique: 80.0M)
+
+#  ID                       Date                 Regions  Files    Size  Unique  Reclaim
+----------------------------------------------------------------------------------------
+1  S-20260901_120000        2026-09-01 12:00:00      145     88  230.0M  120.0M   410.0M
+2  S-20260901_113000        2026-09-01 11:30:00      135     85  210.0M   40.0M   230.0M
+3  S-20260901_110000 [PIN]  2026-09-01 11:00:00      125     82  190.0M   80.0M        -
+4  S-20260901_103000        2026-09-01 10:30:00      125     82  190.0M   60.0M   190.0M
+5  S-20260901_100000        2026-09-01 10:00:00      120     80  180.0M   50.0M    50.0M
+```
+
+- **Interação e paginação**: O mod exibe 10 itens por página; ao passar o cursor sobre a linha de um snapshot no chat são exibidos a data/hora, o número de regiões e o número de arquivos extras, ao clicar é executado `/foldbackup info <snapshot-id>` e, quando há várias páginas, uma barra de paginação clicável aparece na parte inferior. A TUI exibe 15 itens por página e mostra na parte inferior as teclas de paginação quando há mais de 1 página (as telas de seleção para exportar, excluir, fixar e criar arquivos usam a tabela compacta `# / ID / Date / Size / Unique`).
+- **Estimativa de exclusão em lote**: Quando precisar excluir qualquer combinação de snapshots, use `/foldbackup delete --dry-run`, `snapshot delete --dry-run` na CLI ou a tela de confirmação de exclusão da TUI para ver exatamente quanto espaço será liberado.
+
+</details>
 
 ## Principais Opções de Configuração
 
@@ -236,7 +271,9 @@ O arquivo de configuração fica localizado em `config/foldbackup-server.toml` n
 | `localization.autoDetectPlayerLanguage` | `true` | Usar o idioma informado por cada jogador quando for suportado |
 
 > [!WARNING]
-> **A limpeza automática pode excluir todos os snapshots históricos não fixados, incluindo backups criados manualmente.** Os limites padrão restringem apenas o tamanho do repositório (50 GiB) e o espaço livre (5 GiB); não há limite de idade por padrão, portanto a limpeza pode excluir snapshots recentes para atingir essas metas. A meta de espaço livre não significa que o espaço foi reservado para o próximo backup. Use `/foldbackup pin <snapshot-id>` (ou pela CLI/TUI) para proteger snapshots importantes, defina os três limites de limpeza como 0 para desativar a exclusão automática ou desative a limpeza automática com `retention.enabled`.
+> **A limpeza automática pode excluir todos os snapshots não fixados.** Os limites padrão restringem apenas o tamanho do repositório (50 GiB) e o espaço livre (5 GiB), portanto a limpeza automática pode excluir snapshots recentes para atingir essas metas.
+>
+> Use `/foldbackup pin <snapshot-id>` (ou pela CLI/TUI) para proteger snapshots importantes, defina os três limites de limpeza como 0 para desativar a exclusão automática ou desative a limpeza automática com `retention.enabled`.
 
 `general.excludePatterns` corresponde a caminhos relativos ao diretório do mundo, usando `/` como separador de caminho. Por padrão, exclui `**/session.lock`, `**/backups`, `**/.backups`, `**/*.wip` e `**/DistantHorizons.sqlite`. Se um diretório corresponder, toda a sua subárvore será excluída.
 

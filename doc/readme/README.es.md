@@ -76,7 +76,7 @@ En el menú, selecciona "2. Export world files" y sigue las indicaciones para el
 > [!IMPORTANT]
 > **Detén primero el servidor** antes de exportar sobre el directorio de un mundo activo para restaurarlo.
 
-Al exportar a un directorio, el destino puede ser una partida guardada existente: FoldBackup actualiza solo el contenido que difiere de la instantánea y nunca reescribe archivos idénticos. Tras la comprobación, elige "1 = overwrite" para conservar los archivos del destino que no estén en la instantánea, o "2 = delete extra" para eliminarlos y dejar el destino exactamente igual que la instantánea. En la solicitud del número de hilos puedes pulsar Intro para usar el valor predeterminado.
+Al exportar a un directorio, el destino puede ser una partida guardada existente: FoldBackup actualiza solo los archivos que difieren de la instantánea y omite los archivos idénticos. Antes de exportar se realiza una comprobación; tras la comprobación, elige "1 = overwrite" para conservar los archivos del destino que no estén en la instantánea, o "2 = delete extra" para eliminarlos y dejar el destino exactamente igual que la instantánea. En la solicitud del número de hilos puedes pulsar Intro para usar el valor predeterminado.
 
 La CLI puede realizar la misma exportación: `snapshot export <snapshot-id> --output <directorio>`. `--zip` genera un archivo ZIP; al exportar a un directorio, `--delete-extra` elimina el contenido que no está en la instantánea; `--dry-run` muestra las estadísticas sin escribir ni eliminar nada.
 
@@ -178,17 +178,17 @@ Copia el ID de la instantánea de destino de la lista y restaura el chunk. El si
 java -jar ../mods/foldbackup-<version>.jar snapshot rollback <snapshot-id> --world ../world --chunk <chunk-x> <chunk-z> [--scope <all|blocks|entities>]
 ```
 
-`--world` apunta al directorio de la dimensión de destino: usa la raíz del mundo para la superficie (Overworld), `../world/DIM-1` para el Nether, `../world/DIM1` para el End, o el directorio `dimensions/<namespace>/<path>` correspondiente para una dimensión personalizada. `--chunk` recibe coordenadas de chunk enteras con signo, no coordenadas de bloque. Por ejemplo, la coordenada de bloque `-1` pertenece a la coordenada de chunk `-1`. `--scope` usa `all` por defecto, o puede establecerse en `blocks` (solo terreno, entidades de bloque y POI) o `entities` (solo entidades). La CLI pide confirmación antes de continuar; añade `--yes` para omitir la confirmación.
+`--world` apunta al directorio de la dimensión de destino: usa la raíz del mundo para la superficie (Overworld), `../world/DIM-1` para el Nether, `../world/DIM1` para el End, o el directorio `dimensions/<namespace>/<path>` correspondiente para una dimensión personalizada. `--chunk` recibe coordenadas de chunk enteras con signo, no coordenadas de bloque. `--scope` usa `all` por defecto, o puede establecerse en `blocks` (solo terreno, entidades de bloque y POI) o `entities` (solo entidades). La CLI pide confirmación antes de continuar; añade `--yes` para omitir la confirmación.
 
-Por defecto (`--scope all`), la CLI restaura el terreno del chunk de destino, las entidades de bloque, los datos de entidades recuperables y los puntos de interés (POI) de ese chunk tal como se registraron en la instantánea, incluido el estado de ocupación de tickets. No restaura datos de jugadores ni la configuración general del mundo.
+Por defecto, la CLI restaura el terreno del chunk de destino, las entidades de bloque, los datos de entidades recuperables y los puntos de interés (POI) de ese chunk tal como se registraron en la instantánea, incluido el estado de ocupación de tickets. No restaura datos de jugadores ni la configuración general del mundo.
 
 ### Archivos completos y diferenciales
 
 Los archivos comprimidos (Archives) están pensados para almacenar y distribuir mundos priorizando una alta tasa de compresión. Dado que su creación consume bastantes recursos, las operaciones con archivos están disponibles únicamente a través de la CLI y la TUI.
 
-Los archivos se crean a partir de instantáneas, por lo que necesitas tener una instantánea antes de crear un archivo. Puedes crearla dentro del juego o mediante la TUI o la CLI. En la TUI, selecciona "5. Create archive", elige una instantánea y el tipo de archivo. Un archivo diferencial también te pedirá una instantánea anterior como base de comparación para almacenar únicamente lo que haya cambiado.
+Los archivos se crean a partir de instantáneas, por lo que necesitas tener una instantánea antes de crear un archivo. Puedes crearla dentro del juego o mediante la TUI o la CLI. En la TUI, selecciona "5. Create archive", elige una instantánea y el tipo de archivo; un archivo diferencial requiere elegir una instantánea anterior como base de comparación para guardar únicamente lo que haya cambiado.
 
-Un archivo puede restaurarse como un mundo de Minecraft ("7. Restore as world files" en la TUI) o importarse como una instantánea en un repositorio de instantáneas. Al restaurar como mundo también se actualiza una partida existente en el mismo sitio, y al elegir "delete extra" se eliminan los archivos que no están en el archivo comprimido. Si distribuyes un mundo mediante archivos, puedes empaquetar junto a ellos el mod y el script de inicio de la TUI (el contenido del script se muestra más arriba en este README).
+Un archivo puede restaurarse como un mundo de Minecraft ("7. Restore as world files" en la TUI) o importarse como una instantánea en un repositorio de instantáneas. Al restaurar como mundo, si ya existe una partida guardada en la ubicación de destino, también se actualizará sobre esa partida existente, y al elegir "delete extra" se eliminarán los archivos que no están en el archivo comprimido. Si distribuyes un mundo mediante archivos, puedes empaquetar juntos el mod y el script de inicio de la TUI (el contenido del script se muestra más arriba).
 
 El formato de archivo es independiente de la versión de Minecraft. Puedes usar la CLI o la TUI para comprimir mundos de versiones que el mod no admite.
 
@@ -210,6 +210,41 @@ El formato de archivo es independiente de la versión de Minecraft. Puedes usar 
 | `/foldbackup rollback chunk from <snapshot-id> in <dimensión> at <x> <z>` | Restaurar un único chunk en la dimensión especificada |
 | `/foldbackup rollback chunk blocks from <snapshot-id> [in <dimensión> at <x> <z> \| at <x> <z>]` | Restaurar solo bloques, entidades de bloque y POI de un chunk (conservando las entidades actuales) |
 | `/foldbackup rollback chunk entities from <snapshot-id> [in <dimensión> at <x> <z> \| at <x> <z>]` | Restaurar solo entidades de un chunk (sin modificar bloques ni entidades de bloque) |
+
+<details>
+<summary>Haz clic para expandir la guía y el ejemplo de la lista de instantáneas y estadísticas de espacio (Mod / TUI / CLI)</summary>
+
+La lista de instantáneas se muestra **de la más reciente a la más antigua**. En español, el mod muestra encabezados en español, mientras que la TUI (`1. List snapshots`) y la CLI (`snapshot list`) comparten la misma salida en inglés, con una correspondencia directa entre los datos.
+
+| Mod (español) | TUI / CLI (inglés) | Significado |
+| --- | --- | --- |
+| `Ocupado` | `Stored` | Uso real en disco del repositorio (bloques de datos deduplicados + archivo de índice `index.db`) |
+| `Único` / `Compartido (Global)` | `Unique` / `Shared [All]` | Espacio referenciado por una sola instantánea / compartido entre varias; `Global` (`All`) son los datos base referenciados por todas las instantáneas |
+| `Fijadas (Único)` | `Pinned (Unique)` | Número de instantáneas fijadas y espacio ocupado exclusivamente por el conjunto de instantáneas fijadas |
+| — | `Logical (saved %)` | Suma de tamaños comprimidos sin deduplicación entre instantáneas y porcentaje de ahorro por deduplicación |
+| `Tamaño` | `Size` | Tamaño comprimido de la propia instantánea (no equivale al espacio liberado al eliminarla) |
+| `Único` (en la fila) | `Unique` (columna) | Espacio que se libera de inmediato al eliminar solo esa instantánea |
+| `Recuperable` / `[PIN]` | `Reclaim` / `-` | Espacio total liberado al eliminar de forma continua desde la instantánea no fijada más antigua hasta la fila actual en el orden de limpieza automática (omitidas las `[PIN]`) |
+
+**Ejemplo de `1. List snapshots` en la TUI (igual que `snapshot list` en la CLI):**
+
+```text
+Snapshots (5):
+Stored: 601.0M (Unique: 350.0M + Shared: 250.0M [All: 50.0M], index: 1.0M) | Logical: 1000.0M (saved 40.0%) | Pinned: 1 (Unique: 80.0M)
+
+#  ID                       Date                 Regions  Files    Size  Unique  Reclaim
+----------------------------------------------------------------------------------------
+1  S-20260901_120000        2026-09-01 12:00:00      145     88  230.0M  120.0M   410.0M
+2  S-20260901_113000        2026-09-01 11:30:00      135     85  210.0M   40.0M   230.0M
+3  S-20260901_110000 [PIN]  2026-09-01 11:00:00      125     82  190.0M   80.0M        -
+4  S-20260901_103000        2026-09-01 10:30:00      125     82  190.0M   60.0M   190.0M
+5  S-20260901_100000        2026-09-01 10:00:00      120     80  180.0M   50.0M    50.0M
+```
+
+- **Interacción y paginación**: El mod muestra 10 entradas por página; al pasar el cursor sobre una fila en el chat se muestran la fecha, el número de regiones y el número de archivos adicionales, al hacer clic se ejecuta `/foldbackup info <snapshot-id>` y, si hay varias páginas, aparece abajo una barra de paginación clicable. La TUI muestra 15 entradas por página e indica abajo las teclas de navegación cuando hay más de 1 página (las pantallas de selección para exportar, eliminar, fijar y crear archivos usan la tabla compacta `# / ID / Date / Size / Unique`).
+- **Estimación de eliminación por lotes**: Cuando necesites eliminar cualquier combinación de instantáneas, puedes usar `/foldbackup delete --dry-run`, `snapshot delete --dry-run` en la CLI o la pantalla de confirmación de eliminación de la TUI para ver el espacio exacto que se liberará.
+
+</details>
 
 ## Opciones clave de configuración
 
@@ -236,7 +271,9 @@ El archivo de configuración se encuentra por defecto en `config/foldbackup-serv
 | `localization.autoDetectPlayerLanguage` | `true` | Usar el idioma configurado por cada jugador cuando esté soportado |
 
 > [!WARNING]
-> **La limpieza automática puede eliminar todas las instantáneas históricas no fijadas, incluidas las copias creadas manualmente.** Los límites predeterminados solo restringen el tamaño del repositorio (50 GiB) y el espacio libre (5 GiB); no hay límite de días de antigüedad, por lo que la limpieza puede eliminar instantáneas recientes para cumplir esos objetivos. El objetivo de espacio libre no significa que se haya reservado espacio para la siguiente copia. Usa `/foldbackup pin <snapshot-id>` (o la CLI/TUI) para proteger instantáneas importantes, establece los tres límites de limpieza en 0 para desactivar la eliminación automática, o desactiva la limpieza automática con `retention.enabled`.
+> **La limpieza automática puede eliminar todas las instantáneas no fijadas.** Los límites predeterminados solo restringen el tamaño del repositorio (50 GiB) y el espacio libre (5 GiB), por lo que la limpieza automática puede eliminar instantáneas recientes para cumplir esos objetivos.
+>
+> Usa `/foldbackup pin <snapshot-id>` (o la CLI/TUI) para proteger instantáneas importantes, establece los tres límites de limpieza en 0 para desactivar la eliminación automática, o desactiva la limpieza automática con `retention.enabled`.
 
 `general.excludePatterns` compara rutas relativas al directorio del mundo usando `/` como separador de rutas. Por defecto excluye `**/session.lock`, `**/backups`, `**/.backups`, `**/*.wip` y `**/DistantHorizons.sqlite`. Si un directorio coincide, se excluye todo su subárbol.
 
